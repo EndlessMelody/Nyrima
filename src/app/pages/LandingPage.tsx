@@ -112,7 +112,10 @@ export function LandingPage() {
       if (params.get("setup") === "1") {
         params.delete("setup");
         const next = params.toString();
-        const url = window.location.pathname + (next ? `?${next}` : "") + window.location.hash;
+        const url =
+          window.location.pathname +
+          (next ? `?${next}` : "") +
+          window.location.hash;
         window.history.replaceState({}, "", url);
       }
     }
@@ -205,6 +208,9 @@ export function LandingPage() {
         }}
         title="Open a Drive folder"
         description="Paste a Google Drive folder URL or its ID."
+        style={{
+          backgroundColor: "var(--page-background)",
+        }}
         footer={
           <Row gap="8">
             <Button variant="tertiary" onClick={() => setOpen(false)}>

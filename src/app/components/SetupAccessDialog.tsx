@@ -135,6 +135,9 @@ export function SetupAccessDialog({ isOpen, onClose, onSaved }: Props) {
       onClose={onClose}
       title="Nyrima — Setup Guide"
       description="Follow these steps to set up your personal cinema on Google Drive."
+      style={{ 
+        backgroundColor: "var(--page-background)",
+      }}
       footer={
         <Row gap="8" wrap>
           <Button variant="tertiary" onClick={onClose}>
