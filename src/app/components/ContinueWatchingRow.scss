@@ -1,0 +1,32 @@
+.ny-continue {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ny-continue__heading {
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--neutral-on-background-weak);
+  margin: 0;
+}
+
+.ny-continue__scroll {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  scrollbar-width: thin;
+}
+
+.ny-continue__scroll::-webkit-scrollbar {
+  height: 6px;
+}
+
+.ny-continue__scroll::-webkit-scrollbar-thumb {
+  background: var(--neutral-alpha-medium);
+  border-radius: 999px;
+}

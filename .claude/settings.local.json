@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "PowerShell(& npx --no-install tsc --noEmit 2>&1)",
+      "PowerShell($ErrorActionPreference='Continue')",
+      "PowerShell(& node \".\\\\node_modules\\\\typescript\\\\bin\\\\tsc\" --noEmit 2>&1)"
+    ]
+  }
+}

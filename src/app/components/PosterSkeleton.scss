@@ -1,0 +1,23 @@
+/* Reuses the global .ny-poster-grid responsive ladder, so skeleton tile
+   counts cannot drift from the real PosterCard grid below it. */
+.ny-poster-skeleton {
+  /* extends .ny-poster-grid via composition in the .tsx */
+}
+
+.ny-poster-skeleton__item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ny-poster-skeleton__frame {
+  aspect-ratio: 2 / 3;
+  border-radius: 14px;
+  border: 1px solid var(--neutral-border-weak);
+}
+
+.ny-poster-skeleton__text {
+  height: 16px;
+  width: 70%;
+  border-radius: 4px;
+}

@@ -1,0 +1,204 @@
+/**
+ * Player page chrome — Obsidian Atelier player page surface.
+ *
+ * Goals:
+ *  - Frame the <video> with a hairline + champagne gold corner notches.
+ *  - Keep decoration outside the video frame so it never overlaps controls.
+ *  - All eyebrow/meta typography in mono for the instrument feel.
+ */
+
+.ny-player-page {
+  width: 100%;
+}
+
+.ny-player-page.is-theater .ny-player-main {
+  max-width: none;
+}
+
+.ny-player-main {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.ny-player-info {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ny-player-info__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.ny-player-info__title {
+  font-family: var(--dc-font-display);
+  font-size: 1.25rem;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--neutral-on-background-strong);
+  margin: 0;
+}
+
+.ny-player-info__filename {
+  font-family: var(--dc-font-mono);
+  font-size: 0.75rem;
+  color: var(--neutral-on-background-weak);
+  margin: 4px 0 0;
+}
+
+.ny-player-info__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ny-player-info__pill {
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--surface-background-strong);
+  border: var(--dc-hairline);
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--neutral-on-background-medium);
+}
+
+.ny-player-info__progress {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--neutral-alpha-weak);
+  overflow: hidden;
+}
+
+.ny-player-info__progress-bar {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(
+    90deg,
+    var(--brand-background-strong),
+    var(--accent-background-strong)
+  );
+}
+
+.ny-player-info__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Loading state */
+
+.ny-player-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ny-player-loading__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ny-player-loading__stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 80px 32px;
+  border: var(--dc-hairline);
+  border-radius: var(--ny-radius-md);
+  background: var(--surface-background-weak);
+}
+
+.ny-player-loading__spin {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  border: 2px solid var(--neutral-alpha-weak);
+  border-top-color: var(--brand-background-strong);
+  animation: ny-spin 0.9s linear infinite;
+}
+
+@keyframes ny-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.ny-player-loading__text {
+  font-family: var(--dc-font-body);
+  font-size: 0.875rem;
+  color: var(--neutral-on-background-weak);
+}
+
+/* Error card */
+
+.ny-player-error {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 24px;
+  border: 1px solid var(--accent-border-medium);
+  border-radius: var(--ny-radius-md);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent-alpha-weak) 60%, var(--surface-background))
+      0%,
+    var(--surface-background) 100%
+  );
+}
+
+.ny-player-error__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.ny-player-error__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ny-player-error__title {
+  font-family: var(--dc-font-display);
+  font-size: 1.125rem;
+  font-weight: 500;
+  color: var(--neutral-on-background-strong);
+  margin: 0;
+}
+
+.ny-player-error__reason {
+  display: inline-block;
+  padding: 2px 8px;
+  font-family: var(--dc-font-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent-on-background-strong);
+  border: 1px solid var(--accent-border-medium);
+  border-radius: 4px;
+}
+
+.ny-player-error__text {
+  font-family: var(--dc-font-body);
+  font-size: 0.875rem;
+  color: var(--neutral-on-background-medium);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.ny-player-error__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* .ny-btn / .ny-btn--primary / .ny-btn--ghost live in anime-theme.scss. */

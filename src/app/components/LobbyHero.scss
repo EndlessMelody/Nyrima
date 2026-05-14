@@ -1,0 +1,159 @@
+.ny-hero {
+  position: relative;
+  display: block;
+  width: 100%;
+  text-align: left;
+  border-radius: var(--ny-radius-lg);
+  overflow: hidden;
+  aspect-ratio: 16 / 7;
+  cursor: pointer;
+  background: var(--surface-background-strong);
+  border: 1px solid var(--neutral-border-weak);
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  transition: box-shadow 200ms ease;
+}
+
+.ny-hero:hover {
+  box-shadow: var(--ny-shadow-hero-hover);
+}
+
+.ny-hero__backdrop {
+  position: absolute;
+  inset: 0;
+}
+
+.ny-hero__backdrop img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ny-hero__fallback {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    135deg,
+    var(--surface-background-strong),
+    var(--surface-background)
+  );
+}
+
+.ny-hero__gradient {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to right,
+    rgba(6, 8, 20, 0.92) 0%,
+    var(--ny-scrim-strong) 45%,
+    transparent 75%
+  );
+}
+
+.ny-hero__content {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 55%;
+  padding: 32px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+@media (max-width: 720px) {
+  .ny-hero {
+    aspect-ratio: 16 / 9;
+  }
+
+  .ny-hero__content {
+    width: 80%;
+    padding: 20px 24px;
+  }
+}
+
+.ny-hero__eyebrow {
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--brand-on-background-medium);
+}
+
+.ny-hero__title {
+  font-family: var(--dc-font-display);
+  font-size: 1.75rem;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--neutral-on-background-strong);
+  margin: 0;
+  line-height: 1.2;
+}
+
+.ny-hero__overview {
+  font-family: var(--dc-font-body);
+  font-size: 0.875rem;
+  color: var(--neutral-on-background-medium);
+  line-height: 1.5;
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ny-hero__meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  color: var(--neutral-on-background-weak);
+}
+
+.ny-hero__pill {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--neutral-alpha-weak);
+  border: 1px solid var(--neutral-border-weak);
+}
+
+.ny-hero__actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.ny-hero__btn {
+  font-family: var(--dc-font-display);
+  font-size: 0.875rem;
+  font-weight: 500;
+  padding: 10px 20px;
+  border-radius: var(--ny-radius-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition:
+    transform 160ms ease,
+    opacity 160ms ease;
+}
+
+.ny-hero:hover .ny-hero__btn {
+  transform: scale(1.02);
+}
+
+.ny-hero:active .ny-hero__btn {
+  transform: scale(0.98);
+}
+
+.ny-hero__btn--primary {
+  background: linear-gradient(
+    135deg,
+    var(--brand-background-strong),
+    var(--accent-background-strong)
+  );
+  color: var(--neutral-on-solid-strong);
+}

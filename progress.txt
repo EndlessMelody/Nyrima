@@ -1,0 +1,251 @@
+Nyrima — progress journal
+================================
+Format: append-only; newest at top. One short paragraph per session.
+
+[2026-05-14] Phase 2: MKV playback via browser-side remux (H.264+AAC → fMP4).
+- New module: src/app/services/mkv-remux/ with 4 files:
+    types.ts       — VideoTrackInfo, AudioTrackInfo, DemuxedSample, MkvMediaInfo
+    demuxer.ts     — parses MKV headers (EBML→Segment→Tracks→Info) to extract
+                     H.264 CodecPrivate (AVCDecoderConfigurationRecord), AAC
+                     AudioSpecificConfig, and video/audio track metadata.
+                     Also extracts per-sample data from Cluster elements.
+    mp4-generator.ts — builds ISO BMFF (fMP4) binary structures:
+                     Init segment: ftyp + moov (avc1/avcC + mp4a/esds + mvex)
+                     Media segments: moof (mfhd + traf/tfhd/tfdt/trun) + mdat
+    mse-controller.ts — orchestrates the pipeline:
+                     1. Fetch first 2 MB, parse MKV header
+                     2. Build init segment, create MediaSource + SourceBuffer
+                     3. Progressive 2 MB chunk fetch → parse clusters → remux → append
+                     4. Buffer management (30s ahead, 60s behind, quota eviction)
+- Extended ebml.ts MKV_ID with Video/Audio sub-element IDs (PixelWidth,
+  PixelHeight, SamplingFrequency, Channels, etc.) and DefaultDuration,
+  TimecodeScale, BlockDuration.
+- PlayerPage.tsx: MKV files now take a dedicated MSE path instead of showing
+  "Container not yet supported". The flow:
+    1. Probe file with Range 0-0 (surface sharing errors early)
+    2. Set isMkvMse=true, render DrivePlayer with empty src
+    3. DrivePlayer exposes <video> via onVideoRef callback
+    4. MkvMseController.start() attaches MediaSource to the <video>
+    5. Progressive remux begins; onReady sets streamUrl to the object URL
+- DrivePlayer.tsx: new onVideoRef prop; src={src || undefined} so MSE
+  controls the <video> when src is empty.
+- Build passes (tsc --noEmit + vite build). AppPage chunk: ~106 KB gzip.
+
+Known limitations (to address later):
+  - Seeking beyond buffered range not yet implemented (need Cues parsing
+    or byte-offset estimation).
+  - No HEVC/H.265 support (Chrome MSE doesn't support HEVC on most
+    platforms anyway).
+  - Audio-only MKV or video-only MKV edge cases not handled.
+  - Lacing modes (Xiph, EBML) in SimpleBlock not yet parsed; only
+    no-lacing and fixed-size lacing will work. Xiph lacing is rare for
+    H.264 but common for Vorbis audio (we only target AAC so this is fine).
+
+[2026-05-13] Scaffolded the project from empty workspace.
+- Chose Vite + @crxjs/vite-plugin over Next.js because Once UI components are
+  React-only at the leaf, and Chrome Extensions need multi-entry static
+  bundling that Vite handles cleanly.
+- Wrote the full MV3 manifest (background SW, content script, app page,
+  popup, context menus, host permissions, CSP allowing WASM).
+- Implemented Phase-1 player: native MP4/WebM via Blob URL; SRT/VTT
+  attached as <track>; ASS converted to a minimal VTT (full libass rendering
+  is queued for Phase 2). Resume position persists in chrome.storage.local.
+- Added a custom AppProviders that owns theme state (Once UI's Next.js-bound
+  Providers would pull next/navigation; we may revisit once we confirm at
+  install time which Once UI exports are import-safe in Vite).
+- All "Cannot find module" lint noise is expected until `npm install` runs.
+
+[next] Run `npm install`, do a smoke build, fix any Once UI import that
+  trips Vite (likely candidates: anything pulling next/* under the hood; we
+  may need a vite.config alias to stub next/navigation as a no-op).
+
+[2026-05-13b] Smoke build now passing (npm run build, exit 0).
+Findings while making it green:
+- @once-ui-system/core v1.7.3 ships with a nested dist/package.json whose
+  relative paths break Vite's package-entry resolver. Workaround: a Vite
+  resolve.alias pinning the bare specifier "@once-ui-system/core" to
+  dist/components/index.js. We import via the /components subpath in our
+  own code; the alias only matters for the package's OWN self-references.
+- Optional peer deps (recharts, prismjs, compressorjs, sharp) are pulled
+  in by React.lazy chunks for chart / code / upload modules we don't use.
+  Stubbed them in src/stubs/ — recharts-stub.tsx provides the named
+  exports each chart impl file imports, others are empty.
+- Once UI's API differs from what I initially guessed:
+  - horizontal/vertical alignment uses "between" not "space-between"
+  - SpacingToken is a fixed set: 0,1,2,4,8,12,16,20,24,32,40,48,56,64,80,
+    104,128,160 (plus xs/s/m/l/xl). So "6", "10" are invalid.
+  - <Grid> responsive prop is m / s / l with {columns:N} objects, not
+    mobileColumns / tabletColumns.
+  - <Dialog> uses a `footer` prop, not primaryButtonProps/secondaryButtonProps.
+- chrome.identity.getAuthToken in newer @types/chrome returns a
+  GetAuthTokenResult { token }. Service worker now handles both shapes.
+- Placeholder icons generated via a hand-rolled PNG writer in
+  scripts/make-icons.mjs and wired to prebuild.
+- Bundle: 723KB JS (210KB gzip) + 186KB CSS. Most is Once UI; we'll trim
+  in Phase 2 with manualChunks once player WASM lands.
+
+[next] Manual smoke test: chrome://extensions → Load unpacked → dist/.
+  Verify: extension icon renders, popup opens, app page opens, OAuth
+  flow when implemented client_id is set. Then start Phase 2 (MKV).
+
+[2026-05-13c] Oregairu-flavored visual pass.
+- Installed @fontsource/klee-one, m-plus-rounded-1c, zen-kaku-gothic-new.
+  IMPORTANT: @fontsource CSS imports must live in the JS/TS entry (main.tsx,
+  popup.tsx), NOT in SCSS via @use. Sass does not rewrite the url(...woff2)
+  references the way Vite's CSS plugin does, so doing it from SCSS bundles
+  the @font-face declarations without copying the woff2 binaries.
+- New theme stack:
+    src/app/styles/fonts.scss        — token bindings (--dc-font-display, etc.)
+    src/app/styles/anime-theme.scss  — palette overrides for Once UI tokens
+                                       (light = Service Club afternoon /
+                                        dark  = Yukino's evening) plus
+                                       body vignette, washi noise, section
+                                       title bar, kana caption, card glow.
+    src/app/components/SakuraOverlay.{tsx,scss} — fixed pointer-events-none
+                                       layer with 14 falling petals, three
+                                       SVG variants, three keyframe sets,
+                                       respects prefers-reduced-motion.
+- AppShell uses a 5-petal sakura SVG mark, katakana subtitle "ドライブ・シネマ",
+  glass + gradient header, and an Oregairu-style footer pun.
+- LandingPage gets a hero panel with two soft glow blobs and kana section
+  titles. EmptyState now renders the sakura blossom instead of a folder.
+- LibraryPage shows kana eyebrows above each section.
+- Cards (FolderCard + VideoTile) share a `dc-card-glow` hover class that
+  lifts, glows pink+violet, and tints the border.
+- Once UI data attributes shifted to brand="magenta" accent="violet" so
+  stock components fall back close to our palette before anime-theme.scss
+  overrides land.
+
+[next] Phase 1 visual polish optional ideas:
+- Cherry-blossom spinner (replace Once UI <Spinner /> on async fetches).
+- Hero scene illustration (Service Club window with sunset) on landing.
+- Animated kana ticker in the empty state.
+- Reduced-motion respect at the AppProviders level (toggle Sakura.active).
+
+[2026-05-13d] Bugfix: FAB never appeared on drive.google.com.
+- Root cause: src/content/drive-inject.tsx was importing extractFolderId
+  from "@/background/service-worker". Even though tree-shaking would strip
+  the unused exports, the background module's TOP-LEVEL side effects
+  (chrome.runtime.onInstalled.addListener, chrome.runtime.onStartup,
+   chrome.action.onClicked, chrome.contextMenus.onClicked, chrome.runtime.
+   onMessage) were bundled into the content script. Most of those APIs are
+  undefined in the content-script execution context, so the very first
+  addListener call threw and the script halted before mountFab() ran.
+  Diagnostic: in the live page console,
+    document.getElementById('drive-cinema-fab-host')   → null
+- Fix: extracted the URL parser into src/shared/parse-folder-url.ts
+  (side-effect-free) and switched all three contexts (background, content,
+  app/LandingPage) to import from there.
+- Lesson learned: NEVER let content scripts cross-import from background
+  modules, even for a single helper. Keep shared helpers in @shared/* and
+  guarantee they remain pure.
+
+[2026-05-13e] Bugfix: popup crashed with "Uncaught ReferenceError: __dirname
+is not defined" — and by extension app page would have died the same way.
+- Diagnosis: Once UI's components/index.js re-exports <Logo>, <Media>,
+  <ElementType> which top-level import from next/link, next/image. Those
+  modules' barrel exports drag in Next.js' middleware + image-loader
+  internals that reference Node-only globals (__dirname).
+- Fix: extended the stub-via-alias strategy to next/* subpaths:
+    next/link        → src/stubs/next-link-stub.tsx        (<a> passthrough)
+    next/image       → src/stubs/next-image-stub.tsx       (<img> passthrough)
+    next/navigation  → src/stubs/next-navigation-stub.ts   (no-op hooks)
+    next/script      → src/stubs/next-script-stub.tsx      (<script> passthrough)
+    next/server      → src/stubs/next-server-stub.ts       (Response shims)
+- Bonus: bundle shrank from 723 KB to 527 KB (gzip 210 → 153) because
+  Rollup can tree-shake the whole Next.js subtree now that imports resolve
+  to ~20-line stubs.
+- Rule of thumb when adopting Once UI in non-Next projects: any time a new
+  build fails with a missing Next API, add an alias to a tiny shim in
+  src/stubs/ instead of installing Next.
+
+[2026-05-13f] Two more fixes after the user loaded the build in Chrome:
+1. App page returned net::ERR_FILE_NOT_FOUND on main.tsx. Root cause:
+   src/app/index.html lives in web_accessible_resources, not in
+   action.default_popup, so @crxjs/vite-plugin did NOT auto-detect it as a
+   Rollup HTML entry. Vite copied the file verbatim with its <script
+   src="./main.tsx"> reference intact, which 404s in production.
+   Fix: declared the page in vite.config.ts build.rollupOptions.input
+   ("appPage": "src/app/index.html"). Vite now rewrites the script tag to
+   the bundled chunk and emits dist/src/app/index.html.
+2. App crashed at boot with "useLayout must be used within a
+   LayoutProvider". Root cause: our custom AppProviders skipped Once UI's
+   providers, but Flex/Row/Column subscribe to LayoutContext for
+   breakpoint matching.
+   Fix: AppProviders now wraps children in Once UI's LayoutProvider,
+   IconProvider, and ToastProvider (all three are pure React, no Next deps
+   so the Next stubs aren't even touched by these).
+
+If the next session sees a similar "<X> must be used within a <X>Provider"
+error, add the corresponding provider from @once-ui-system/core/contexts.
+
+[2026-05-13g] OAuth flow swapped for API-key-first access.
+- Problem: oauth2.client_id placeholder caused "bad client id" toast on
+  every Drive request. Setting up a proper OAuth Chrome Extension client
+  is a multi-step Google Cloud chore that blocks first-run.
+- Solution: dropped the oauth2 block from manifest.config.ts entirely, and
+  added a Google API key path:
+    src/app/services/api-key.ts       — get/set/clear via chrome.storage
+    src/app/services/errors.ts        — DriveAccessError + classifyDriveError
+                                        (typed reasons: no-api-key,
+                                        private-folder, not-found,
+                                        rate-limited, auth-required, unknown)
+    src/app/services/auth.ts          — authedFetch is now a strategy router:
+                                        1. API key (no Authorization header)
+                                        2. OAuth Bearer (only if manifest
+                                           re-enables oauth2)
+                                        3. throw DriveAccessError typed
+- New UX surface:
+    src/app/components/SetupAccessDialog.tsx — first-run pairing dialog with
+        a link to the Google Cloud Credentials page; validates the key
+        against drive/v3/files?pageSize=1 before persisting.
+    src/app/pages/LandingPage.tsx — shows a prominent "Setup Drive access"
+        banner when no key is configured; a "Manage access" button + green
+        "Drive linked" Tag when one is.
+    src/app/pages/LibraryPage.tsx → AccessErrorCard — branches its
+        remediation copy on errorReason: step-by-step "share publicly"
+        instructions for private folders, "Setup access" CTA for missing
+        keys, "wait" for rate limits.
+- API setup UX is roughly: open Google Cloud Console → Create credentials
+  → API key → paste. The "Anyone with the link" share requirement is now
+  surfaced inside the app with a deep link to the offending folder.
+
+Re-enabling OAuth later: uncomment the oauth2 block in src/manifest.config.ts
+with a real client_id, then sign-in works for private folders. authedFetch
+will use the Bearer token automatically if API-key fetch returns 403.
+
+[2026-05-13h] Player: switched to direct streaming + cinematic UI.
+- Problem: the Phase 1 player fetched the entire file as a Blob before
+  setting <video src>. For multi-GB movies that meant minutes of staring
+  at a spinner, RAM bloat, and no seek-ahead.
+- Fix:
+    src/app/services/drive-api.ts  → added buildPublicStreamUrl() that
+        returns the API-key-stamped googleapis URL ready for <video src>.
+        Browser handles HTTP Range requests natively, playback starts in
+        seconds.
+    src/app/pages/PlayerPage.tsx   → load strategy:
+          A. If API key configured → set videoRef.src = directUrl. Stream.
+          B. Else (OAuth-only) → fetch+blob fallback with a distinct
+             "buffering full file" status pill.
+        Plus: video 'error' listener probes the same URL via authedFetch
+        (Range 0-0) to classify DriveAccessError so private-folder and
+        rate-limited failures show the correct remediation card.
+    src/manifest.config.ts         → CSP extended with media-src for
+        googleapis.com + googleusercontent.com + drive.google.com (Drive
+        sometimes 302's ranged media to CDN mirrors). img-src widened for
+        thumbnail rendering in tiles.
+- UI redesign (src/app/pages/PlayerPage.scss + .tsx):
+  - .dc-player-stage: cinematic frame with sakura-violet conic glow ring,
+    16:9 aspect, deep shadow, native <video> nested inside.
+  - .dc-player-eyebrow: kana caption above titles ("上映中 · Now playing").
+  - .dc-meta-pill row: container / resolution / duration / size pills
+    populated from the file's videoMediaMetadata.
+  - .dc-sub-picker chips: per-language toggle that flips TextTrack.mode at
+    runtime; "Off" chip turns subs off without removing them.
+  - Shimmer-bar loader replaces the bare Spinner page.
+  - PlayerErrorCard: typed reason → tailored copy + Setup access CTA when
+    reason === "no-api-key", retry uses navigate(0) to re-mount.
+
+Verification: opening a folder shared "Anyone with the link", an MP4 starts
+within ~1s and seek works without buffering the whole file. MKV still falls
+into the "container not supported" Phase 2 placeholder.

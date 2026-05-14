@@ -1,0 +1,24 @@
+.ny-player-layout {
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  gap: 24px;
+  align-items: start;
+}
+
+@media (max-width: 1080px) {
+  .ny-player-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .ny-player-layout__aside {
+    order: 2;
+  }
+}
+
+.ny-player-layout__main {
+  min-width: 0;
+}
+
+.ny-player-layout__aside {
+  min-width: 0;
+}

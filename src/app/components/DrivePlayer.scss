@@ -1,0 +1,688 @@
+/**
+ * Nyrima player chrome — Obsidian Atelier.
+ *
+ * Design pillars:
+ *  - Dark-first cinematic surface; the player is its own room.
+ *  - Tech HUD: monospace timecodes, hairline borders, mono labels.
+ *  - Luxury minimal: champagne gold is the only chromatic accent; sakura
+ *    pink is reserved as the "now active" state on menu items only.
+ *  - Auto-hide HUD after ~2.5s of mouse inactivity while playing.
+ */
+
+.dc-vlc {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: 12px;
+  overflow: hidden;
+  isolation: isolate;
+  user-select: none;
+  outline: none;
+  border: var(--dc-hairline);
+  box-shadow:
+    0 24px 60px -28px rgba(0, 0, 0, 0.9),
+    var(--dc-glow);
+
+  & > video {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    display: block;
+    background: #000;
+    object-fit: contain;
+  }
+
+  &.is-fullscreen {
+    border-radius: 0;
+    aspect-ratio: auto;
+    height: 100vh;
+    border: 0;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Top kana eyebrow ("再生中 · NOW PLAYING")
+// ---------------------------------------------------------------------------
+.dc-vlc__top {
+  position: absolute;
+  inset: 0 0 auto 0;
+  padding: 14px 20px 28px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  pointer-events: none;
+  color: rgba(255, 255, 255, 0.92);
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.72) 0%,
+    transparent 100%
+  );
+  transform: translateY(-100%);
+  opacity: 0;
+  transition:
+    transform 220ms ease,
+    opacity 220ms ease;
+}
+
+.dc-vlc__top-kana {
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--dc-gold);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.625rem;
+
+  &::before {
+    content: "";
+    width: 24px;
+    height: 1px;
+    background: currentColor;
+    opacity: 0.6;
+  }
+}
+
+.dc-vlc__top-title {
+  font-family: var(--dc-font-display);
+  font-size: 0.875rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60%;
+  opacity: 0.9;
+}
+
+// ---------------------------------------------------------------------------
+// Center resume button (shows when paused or before first play)
+// ---------------------------------------------------------------------------
+.dc-vlc__center {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(0, 0, 0, 0.25) 0%,
+    rgba(0, 0, 0, 0.55) 100%
+  );
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  transition: opacity 200ms ease;
+}
+
+.dc-vlc__center-knob {
+  width: 88px;
+  height: 88px;
+  border-radius: 999px;
+  background: linear-gradient(
+    180deg,
+    rgba(212, 183, 118, 0.95) 0%,
+    rgba(184, 152, 85, 0.92) 100%
+  );
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow:
+    0 20px 48px -8px rgba(212, 183, 118, 0.45),
+    0 0 0 1px rgba(255, 255, 255, 0.18) inset,
+    0 0 60px rgba(212, 183, 118, 0.3);
+  animation: dc-vlc-breathe 2.4s ease-in-out infinite;
+
+  svg {
+    width: 36px;
+    height: 36px;
+    fill: #1a1408;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+    margin-left: 4px;
+  }
+}
+
+@keyframes dc-vlc-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Bottom HUD (timeline + control bar)
+// ---------------------------------------------------------------------------
+.dc-vlc__hud {
+  position: absolute;
+  inset: auto 0 0 0;
+  z-index: 3;
+  padding: 18px 20px 16px;
+  background: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.94) 0%,
+    rgba(0, 0, 0, 0.65) 55%,
+    transparent 100%
+  );
+  transform: translateY(110%);
+  opacity: 0;
+  transition:
+    transform 220ms ease,
+    opacity 220ms ease;
+  pointer-events: none;
+}
+
+.dc-vlc.is-hud-on {
+  .dc-vlc__top,
+  .dc-vlc__hud {
+    transform: translateY(0);
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Timeline
+// ---------------------------------------------------------------------------
+.dc-vlc__timeline {
+  position: relative;
+  height: 8px;
+  padding: 8px 0; // larger hit area
+  margin: 0 0 10px;
+  cursor: pointer;
+
+  &-track {
+    position: relative;
+    height: 4px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.14);
+    overflow: visible;
+    transition: height 140ms ease;
+  }
+
+  &:hover &-track {
+    height: 6px;
+  }
+}
+
+.dc-vlc__tl-buffered {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: rgba(255, 255, 255, 0.25);
+  pointer-events: none;
+}
+
+.dc-vlc__tl-progress {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--dc-gold);
+  box-shadow: 0 0 8px rgba(212, 183, 118, 0.45);
+  pointer-events: none;
+}
+
+.dc-vlc__tl-thumb {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: var(--dc-gold);
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.85),
+    0 0 14px rgba(212, 183, 118, 0.6);
+  opacity: 0;
+  transition: opacity 140ms ease;
+  pointer-events: none;
+}
+
+.dc-vlc__timeline:hover .dc-vlc__tl-thumb,
+.dc-vlc__timeline.is-scrubbing .dc-vlc__tl-thumb {
+  opacity: 1;
+}
+
+.dc-vlc__tl-preview {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: rgba(10, 10, 15, 0.94);
+  color: var(--dc-gold);
+  font-family: var(--dc-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  pointer-events: none;
+  white-space: nowrap;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+// ---------------------------------------------------------------------------
+// Bottom bar (play / time / spacer / volume / speed / subs / fullscreen)
+// ---------------------------------------------------------------------------
+.dc-vlc__bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #fff;
+}
+
+.dc-vlc__btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.78);
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background 140ms ease,
+    color 140ms ease;
+  position: relative;
+
+  svg {
+    width: 16px;
+    height: 16px;
+    fill: currentColor;
+  }
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--dc-gold);
+  }
+
+  &:focus-visible {
+    outline: 1px solid var(--dc-gold);
+    outline-offset: 2px;
+  }
+
+  &.is-on {
+    color: var(--dc-gold);
+    background: rgba(212, 183, 118, 0.12);
+  }
+}
+
+/* Compact text-button variant — used by the speed picker so "1.5x" fits. */
+.dc-vlc__btn--text {
+  width: auto;
+  padding: 0 10px;
+  font-family: var(--dc-font-mono);
+  font-size: 12px;
+  letter-spacing: 0.05em;
+}
+
+.dc-vlc__play {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  background: linear-gradient(
+    180deg,
+    rgba(212, 183, 118, 0.95) 0%,
+    rgba(184, 152, 85, 0.92) 100%
+  );
+  color: #1a1408;
+  box-shadow:
+    0 8px 20px -6px rgba(212, 183, 118, 0.42),
+    0 0 0 1px rgba(255, 255, 255, 0.18) inset;
+
+  svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  &:hover {
+    background: linear-gradient(180deg, #e2c989 0%, #c4a866 100%);
+    color: #1a1408;
+    transform: none;
+  }
+}
+
+// Prev / next buttons use the same base style as dc-vlc__btn
+.dc-vlc__bar > .dc-vlc__btn:first-child,
+.dc-vlc__bar > .dc-vlc__btn:nth-child(3) {
+  // prev/next adjacent to play
+  margin: 0 2px;
+}
+
+.dc-vlc__time {
+  font-family: var(--dc-font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.9);
+  padding: 0 6px;
+  min-width: 8ch;
+  text-align: left;
+
+  .sep {
+    opacity: 0.35;
+    margin: 0 6px;
+  }
+
+  .total {
+    opacity: 0.55;
+  }
+}
+
+.dc-vlc__spacer {
+  flex: 1;
+}
+
+// ---------------------------------------------------------------------------
+// Volume cluster — slider unfolds horizontally on hover
+// ---------------------------------------------------------------------------
+.dc-vlc__vol {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+
+  &-rail {
+    width: 0;
+    overflow: hidden;
+    display: inline-flex;
+    align-items: center;
+    transition: width 220ms ease;
+  }
+
+  &:hover &-rail,
+  &.is-open &-rail {
+    width: 92px;
+    padding-left: 6px;
+    padding-right: 8px;
+  }
+}
+
+.dc-vlc__range {
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  background: transparent;
+  cursor: pointer;
+  --pct: 0%;
+  background-image: linear-gradient(
+    90deg,
+    var(--dc-gold) 0%,
+    var(--dc-gold) var(--pct),
+    rgba(255, 255, 255, 0.16) var(--pct),
+    rgba(255, 255, 255, 0.16) 100%
+  );
+  background-size: 100% 4px;
+  background-position: center;
+  background-repeat: no-repeat;
+  border-radius: 4px;
+
+  &::-webkit-slider-thumb {
+    appearance: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: var(--dc-gold);
+    border: 0;
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85);
+    cursor: pointer;
+    margin-top: -3px;
+  }
+
+  &::-moz-range-thumb {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: var(--dc-gold);
+    border: 0;
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85);
+    cursor: pointer;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Popup menus (subtitles, speed)
+// ---------------------------------------------------------------------------
+.dc-vlc__menu-host {
+  position: relative;
+  display: inline-flex;
+}
+
+.dc-vlc__menu {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  right: 0;
+  min-width: 180px;
+  padding: 6px;
+  border-radius: 8px;
+  background: rgba(10, 10, 15, 0.96);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 18px 40px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 5;
+}
+
+.dc-vlc__menu-kana {
+  font-family: var(--dc-font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.24em;
+  color: var(--dc-gold);
+  text-transform: uppercase;
+  padding: 8px 12px 6px;
+}
+
+.dc-vlc__menu-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 4px 0;
+}
+
+.dc-vlc__menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 12px;
+}
+
+.dc-vlc__menu-mid {
+  font-family: var(--dc-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--dc-gold);
+  opacity: 0.9;
+  min-width: 4ch;
+  text-align: center;
+}
+
+.dc-vlc__menu-mini {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.65);
+  font-family: var(--dc-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+  }
+}
+
+.dc-vlc__menu-item {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.82);
+  font-family: var(--dc-font-body);
+  font-size: 13px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: #fff;
+  }
+
+  &.is-active {
+    background: rgba(212, 183, 118, 0.14);
+    color: var(--dc-gold);
+    box-shadow: 0 0 0 1px rgba(212, 183, 118, 0.4) inset;
+  }
+
+  &.is-disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    color: rgba(255, 255, 255, 0.45);
+
+    &:hover {
+      background: transparent;
+      color: rgba(255, 255, 255, 0.45);
+    }
+  }
+
+  .dc-vlc__menu-side {
+    font-family: var(--dc-font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    opacity: 0.55;
+    letter-spacing: 0.06em;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tech-detail scan line overlay (very subtle)
+// ---------------------------------------------------------------------------
+.dc-vlc__hud::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.015) 0,
+    rgba(255, 255, 255, 0.015) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  mix-blend-mode: overlay;
+}
+
+// ---------------------------------------------------------------------------
+// Brackets at the four corners — film-cell vibe
+// ---------------------------------------------------------------------------
+.dc-vlc__corners span {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 1px solid rgba(212, 183, 118, 0.6);
+  pointer-events: none;
+  z-index: 4;
+  opacity: 0.7;
+  transition: opacity 200ms ease;
+
+  &.tl {
+    top: 10px;
+    left: 10px;
+    border-right: 0;
+    border-bottom: 0;
+  }
+  &.tr {
+    top: 10px;
+    right: 10px;
+    border-left: 0;
+    border-bottom: 0;
+  }
+  &.bl {
+    bottom: 10px;
+    left: 10px;
+    border-right: 0;
+    border-top: 0;
+  }
+  &.br {
+    bottom: 10px;
+    right: 10px;
+    border-left: 0;
+    border-top: 0;
+  }
+}
+
+.dc-vlc.is-fullscreen .dc-vlc__corners span {
+  opacity: 0.4;
+}
+
+// ---------------------------------------------------------------------------
+// Loading shimmer while video buffers
+// ---------------------------------------------------------------------------
+.dc-vlc__buffering {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 14px;
+  color: rgba(255, 255, 255, 0.85);
+  z-index: 2;
+  pointer-events: none;
+
+  .spinner {
+    width: 42px;
+    height: 42px;
+    border-radius: 999px;
+    border: 1.5px solid rgba(255, 255, 255, 0.16);
+    border-top-color: var(--dc-gold);
+    border-right-color: rgba(212, 183, 118, 0.6);
+    animation: dc-vlc-spin 0.9s linear infinite;
+  }
+
+  .label {
+    font-family: var(--dc-font-mono);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--dc-gold);
+  }
+}
+
+@keyframes dc-vlc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

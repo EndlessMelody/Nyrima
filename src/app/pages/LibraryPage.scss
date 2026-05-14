@@ -1,0 +1,256 @@
+/**
+ * Library page — Obsidian Atelier listing.
+ *
+ * Visual model:
+ *   - A header strip with a mono breadcrumb ("LIBRARY · folderId"), a
+ *     display title in Geist Sans, and a "Back" hairline button on the right.
+ *   - A "00 — STATS" tape strip with two or three cells (videos count,
+ *     subfolders count, total size) rendered like an instrument cluster.
+ *   - "01 — SUBFOLDERS" and "02 — VIDEOS" hairline sections.
+ *   - The empty state and access-error card both use the same hairline frame.
+ */
+
+.ny-library {
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+  width: 100%;
+}
+
+.ny-library__head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+  padding-bottom: 18px;
+  border-bottom: var(--dc-hairline);
+}
+
+.ny-library__head-left {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ny-library__crumb {
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--neutral-on-background-weak);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ny-library__crumb-sep {
+  width: 14px;
+  height: 1px;
+  background: var(--neutral-border-medium);
+}
+
+.ny-library__title {
+  font-family: var(--dc-font-display);
+  font-size: clamp(1.5rem, 3vw, 2rem);
+  line-height: 1.1;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--neutral-on-background-strong);
+  margin: 0;
+}
+
+.ny-library__section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ny-library__section-heading {
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--neutral-on-background-weak);
+  margin: 0;
+}
+
+/* .ny-poster-grid is defined globally in anime-theme.scss. */
+
+.ny-folder-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.ny-folder-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: var(--dc-hairline);
+  border-radius: var(--ny-radius-sm);
+  background: var(--surface-background);
+  cursor: pointer;
+  font-family: var(--dc-font-body);
+  font-size: 0.8125rem;
+  color: var(--neutral-on-background-medium);
+  transition:
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.ny-folder-chip:hover {
+  border-color: var(--brand-border-medium);
+  background: var(--surface-background-strong);
+}
+
+.ny-folder-chip svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--brand-on-background-medium);
+}
+
+.ny-library__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 64px 32px;
+  border: var(--dc-hairline);
+  border-radius: var(--ny-radius-md);
+  background: var(--surface-background-weak);
+  text-align: center;
+}
+
+.ny-library__empty-title {
+  font-family: var(--dc-font-display);
+  font-size: 1.125rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--neutral-on-background-strong);
+  margin: 0;
+}
+
+.ny-library__empty-sub {
+  font-family: var(--dc-font-body);
+  font-size: 0.875rem;
+  color: var(--neutral-on-background-weak);
+  max-width: 44ch;
+  margin: 0;
+  line-height: 1.6;
+}
+
+/* Access error card */
+
+.dc-error {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 22px 24px;
+  border: 1px solid var(--accent-border-medium);
+  border-radius: 12px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent-alpha-weak) 60%, var(--surface-background))
+      0%,
+    var(--surface-background) 100%
+  );
+}
+
+.dc-error__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.dc-error__icon {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border: 1px solid var(--accent-border-medium);
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-on-background-strong);
+}
+
+.dc-error__icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.dc-error__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dc-error__title {
+  font-family: var(--dc-font-display);
+  font-size: 1rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--neutral-on-background-strong);
+}
+
+.dc-error__sub {
+  font-family: var(--dc-font-body);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: var(--neutral-on-background-medium);
+}
+
+.dc-error__reason {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 6px;
+  font-family: var(--dc-font-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent-on-background-strong);
+  border: 1px solid var(--accent-border-medium);
+  border-radius: 4px;
+}
+
+.dc-error__steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border: var(--dc-hairline);
+  border-radius: 8px;
+  background: var(--surface-background-weak);
+  font-family: var(--dc-font-body);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--neutral-on-background-medium);
+}
+
+.dc-error__steps-title {
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--neutral-on-background-strong);
+}
+
+.dc-error__steps a {
+  color: var(--brand-on-background-strong);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.dc-error__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

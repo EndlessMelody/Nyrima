@@ -1,0 +1,209 @@
+/**
+ * FolderCard — Obsidian Atelier folder tile.
+ *
+ * Hairline-bordered rectangle with a hairline corner mark, a Geist Sans title
+ * line, a Geist Mono metadata line, and corner action icons that fade in on
+ * hover. Pinned state is shown as a small gold hairline pip in the top-left
+ * corner mark, not a chunky tag.
+ */
+
+.dc-folder {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  border: var(--dc-hairline);
+  border-radius: 10px;
+  background: var(--surface-background);
+  cursor: pointer;
+  min-width: 0;
+  transition:
+    border-color 200ms ease,
+    background 200ms ease,
+    transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.dc-folder:hover {
+  border-color: var(--brand-border-medium);
+  background: var(--surface-background-strong);
+  transform: translateY(-1px);
+}
+
+.dc-folder:hover .dc-folder__actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.dc-folder:hover .dc-folder__corner {
+  border-color: var(--brand-border-strong);
+}
+
+.dc-folder__corner {
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  width: 22px;
+  height: 22px;
+  border-top: 1px solid var(--neutral-border-medium);
+  border-left: 1px solid var(--neutral-border-medium);
+  border-top-left-radius: 10px;
+  pointer-events: none;
+  transition: border-color 200ms ease;
+}
+
+.dc-folder__corner::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--neutral-on-background-weak);
+  opacity: 0.4;
+}
+
+.dc-folder--pinned .dc-folder__corner {
+  border-color: var(--brand-border-strong);
+}
+
+.dc-folder--pinned .dc-folder__corner::after {
+  background: var(--dc-gold);
+  box-shadow: 0 0 8px var(--brand-alpha-strong);
+  opacity: 1;
+}
+
+.dc-folder__row-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.dc-folder__icon {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: var(--dc-hairline);
+  border-radius: 6px;
+  color: var(--brand-on-background-medium);
+}
+
+.dc-folder__icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.dc-folder__title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.dc-folder__title {
+  font-family: var(--dc-font-display);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--neutral-on-background-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dc-folder__id {
+  font-family: var(--dc-font-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.08em;
+  color: var(--neutral-on-background-weak);
+  text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dc-folder__row-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: var(--dc-hairline);
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--neutral-on-background-weak);
+}
+
+.dc-folder__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dc-folder__sep {
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--neutral-on-background-weak);
+  opacity: 0.4;
+  display: inline-block;
+}
+
+.dc-folder__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+}
+
+.dc-folder__action {
+  appearance: none;
+  border: var(--dc-hairline);
+  background: transparent;
+  color: var(--neutral-on-background-medium);
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    color 140ms ease,
+    border-color 140ms ease;
+}
+
+.dc-folder__action svg {
+  width: 12px;
+  height: 12px;
+}
+
+.dc-folder__action:hover {
+  background: var(--neutral-alpha-weak);
+  color: var(--neutral-on-background-strong);
+  border-color: var(--neutral-border-strong);
+}
+
+.dc-folder__action--pin.is-pinned {
+  color: var(--dc-gold);
+  border-color: var(--brand-border-medium);
+  background: var(--brand-alpha-weak);
+}
+
+.dc-folder__action--danger:hover {
+  color: var(--danger-solid-strong);
+  border-color: var(--danger-solid-strong);
+  background: transparent;
+}

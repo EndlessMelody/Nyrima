@@ -1,0 +1,197 @@
+.ny-poster-card {
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* Reset the focus ring to draw around the frame, not the whole flex column,
+     so the title text isn't included in the outline rectangle. */
+  &:focus-visible {
+    outline: none;
+  }
+
+  &:focus-visible .ny-poster-card__frame {
+    outline: 2px solid var(--brand-border-strong);
+    outline-offset: 2px;
+  }
+}
+
+/* Backdrop variant — used in horizontal-scroll rows (Continue Watching). */
+.ny-poster-card--backdrop {
+  min-width: clamp(220px, 28vw, 280px);
+  flex-shrink: 0;
+}
+
+.ny-poster-card__frame {
+  position: relative;
+  border-radius: var(--ny-radius-md);
+  overflow: hidden;
+  background: var(--surface-background-strong);
+  border: 1px solid var(--neutral-border-weak);
+  transition:
+    transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    border-color 200ms ease,
+    box-shadow 200ms ease,
+    outline 120ms ease;
+
+  .ny-poster-card--poster & {
+    aspect-ratio: 2 / 3;
+    border-radius: 14px;
+  }
+
+  .ny-poster-card--backdrop & {
+    aspect-ratio: 16 / 9;
+  }
+}
+
+.ny-poster-card:hover .ny-poster-card__frame {
+  transform: translateY(-2px);
+  border-color: var(--accent-border-medium);
+  box-shadow: var(--ny-shadow-card-hover);
+}
+
+.ny-poster-card__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 300ms ease;
+}
+
+.ny-poster-card__img.is-loaded {
+  opacity: 1;
+}
+
+.ny-poster-card__skeleton {
+  position: absolute;
+  inset: 0;
+}
+
+.ny-poster-card__fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px;
+  background: linear-gradient(
+    135deg,
+    var(--surface-background-strong),
+    var(--surface-background)
+  );
+}
+
+.ny-poster-card__fallback-title {
+  font-family: var(--dc-font-display);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--neutral-on-background-medium);
+  text-align: center;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ny-poster-card__overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ny-scrim-medium);
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+
+.ny-poster-card:hover .ny-poster-card__overlay {
+  opacity: 1;
+}
+
+.ny-poster-card__play {
+  width: 48px;
+  height: 48px;
+  color: var(--neutral-on-background-strong);
+  background: var(--ny-scrim-strong);
+  backdrop-filter: blur(8px);
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ny-ink-alpha-weak);
+
+  .ny-poster-card--backdrop & {
+    width: 40px;
+    height: 40px;
+  }
+}
+
+.ny-poster-card__play svg {
+  width: 20px;
+  height: 20px;
+
+  .ny-poster-card--backdrop & {
+    width: 16px;
+    height: 16px;
+  }
+}
+
+.ny-poster-card__pill {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-family: var(--dc-font-mono);
+  font-size: 0.625rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 999px;
+  z-index: 2;
+}
+
+.ny-poster-card__pill--watched {
+  background: var(--brand-background-strong);
+  color: var(--neutral-on-solid-strong);
+}
+
+.ny-poster-card__progress {
+  position: absolute;
+  bottom: 0;
+  left: 8px;
+  right: 8px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--ny-ink-alpha-weak);
+  overflow: hidden;
+  z-index: 2;
+
+  .ny-poster-card--backdrop & {
+    left: 0;
+    right: 0;
+    border-radius: 0;
+  }
+}
+
+.ny-poster-card__progress-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    var(--brand-background-strong),
+    var(--accent-background-strong)
+  );
+}
+
+.ny-poster-card__title {
+  font-family: var(--dc-font-display);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--neutral-on-background-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

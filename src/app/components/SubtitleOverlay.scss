@@ -1,0 +1,132 @@
+/**
+ * SubtitleOverlay — custom subtitle rendering above the video frame.
+ *
+ * Design notes:
+ *  - Absolutely positioned over the video element, same z-layer as corners.
+ *  - Two rows: top and bottom, each with left/center/right alignment zones.
+ *  - Respects user font-size scaling and delay offset.
+ *  - Gold accent for active cues to match Obsidian Atelier theme.
+ */
+
+.dc-sub-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 12% 6% 10%;
+  transition: padding 200ms ease;
+}
+
+.dc-sub-overlay.is-fs {
+  padding: 10% 8% 8%;
+}
+
+.dc-sub-zone {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+  align-content: flex-end;
+  min-height: 1.5em;
+
+  &--top {
+    align-content: flex-start;
+  }
+
+  &--bottom {
+    align-content: flex-end;
+  }
+}
+
+.dc-sub-cue {
+  display: inline-block;
+  padding: 0 0.15em;
+  background: transparent;
+  color: #ffffff;
+  font-family: var(--dc-font-body);
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: center;
+  word-break: normal;
+  overflow-wrap: anywhere;
+  max-width: 92%;
+  // VLC / Plex legibility recipe: a 1.5px black stroke painted *under*
+  // the white fill, plus a layered text-shadow halo for soft anchoring
+  // on bright frames.
+  -webkit-text-stroke: 1.5px #000;
+  paint-order: stroke fill;
+  text-shadow:
+    0 0 3px rgba(0, 0, 0, 0.95),
+    0 0 8px rgba(0, 0, 0, 0.55),
+    0 2px 4px rgba(0, 0, 0, 0.7);
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+
+  // Size variants
+  &--xs {
+    font-size: clamp(0.65rem, 1.6vw, 0.8rem);
+  }
+  &--sm {
+    font-size: clamp(0.75rem, 1.9vw, 0.95rem);
+  }
+  &--md {
+    font-size: clamp(0.9rem, 2.3vw, 1.15rem);
+  }
+  &--lg {
+    font-size: clamp(1.05rem, 2.8vw, 1.45rem);
+  }
+  &--xl {
+    font-size: clamp(1.25rem, 3.4vw, 1.85rem);
+  }
+
+  // ASS-derived styles
+  &[data-bold="true"] {
+    font-weight: 700;
+  }
+  &[data-italic="true"] {
+    font-style: italic;
+  }
+  &[data-underline="true"] {
+    text-decoration: underline;
+  }
+  &[data-align="left"] {
+    text-align: left;
+  }
+  &[data-align="right"] {
+    text-align: right;
+  }
+}
+
+// Entrance / exit
+.dc-sub-cue.is-enter {
+  animation: dc-sub-in 180ms ease forwards;
+}
+.dc-sub-cue.is-exit {
+  animation: dc-sub-out 140ms ease forwards;
+}
+
+@keyframes dc-sub-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes dc-sub-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}

@@ -1,0 +1,51 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Dependencies
+node_modules
+.pnp
+.pnp.js
+
+# Build outputs
+dist
+dist-zip
+build
+*.tsbuildinfo
+
+# Local env
+.env
+.env.local
+.env.*.local
+
+# Editor
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea
+.DS_Store
+Thumbs.db
+
+# OS
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Secrets
+client_secret*.json
+oauth_credentials.json
+
+# Coverage
+coverage
+.nyc_output
+
+# Misc
+*.local
+.cache

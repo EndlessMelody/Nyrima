@@ -1,0 +1,48 @@
+/**
+ * Typography tokens — "Obsidian Atelier" luxury minimal-tech system.
+ *
+ * Geist Sans is the spine of the system. It carries display headlines, body
+ * copy, and form labels with a tight, modern sans personality that reads as
+ * both premium and technical. Geist Mono handles every numeric, code, file
+ * metadata, and small uppercase tracker label so the interface always has a
+ * visible "instrument cluster" feel. Zen Kaku Gothic is preserved only as a
+ * dedicated CJK fallback so kana annotations still render with proper
+ * kerning instead of falling back to the OS default which would clash
+ * visually with Geist's letterforms.
+ *
+ * The @fontsource CSS files (which declare @font-face → woff2 url() refs)
+ * are imported from `main.tsx` as side effects, not from here, so Vite can
+ * resolve and hash the woff2 assets the same way it handles JS-side CSS
+ * imports.
+ */
+
+:root {
+  /* Display + body: Geist Sans, tabular numerals on by default */
+  --dc-font-display:
+    "Geist Sans", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "Helvetica Neue", system-ui, sans-serif;
+  --dc-font-body:
+    "Geist Sans", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "Helvetica Neue", system-ui, sans-serif;
+
+  /* Mono: technical labels, timestamps, codes, kbd shortcuts */
+  --dc-font-mono:
+    "Geist Mono", ui-monospace, "JetBrains Mono", "SFMono-Regular",
+    "Cascadia Mono", Consolas, monospace;
+
+  /* Kana: small Japanese accents kept around for the existing brand voice */
+  --dc-font-kana:
+    "Geist Mono", "Zen Kaku Gothic New", "Hiragino Kaku Gothic ProN",
+    "Yu Gothic", sans-serif;
+}
+
+/* Hand the resolved families to Once UI's typography tokens so every */
+/* primitive (Heading, Text, Button, Input) picks them up without us */
+/* needing to touch the components directly. */
+:root {
+  --font-family-body: var(--dc-font-body);
+  --font-family-heading: var(--dc-font-display);
+  --font-family-display: var(--dc-font-display);
+  --font-family-label: var(--dc-font-body);
+  --font-family-code: var(--dc-font-mono);
+}

@@ -1,0 +1,215 @@
+/**
+ * VideoTile — Obsidian Atelier video card.
+ *
+ * Anatomy: poster (16:9, hairline frame) → mono runtime corner badge →
+ * title strip with hairline divider → mono metadata row (resolution, size,
+ * subtitle count). Hover reveals a play glyph centered on the poster.
+ */
+
+.dc-video {
+  display: flex;
+  flex-direction: column;
+  border: var(--dc-hairline);
+  border-radius: 10px;
+  background: var(--surface-background);
+  cursor: pointer;
+  overflow: hidden;
+  min-width: 0;
+  transition:
+    border-color 200ms ease,
+    background 200ms ease,
+    transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.dc-video:hover {
+  border-color: var(--brand-border-medium);
+  background: var(--surface-background-strong);
+  transform: translateY(-1px);
+}
+
+.dc-video:hover .dc-video__overlay {
+  opacity: 1;
+}
+
+.dc-video:hover .dc-video__poster img {
+  transform: scale(1.03);
+}
+
+.dc-video__poster {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background:
+    linear-gradient(
+      135deg,
+      var(--neutral-background-medium) 0%,
+      var(--neutral-background-weak) 100%
+    );
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-bottom: var(--dc-hairline);
+}
+
+.dc-video__poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 360ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.dc-video__poster-fallback {
+  color: var(--neutral-on-background-weak);
+  opacity: 0.5;
+  width: 32px;
+  height: 32px;
+}
+
+.dc-video__corners {
+  position: absolute;
+  inset: 6px;
+  pointer-events: none;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+.dc-video__corners::before,
+.dc-video__corners::after,
+.dc-video__corners > span {
+  content: "";
+  width: 12px;
+  height: 12px;
+  border-color: rgba(255, 255, 255, 0.5);
+  border-style: solid;
+  border-width: 0;
+}
+
+.dc-video__corners::before {
+  border-top-width: 1px;
+  border-left-width: 1px;
+  align-self: start;
+  justify-self: start;
+}
+
+.dc-video__corners::after {
+  border-bottom-width: 1px;
+  border-right-width: 1px;
+  align-self: end;
+  justify-self: end;
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.dc-video__runtime {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  padding: 4px 8px;
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  background: rgba(10, 10, 15, 0.78);
+  color: #fafafa;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  backdrop-filter: blur(8px);
+}
+
+.dc-video__overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(10, 10, 15, 0.4) 100%
+  );
+  opacity: 0;
+  transition: opacity 220ms ease;
+  pointer-events: none;
+}
+
+.dc-video__play {
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  background: rgba(10, 10, 15, 0.6);
+  backdrop-filter: blur(8px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dc-gold);
+  box-shadow:
+    0 0 0 1px var(--brand-alpha-medium),
+    0 0 24px var(--brand-alpha-medium);
+}
+
+.dc-video__play svg {
+  width: 20px;
+  height: 20px;
+}
+
+.dc-video__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px 16px;
+}
+
+.dc-video__title {
+  font-family: var(--dc-font-display);
+  font-size: 0.875rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--neutral-on-background-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dc-video__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--dc-font-mono);
+  font-size: 0.625rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--neutral-on-background-weak);
+  min-width: 0;
+}
+
+.dc-video__pill {
+  padding: 2px 6px;
+  border: var(--dc-hairline);
+  border-radius: 4px;
+  white-space: nowrap;
+  color: var(--neutral-on-background-medium);
+}
+
+.dc-video__pill--accent {
+  border-color: var(--brand-border-medium);
+  color: var(--dc-gold);
+  background: var(--brand-alpha-weak);
+}
+
+.dc-video__sep {
+  width: 3px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--neutral-on-background-weak);
+  opacity: 0.4;
+  flex-shrink: 0;
+}
+
+.dc-video__size {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

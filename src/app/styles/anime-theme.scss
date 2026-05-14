@@ -1,0 +1,613 @@
+/**
+ * Nyrima Cinematic — Neon Pink × Neon Blue color system.
+ *
+ * Two moods, mapped to the existing data-theme="light|dark" attribute Once UI
+ * already drives:
+ *
+ *   dark   → "Midnight"   — deep navy surfaces, neon pink brand, cyan accent.
+ *                           Dark glossy movie-lobby aesthetic.
+ *
+ *   light  → "Pearl"      — icy blush base, darker pink/blue variants for
+ *                           readable text, icons, and borders.
+ *
+ * Token strategy:
+ *   - `--neutral-*` → grayscale ink scale (background → text)
+ *   - `--brand-*`  → neon pink (primary brand)
+ *   - `--accent-*` → neon cyan (highlight accent)
+ *   - `--dc-*`     → custom tokens mapped to new palette for backwards
+ *                    compatibility with existing component files.
+ */
+
+/* ───────────────────────── Light: Pearl ──────────────────────────────── */
+
+:root {
+  /* Radii — three steps, used everywhere */
+  --ny-radius-sm: 8px;
+  --ny-radius-md: 12px;
+  --ny-radius-lg: 18px;
+
+  /* Cinematic dark scrim — used over backdrops/posters regardless of theme */
+  --ny-scrim-medium: rgba(6, 8, 20, 0.4);
+  --ny-scrim-strong: rgba(6, 8, 20, 0.6);
+
+  /* Hairline on top of media (always pearl, regardless of theme) */
+  --ny-ink-alpha-weak: rgba(248, 247, 255, 0.12);
+
+  /* Hover elevations */
+  --ny-shadow-card-hover:
+    0 0 0 1px var(--hairline-pink),
+    0 12px 40px -12px rgba(0, 0, 0, 0.5);
+  --ny-shadow-hero-hover:
+    0 0 0 1px var(--hairline-pink),
+    0 16px 48px -16px rgba(0, 0, 0, 0.6);
+}
+
+:root[data-theme="light"],
+:root:not([data-theme="dark"]) {
+  /* Page + surfaces — icy blush base */
+  --page-background: #fbf8ff;
+  --overlay-background: rgba(251, 248, 255, 0.78);
+
+  --surface-background: #ffffff;
+  --surface-background-strong: #f3f0ff;
+  --surface-background-weak: #fdfbff;
+
+  /* Foreground (neutral) — deep ink with a cool violet undertone */
+  --neutral-on-background-strong: #171022;
+  --neutral-on-background-medium: rgba(23, 16, 34, 0.7);
+  --neutral-on-background-weak: rgba(23, 16, 34, 0.5);
+  --neutral-on-solid-strong: #fbf8ff;
+  --neutral-on-solid-medium: #ffffff;
+
+  --neutral-background-strong: rgba(23, 16, 34, 0.12);
+  --neutral-background-medium: rgba(23, 16, 34, 0.07);
+  --neutral-background-weak: rgba(23, 16, 34, 0.04);
+  --neutral-alpha-strong: rgba(23, 16, 34, 0.12);
+  --neutral-alpha-medium: rgba(23, 16, 34, 0.07);
+  --neutral-alpha-weak: rgba(23, 16, 34, 0.04);
+
+  /* Hairline borders */
+  --neutral-border-strong: rgba(23, 16, 34, 0.14);
+  --neutral-border-medium: rgba(23, 16, 34, 0.08);
+  --neutral-border-weak: rgba(23, 16, 34, 0.05);
+
+  /* Brand — darker pink for readability on light backgrounds */
+  --brand-on-background-strong: #a21caf;
+  --brand-on-background-medium: #d946ef;
+  --brand-on-background-weak: #f0abfc;
+  --brand-on-solid-strong: #fbf8ff;
+  --brand-on-solid-medium: #ffffff;
+  --brand-on-solid-weak: #f3f0ff;
+
+  --brand-background-strong: #d946ef;
+  --brand-background-medium: #c026d3;
+  --brand-background-weak: #a21caf;
+  --brand-solid-strong: #d946ef;
+  --brand-solid-medium: #c026d3;
+  --brand-solid-weak: #a21caf;
+
+  --brand-alpha-strong: rgba(217, 70, 239, 0.24);
+  --brand-alpha-medium: rgba(217, 70, 239, 0.12);
+  --brand-alpha-weak: rgba(217, 70, 239, 0.06);
+  --brand-border-strong: rgba(217, 70, 239, 0.3);
+  --brand-border-medium: rgba(217, 70, 239, 0.16);
+  --brand-border-weak: rgba(217, 70, 239, 0.08);
+
+  /* Accent — cyan, tuned down for light backgrounds */
+  --accent-on-background-strong: #0369a1;
+  --accent-on-background-medium: #0284c7;
+  --accent-on-background-weak: #7dd3fc;
+  --accent-on-solid-strong: #fbf8ff;
+  --accent-on-solid-medium: #ffffff;
+
+  --accent-background-strong: #0284c7;
+  --accent-background-medium: #0369a1;
+  --accent-background-weak: #075985;
+  --accent-solid-strong: #0284c7;
+  --accent-solid-medium: #0369a1;
+  --accent-solid-weak: #075985;
+
+  --accent-alpha-strong: rgba(2, 132, 199, 0.2);
+  --accent-alpha-medium: rgba(2, 132, 199, 0.1);
+  --accent-alpha-weak: rgba(2, 132, 199, 0.05);
+  --accent-border-strong: rgba(2, 132, 199, 0.28);
+  --accent-border-medium: rgba(2, 132, 199, 0.14);
+  --accent-border-weak: rgba(2, 132, 199, 0.07);
+
+  /* Status */
+  --warning-solid-strong: #b45309;
+  --danger-solid-strong: #b91c1c;
+  --success-solid-strong: #15803d;
+  --info-solid-strong: #0369a1;
+
+  /* Custom Nyrima tokens — mapped to new palette for backwards compatibility */
+  --dc-gold: #d946ef;
+  --dc-gold-soft: #f0abfc;
+  --dc-sakura: #d946ef;
+  --dc-hud-cyan: #0284c7;
+  --dc-ink: #171022;
+  --dc-paper: #fbf8ff;
+
+  /* Hairline tokens */
+  --dc-hairline: 1px solid rgba(23, 16, 34, 0.08);
+  --dc-hairline-strong: 1px solid rgba(23, 16, 34, 0.14);
+
+  /* New cinematic hairlines */
+  --hairline-pink: rgba(217, 70, 239, 0.2);
+  --hairline-blue: rgba(2, 132, 199, 0.18);
+
+  /* Neon glow — soft mixed bloom */
+  --dc-glow:
+    0 0 0 1px rgba(217, 70, 239, 0.1), 0 8px 32px -16px rgba(23, 16, 34, 0.18);
+}
+
+/* ───────────────────────── Dark: Midnight (primary mood) ───────────────── */
+
+:root[data-theme="dark"] {
+  /* Page + surfaces — deep navy */
+  --page-background: #060814;
+  --overlay-background: rgba(6, 8, 20, 0.78);
+
+  --surface-background: #0d1022;
+  --surface-background-strong: #141832;
+  --surface-background-weak: #080b18;
+
+  /* Foreground — high-contrast pearl white */
+  --neutral-on-background-strong: #f8f7ff;
+  --neutral-on-background-medium: rgba(248, 247, 255, 0.72);
+  --neutral-on-background-weak: rgba(248, 247, 255, 0.5);
+  --neutral-on-solid-strong: #060814;
+  --neutral-on-solid-medium: #0d1022;
+
+  --neutral-background-strong: rgba(248, 247, 255, 0.14);
+  --neutral-background-medium: rgba(248, 247, 255, 0.08);
+  --neutral-background-weak: rgba(248, 247, 255, 0.04);
+  --neutral-alpha-strong: rgba(248, 247, 255, 0.14);
+  --neutral-alpha-medium: rgba(248, 247, 255, 0.08);
+  --neutral-alpha-weak: rgba(248, 247, 255, 0.04);
+
+  /* Hairline borders */
+  --neutral-border-strong: rgba(248, 247, 255, 0.14);
+  --neutral-border-medium: rgba(248, 247, 255, 0.08);
+  --neutral-border-weak: rgba(248, 247, 255, 0.05);
+
+  /* Brand — neon pink */
+  --brand-on-background-strong: #ff9bea;
+  --brand-on-background-medium: #ff4fd8;
+  --brand-on-background-weak: #d946ef;
+  --brand-on-solid-strong: #060814;
+  --brand-on-solid-medium: #0d1022;
+  --brand-on-solid-weak: #141832;
+
+  --brand-background-strong: #ff4fd8;
+  --brand-background-medium: #d946ef;
+  --brand-background-weak: #a21caf;
+  --brand-solid-strong: #ff9bea;
+  --brand-solid-medium: #ff4fd8;
+  --brand-solid-weak: #d946ef;
+
+  --brand-alpha-strong: rgba(255, 79, 216, 0.28);
+  --brand-alpha-medium: rgba(255, 79, 216, 0.14);
+  --brand-alpha-weak: rgba(255, 79, 216, 0.07);
+  --brand-border-strong: rgba(255, 79, 216, 0.36);
+  --brand-border-medium: rgba(255, 79, 216, 0.18);
+  --brand-border-weak: rgba(255, 79, 216, 0.1);
+
+  /* Accent — neon cyan */
+  --accent-on-background-strong: #7dd3fc;
+  --accent-on-background-medium: #22d3ee;
+  --accent-on-background-weak: #0ea5e9;
+  --accent-on-solid-strong: #060814;
+  --accent-on-solid-medium: #0d1022;
+
+  --accent-background-strong: #22d3ee;
+  --accent-background-medium: #0ea5e9;
+  --accent-background-weak: #0369a1;
+  --accent-solid-strong: #7dd3fc;
+  --accent-solid-medium: #22d3ee;
+  --accent-solid-weak: #0ea5e9;
+
+  --accent-alpha-strong: rgba(34, 211, 238, 0.24);
+  --accent-alpha-medium: rgba(34, 211, 238, 0.12);
+  --accent-alpha-weak: rgba(34, 211, 238, 0.06);
+  --accent-border-strong: rgba(34, 211, 238, 0.32);
+  --accent-border-medium: rgba(34, 211, 238, 0.16);
+  --accent-border-weak: rgba(34, 211, 238, 0.08);
+
+  /* Status */
+  --warning-solid-strong: #f59e0b;
+  --danger-solid-strong: #ef4444;
+  --success-solid-strong: #22c55e;
+  --info-solid-strong: #38bdf8;
+
+  /* Custom DC tokens — mapped to new palette for backwards compatibility */
+  --dc-gold: #ff4fd8;
+  --dc-gold-soft: #ff9bea;
+  --dc-sakura: #ff4fd8;
+  --dc-hud-cyan: #22d3ee;
+  --dc-ink: #f8f7ff;
+  --dc-paper: #060814;
+
+  /* Hairline tokens */
+  --dc-hairline: 1px solid rgba(248, 247, 255, 0.08);
+  --dc-hairline-strong: 1px solid rgba(248, 247, 255, 0.14);
+
+  /* New cinematic hairlines */
+  --hairline-pink: rgba(255, 79, 216, 0.18);
+  --hairline-blue: rgba(34, 211, 238, 0.16);
+
+  /* Neon glow — mixed pink/blue bloom */
+  --dc-glow:
+    0 0 0 1px rgba(255, 79, 216, 0.12), 0 8px 32px -16px rgba(0, 0, 0, 0.6);
+}
+
+/* ───────────────────────── Page background + texture ───────────────────── */
+
+body {
+  background: var(--page-background);
+  background-attachment: fixed;
+  font-family: var(--dc-font-body);
+  font-feature-settings: "ss01", "cv11", "tnum";
+  letter-spacing: -0.005em;
+}
+
+/* Two subtle radial blooms — neon pink top-left, neon blue bottom-right. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(
+      800px 600px at 0% 0%,
+      rgba(255, 79, 216, 0.1) 0%,
+      transparent 60%
+    ),
+    radial-gradient(
+      800px 600px at 100% 100%,
+      rgba(34, 211, 238, 0.08) 0%,
+      transparent 60%
+    );
+}
+
+/* Headings wear the display font with tight, premium tracking. */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+[class*="display-"],
+[class*="heading-"] {
+  font-family: var(--dc-font-display) !important;
+  letter-spacing: -0.025em;
+  font-weight: 500;
+}
+
+[class*="display-"] {
+  letter-spacing: -0.04em;
+  font-weight: 500;
+}
+
+/* Tabular numerals everywhere a number appears */
+[class*="body-"],
+[class*="heading-"],
+[class*="display-"] {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ───────────────────────── Utility classes ─────────────────────────────── */
+
+.dc-glow {
+  box-shadow: var(--dc-glow);
+}
+
+.dc-tracker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--neutral-on-background-weak);
+}
+
+.dc-tracker--accent {
+  color: var(--brand-on-background-medium);
+}
+
+.dc-kana {
+  display: inline-block;
+  font-family: var(--dc-font-kana);
+  font-size: 0.6875rem;
+  letter-spacing: 0.24em;
+  color: var(--neutral-on-background-weak);
+  opacity: 0.7;
+}
+
+.dc-section {
+  display: flex;
+  align-items: baseline;
+  gap: 0.875rem;
+  padding-bottom: 0.875rem;
+  border-bottom: var(--dc-hairline);
+}
+
+.dc-section__index {
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  color: var(--brand-on-background-strong);
+  text-transform: uppercase;
+}
+
+.dc-section__title {
+  font-family: var(--dc-font-display);
+  font-size: 1rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--neutral-on-background-strong);
+}
+
+.dc-section__meta {
+  margin-left: auto;
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  color: var(--neutral-on-background-weak);
+  text-transform: uppercase;
+}
+
+.dc-section-title {
+  position: relative;
+  padding-left: 14px;
+  font-family: var(--dc-font-display);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.dc-section-title::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.2em;
+  bottom: 0.2em;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--brand-solid-medium);
+  box-shadow: 0 0 12px var(--brand-alpha-medium);
+}
+
+.dc-hairline {
+  height: 1px;
+  width: 100%;
+  background: var(--neutral-border-medium);
+}
+
+.dc-card-glow {
+  transition:
+    transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    border-color 200ms ease,
+    background 200ms ease,
+    box-shadow 200ms ease;
+}
+
+.dc-card-glow:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent-border-medium) !important;
+  background: var(--surface-background-strong) !important;
+  box-shadow:
+    0 0 0 1px var(--hairline-pink),
+    0 12px 40px -12px rgba(0, 0, 0, 0.5);
+}
+
+/* Primary buttons — pink-to-blue gradient. */
+button[class*="primary"],
+[role="button"][class*="primary"] {
+  background: linear-gradient(
+    135deg,
+    var(--brand-background-strong),
+    var(--accent-background-strong)
+  );
+  border: none;
+  color: var(--neutral-on-solid-strong);
+}
+
+:root[data-theme="light"] button[class*="primary"],
+:root[data-theme="light"] [role="button"][class*="primary"] {
+  background: linear-gradient(
+    135deg,
+    var(--brand-background-strong),
+    var(--accent-background-strong)
+  );
+}
+
+.dc-mono {
+  font-family: var(--dc-font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.dc-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--neutral-on-background-weak);
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.dc-status-dot--ok {
+  background: var(--success-solid-strong);
+  box-shadow: 0 0 8px var(--success-solid-strong);
+}
+
+.dc-status-dot--warn {
+  background: var(--warning-solid-strong);
+  box-shadow: 0 0 8px var(--warning-solid-strong);
+}
+
+.dc-status-dot--err {
+  background: var(--danger-solid-strong);
+  box-shadow: 0 0 8px var(--danger-solid-strong);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--neutral-alpha-medium);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--neutral-alpha-strong);
+}
+
+::selection {
+  background: var(--brand-alpha-strong);
+  color: var(--neutral-on-background-strong);
+}
+
+/* ───────────────────────── Shimmer (skeleton loading) ──────────────────── */
+
+@keyframes ny-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* Surface-tinted shimmer for card/hero placeholders. */
+.ny-shimmer {
+  background: linear-gradient(
+    110deg,
+    var(--surface-background-strong) 30%,
+    var(--surface-background) 50%,
+    var(--surface-background-strong) 70%
+  );
+  background-size: 200% 100%;
+  animation: ny-shimmer 1.4s infinite linear;
+}
+
+/* Ink-tinted shimmer for skeleton bars on top of a backdrop. */
+.ny-shimmer--ink {
+  background: linear-gradient(
+    110deg,
+    rgba(248, 247, 255, 0.08) 30%,
+    rgba(248, 247, 255, 0.14) 50%,
+    rgba(248, 247, 255, 0.08) 70%
+  );
+  background-size: 200% 100%;
+  animation: ny-shimmer 1.4s infinite linear;
+}
+
+/* ───────────────────────── Focus rings ─────────────────────────────────── */
+
+/* Apply this class to any interactive surface to get the brand focus ring. */
+.ny-focusable:focus-visible {
+  outline: 2px solid var(--brand-border-strong);
+  outline-offset: 2px;
+}
+
+/* Catch-all: keyboard focus on buttons/role=button gets a visible ring. */
+button:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid var(--brand-border-strong);
+  outline-offset: 2px;
+}
+
+/* ───────────────────────── Generic buttons ─────────────────────────────── */
+
+.ny-btn {
+  appearance: none;
+  border: var(--dc-hairline);
+  background: var(--surface-background);
+  color: var(--neutral-on-background-medium);
+  border-radius: var(--ny-radius-sm);
+  padding: 8px 14px;
+  font-family: var(--dc-font-display);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    opacity 160ms ease;
+}
+
+.ny-btn:hover {
+  background: var(--surface-background-strong);
+  border-color: var(--neutral-border-strong);
+  color: var(--neutral-on-background-strong);
+}
+
+.ny-btn--primary {
+  background: linear-gradient(
+    135deg,
+    var(--brand-background-strong),
+    var(--accent-background-strong)
+  );
+  border: none;
+  color: var(--neutral-on-solid-strong);
+}
+
+.ny-btn--primary:hover {
+  opacity: 0.92;
+}
+
+.ny-btn--ghost {
+  background: transparent;
+  border-color: transparent;
+}
+
+.ny-btn--ghost:hover {
+  background: var(--neutral-alpha-weak);
+}
+
+/* ───────────────────────── Poster grid ─────────────────────────────────── */
+
+/* Shared responsive ladder used by PosterCard grid, PosterSkeleton, and
+   SuggestionList so they can't drift. Override --ny-cols to taste. */
+.ny-poster-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--ny-cols, 5), minmax(0, 1fr));
+  gap: 16px;
+}
+
+@media (max-width: 1200px) {
+  .ny-poster-grid {
+    grid-template-columns: repeat(var(--ny-cols-lg, 4), minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 960px) {
+  .ny-poster-grid {
+    grid-template-columns: repeat(var(--ny-cols-md, 3), minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .ny-poster-grid {
+    grid-template-columns: repeat(var(--ny-cols-sm, 2), minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 400px) {
+  .ny-poster-grid {
+    grid-template-columns: 1fr;
+  }
+}

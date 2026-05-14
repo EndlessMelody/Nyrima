@@ -1,0 +1,62 @@
+.ny-hero-skeleton {
+  position: relative;
+  border-radius: var(--ny-radius-lg);
+  overflow: hidden;
+  aspect-ratio: 16 / 7;
+  background: var(--surface-background-strong);
+  border: 1px solid var(--neutral-border-weak);
+}
+
+@media (max-width: 720px) {
+  .ny-hero-skeleton {
+    aspect-ratio: 16 / 9;
+  }
+}
+
+.ny-hero-skeleton__backdrop {
+  position: absolute;
+  inset: 0;
+}
+
+.ny-hero-skeleton__content {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 32px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: linear-gradient(to top, var(--ny-scrim-strong), transparent);
+}
+
+@media (max-width: 720px) {
+  .ny-hero-skeleton__content {
+    padding: 20px 24px;
+  }
+}
+
+.ny-hero-skeleton__eyebrow {
+  height: 12px;
+  width: 120px;
+  border-radius: 4px;
+}
+
+.ny-hero-skeleton__title {
+  height: 36px;
+  width: 60%;
+  border-radius: 6px;
+}
+
+.ny-hero-skeleton__meta {
+  height: 16px;
+  width: 40%;
+  border-radius: 4px;
+}
+
+.ny-hero-skeleton__actions {
+  height: 36px;
+  width: 200px;
+  border-radius: var(--ny-radius-sm);
+  margin-top: 8px;
+}

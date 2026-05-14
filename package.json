@@ -1,0 +1,40 @@
+{
+  "name": "nyrima",
+  "private": true,
+  "version": "0.0.1",
+  "description": "A personal video cinema that lives on Google Drive. Built as a Chrome Extension.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "icons": "node scripts/make-icons.mjs",
+    "prebuild": "node scripts/make-icons.mjs",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "lint": "tsc --noEmit",
+    "zip": "node scripts/zip.mjs"
+  },
+  "dependencies": {
+    "@fontsource/geist-mono": "^5.2.7",
+    "@fontsource/geist-sans": "^5.2.5",
+    "@fontsource/klee-one": "^5.2.8",
+    "@fontsource/m-plus-rounded-1c": "^5.2.10",
+    "@fontsource/zen-kaku-gothic-new": "^5.2.7",
+    "@once-ui-system/core": "^1.6.4",
+    "classnames": "^2.5.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.2",
+    "zustand": "^4.5.5"
+  },
+  "devDependencies": {
+    "@crxjs/vite-plugin": "^2.0.0-beta.28",
+    "@types/chrome": "^0.0.270",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "sass": "^1.79.3",
+    "sharp": "^0.34.5",
+    "typescript": "^5.6.2",
+    "vite": "^5.4.6"
+  }
+}

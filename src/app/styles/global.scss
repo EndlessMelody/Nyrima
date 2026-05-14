@@ -1,0 +1,82 @@
+/* Global app styles. Once UI CSS is imported by AppProviders. */
+
+@use "./fonts.scss";
+@use "./anime-theme.scss";
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  color: var(--neutral-on-background-strong, #f5e9d6);
+  font-family: var(--dc-font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+#root {
+  position: relative;
+  z-index: 2;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  font: inherit;
+}
+
+/* Custom scrollbar — uses theme tokens so it adapts to the active palette */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--neutral-alpha-medium);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--neutral-alpha-strong);
+}
+
+/* Page wrapper used by AppShell — 1280px max-width with generous vertical */
+/* breathing room. Keep horizontal padding modest so hairline dividers feel */
+/* like they extend across the full layout.                                  */
+.dc-page {
+  min-height: 100vh;
+  padding: 48px 32px 96px;
+  max-width: 1280px;
+  margin: 0 auto;
+  position: relative;
+  z-index: 1;
+}
+
+@media (max-width: 720px) {
+  .dc-page {
+    padding: 32px 20px 64px;
+  }
+}
+
+.dc-page__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+}

@@ -1,0 +1,23 @@
+.ny-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ny-suggestions__heading {
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--neutral-on-background-weak);
+  margin: 0;
+}
+
+/* One denser column at every breakpoint than the main library grid. */
+.ny-suggestions__grid {
+  --ny-cols: 6;
+  --ny-cols-lg: 5;
+  --ny-cols-md: 4;
+  --ny-cols-sm: 3;
+}
