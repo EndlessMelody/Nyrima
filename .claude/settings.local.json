@@ -4,7 +4,8 @@
       "Bash(npm run *)",
       "PowerShell(& npx --no-install tsc --noEmit 2>&1)",
       "PowerShell($ErrorActionPreference='Continue')",
-      "PowerShell(& node \".\\\\node_modules\\\\typescript\\\\bin\\\\tsc\" --noEmit 2>&1)"
+      "PowerShell(& node \".\\\\node_modules\\\\typescript\\\\bin\\\\tsc\" --noEmit 2>&1)",
+      "PowerShell($ErrorActionPreference='Continue'; node \".\\\\node_modules\\\\typescript\\\\bin\\\\tsc\" --noEmit; \"TSC=$LASTEXITCODE\"; if \\($LASTEXITCODE -eq 0\\) { node \".\\\\node_modules\\\\vite\\\\bin\\\\vite.js\" build 2>&1 | Select-Object -Last 4; \"BUILD=$LASTEXITCODE\" })"
     ]
   }
 }

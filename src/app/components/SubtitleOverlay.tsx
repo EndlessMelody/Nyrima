@@ -37,20 +37,10 @@ export function SubtitleOverlay({
   const prevActiveRef = useRef<Set<string>>(new Set());
 
   // Keep a sorted copy for binary search
-  const sorted = useMemo(() => {
-    const arr = [...cues].sort((a, b) => a.start - b.start);
-    return arr;
-  }, [cues]);
-
-  // Debug: log when cues prop changes
-  useEffect(() => {
-    /* debug */ console.log(
-      "[SubOverlay] cues:",
-      cues.length,
-      "sorted:",
-      sorted.length,
-    );
-  }, [cues, sorted]);
+  const sorted = useMemo(
+    () => [...cues].sort((a, b) => a.start - b.start),
+    [cues],
+  );
 
   useEffect(() => {
     function tick() {
@@ -69,24 +59,6 @@ export function SubtitleOverlay({
         } else if (cue.start > t) {
           break;
         }
-      }
-
-      // Debug: log every 2 seconds
-      if (Math.floor(t) % 2 === 0) {
-        /* debug */ console.log(
-          "[SubOverlay] t=",
-          t.toFixed(1),
-          "first cue:",
-          sorted[0]
-            ? `${sorted[0].start.toFixed(1)}-${sorted[0].end.toFixed(1)}`
-            : "n/a",
-          "last cue:",
-          sorted[sorted.length - 1]
-            ? `${sorted[sorted.length - 1].start.toFixed(1)}-${sorted[sorted.length - 1].end.toFixed(1)}`
-            : "n/a",
-          "active:",
-          nowActive.length,
-        );
       }
 
       setActive((prev) => {

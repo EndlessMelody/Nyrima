@@ -389,6 +389,34 @@ export function PlayerPage() {
         setErrorReason("unknown");
         return;
       }
+
+      // SRC_NOT_SUPPORTED on a direct-URL stream usually means Drive returned
+      // 403 to the bare key request (e.g. a private file the user owns but
+      // hasn't shared "Anyone with the link"). authedFetch can still reach it
+      // via OAuth/cookies, so re-buffer the bytes as a blob URL before giving
+      // up. If that also fails, surface the typed DriveAccessError.
+      if (
+        code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED &&
+        !isMkvMse &&
+        !isMkvNative
+      ) {
+        try {
+          setBufferingBlob(true);
+          const res = await authedFetch(buildMediaUrl(fileId));
+          const blob = await res.blob();
+          const u = URL.createObjectURL(blob);
+          if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
+          blobUrlRef.current = u;
+          setStreamUrl(u);
+          setBufferingBlob(false);
+          return;
+        } catch (e) {
+          setBufferingBlob(false);
+          reportError(e);
+          return;
+        }
+      }
+
       try {
         const res = await authedFetch(buildMediaUrl(fileId), {
           headers: { Range: "bytes=0-0" },

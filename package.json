@@ -19,7 +19,7 @@
     "@fontsource/klee-one": "^5.2.8",
     "@fontsource/m-plus-rounded-1c": "^5.2.10",
     "@fontsource/zen-kaku-gothic-new": "^5.2.7",
-    "@once-ui-system/core": "^1.6.4",
+    "@once-ui-system/core": "1.6.4",
     "classnames": "^2.5.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

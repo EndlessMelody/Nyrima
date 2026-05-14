@@ -23,6 +23,7 @@ import { FolderCard } from "../components/FolderCard";
 import { LobbyHero } from "../components/LobbyHero";
 import { ContinueWatchingRow } from "../components/ContinueWatchingRow";
 import { SetupAccessDialog } from "../components/SetupAccessDialog";
+import { WelcomeBlock } from "../components/WelcomeBlock";
 import { extractFolderId } from "@shared/parse-folder-url";
 import { useNavigate } from "react-router-dom";
 import { hasApiKey } from "../services/api-key";
@@ -125,8 +126,6 @@ export function LandingPage() {
     navigate(`/library/${encodeURIComponent(id)}`);
   }
 
-  const showSetupBanner = keyConfigured === false;
-
   // Build DriveFile stubs from playback positions for ContinueWatchingRow.
   const continueFiles = useMemo<DriveFile[]>(
     () =>
@@ -148,29 +147,11 @@ export function LandingPage() {
 
   return (
     <div className="ny-landing">
-      {showSetupBanner && (
-        <div className="ny-landing__banner">
-          <div className="ny-landing__banner-body">
-            <span className="dc-tracker dc-tracker--accent">
-              Getting Started
-            </span>
-            <span className="ny-landing__banner-title">
-              Create your Nyrima folder on Google Drive
-            </span>
-            <span className="ny-landing__banner-sub">
-              Create a folder named <strong>"Nyrima"</strong> in your Drive,
-              share it publicly, and pair an API key. Takes about 2 minutes.
-            </span>
-          </div>
-          <button
-            type="button"
-            className="ny-btn ny-btn--primary"
-            onClick={() => setSetupOpen(true)}
-          >
-            Setup guide
-          </button>
-        </div>
-      )}
+      <WelcomeBlock
+        keyConfigured={keyConfigured}
+        onOpenFolder={() => setOpen(true)}
+        onOpenSetup={() => setSetupOpen(true)}
+      />
 
       {featured && (
         <LobbyHero

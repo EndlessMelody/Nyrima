@@ -88,53 +88,6 @@
   line-height: 1.6;
 }
 
-/* ───────────────────────── Setup banner ────────────────────────────────── */
-
-.ny-landing__banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 18px 22px;
-  border: 1px solid var(--brand-border-medium);
-  border-radius: var(--ny-radius-md);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--brand-alpha-weak) 70%, var(--surface-background))
-      0%,
-    var(--surface-background) 100%
-  );
-}
-
-@media (max-width: 720px) {
-  .ny-landing__banner {
-    flex-direction: column;
-    align-items: stretch;
-  }
-}
-
-.ny-landing__banner-body {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-.ny-landing__banner-title {
-  font-family: var(--dc-font-display);
-  font-size: 0.9375rem;
-  font-weight: 500;
-  letter-spacing: -0.01em;
-  color: var(--neutral-on-background-strong);
-}
-
-.ny-landing__banner-sub {
-  font-family: var(--dc-font-body);
-  font-size: 0.8125rem;
-  line-height: 1.55;
-  color: var(--neutral-on-background-medium);
-  max-width: 60ch;
-}
-
-/* .ny-btn / .ny-btn--primary / .ny-btn--ghost are defined globally in
+/* WelcomeBlock supersedes the legacy setup banner; styles live in
+   src/app/components/WelcomeBlock.scss. Generic buttons (.ny-btn*) live in
    anime-theme.scss so every page shares one source of truth. */
