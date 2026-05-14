@@ -26,6 +26,9 @@
     "react-router-dom": "^6.26.2",
     "zustand": "^4.5.5"
   },
+  "overrides": {
+    "sharp": "^0.34.5"
+  },
   "devDependencies": {
     "@crxjs/vite-plugin": "^2.0.0-beta.28",
     "@types/chrome": "^0.0.270",
