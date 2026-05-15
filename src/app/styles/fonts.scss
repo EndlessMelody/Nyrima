@@ -34,6 +34,18 @@
   --dc-font-kana:
     "Geist Mono", "Zen Kaku Gothic New", "Hiragino Kaku Gothic ProN",
     "Yu Gothic", sans-serif;
+
+  /* Subtitle: anime-fansub voice — system Comic Sans MS where present
+     (Windows/macOS, full Vietnamese coverage), Comic Neue (bundled) as the
+     cross-OS clone. Itim is intentionally NOT in this stack: it has a more
+     cursive/handwritten character that "leaks" through whenever the ASS
+     source flags a cue italic (Comic Sans MS lacks an italic face), making
+     the rendering look like Itim instead of Comic Sans. We let
+     `font-synthesis: style weight` in SubtitleOverlay.scss synthesize the
+     italic on Comic Sans / Comic Neue instead. */
+  --dc-font-subtitle:
+    "Comic Sans MS", "Chalkboard SE", "Marker Felt", "Comic Neue",
+    var(--dc-font-body);
 }
 
 /* Hand the resolved families to Once UI's typography tokens so every */

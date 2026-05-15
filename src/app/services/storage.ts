@@ -137,8 +137,24 @@ export function isInProgress(
 // --- Settings --------------------------------------------------------------
 
 export async function getSettings(): Promise<AppSettings> {
-  const stored = await get<Partial<AppSettings>>(STORAGE_KEYS.SETTINGS);
-  return { ...DEFAULT_SETTINGS, ...(stored ?? {}) };
+  const stored = await get<Partial<AppSettings> & { subtitleFont?: string }>(
+    STORAGE_KEYS.SETTINGS,
+  );
+  const migrated = stored ? migrateSettings(stored) : {};
+  return { ...DEFAULT_SETTINGS, ...migrated };
+}
+
+/** Fold the pre-2026-05-15 font-preset keys (`comic`, `geist`) into the new
+ *  picker labels so users who hydrated with the old shape don't get reset to
+ *  defaults. */
+function migrateSettings(
+  s: Partial<AppSettings> & { subtitleFont?: string },
+): Partial<AppSettings> {
+  const next: Partial<AppSettings> & { subtitleFont?: string } = { ...s };
+  const legacy = next.subtitleFont as string | undefined;
+  if (legacy === "comic") next.subtitleFont = "anime-brush";
+  else if (legacy === "geist") next.subtitleFont = "clean-sans";
+  return next as Partial<AppSettings>;
 }
 
 export async function saveSettings(

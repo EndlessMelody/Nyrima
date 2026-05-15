@@ -101,27 +101,57 @@
 }
 
 // ---------------------------------------------------------------------------
-// Center resume button (shows when paused or before first play)
+// Center playback cluster — skip-back / play-pause / skip-forward.
+// Sits absolutely over the video. Backdrop only intensifies while paused
+// (where it doubles as the "your video is waiting" cue) so the playing-state
+// HUD doesn't dim the actual frame.
 // ---------------------------------------------------------------------------
 .dc-vlc__center {
   position: absolute;
-  inset: 0;
+  // Stop short of the subtitle bottom zone (cues sit at ~10 % of the
+  // overlay from the bottom edge) so the play knob never sits on top of
+  // a line of dialogue.
+  inset: 0 0 18% 0;
   z-index: 2;
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 32px;
+  pointer-events: none; // child buttons re-enable; turned back off below
+                       // when the cluster is faded out
+  opacity: 0;
+  transform: translateY(6px);
+  transition:
+    opacity 220ms ease,
+    transform 220ms ease;
+
+  > * {
+    pointer-events: auto;
+  }
+
+  &.is-on {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  &:not(.is-on) > * {
+    pointer-events: none;
+  }
+}
+
+.dc-vlc:not(.is-playing) .dc-vlc__center.is-on {
   background: radial-gradient(
     ellipse at center,
     rgba(0, 0, 0, 0.25) 0%,
     rgba(0, 0, 0, 0.55) 100%
   );
-  border: 0;
-  padding: 0;
-  cursor: pointer;
-  transition: opacity 200ms ease;
 }
 
 .dc-vlc__center-knob {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
   width: 88px;
   height: 88px;
   border-radius: 999px;
@@ -137,14 +167,82 @@
     0 20px 48px -8px rgba(212, 183, 118, 0.45),
     0 0 0 1px rgba(255, 255, 255, 0.18) inset,
     0 0 60px rgba(212, 183, 118, 0.3);
-  animation: dc-vlc-breathe 2.4s ease-in-out infinite;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease;
 
   svg {
     width: 36px;
     height: 36px;
     fill: #1a1408;
     filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
-    margin-left: 4px;
+    // Center the play triangle visually; pause icon doesn't need the offset.
+  }
+
+  &:hover {
+    transform: scale(1.04);
+    box-shadow:
+      0 22px 52px -8px rgba(212, 183, 118, 0.55),
+      0 0 0 1px rgba(255, 255, 255, 0.22) inset,
+      0 0 70px rgba(212, 183, 118, 0.4);
+  }
+}
+
+// Only breathe while paused — it's a "press me" affordance, not background
+// motion that should follow the user through playback.
+.dc-vlc:not(.is-playing) .dc-vlc__center-knob {
+  animation: dc-vlc-breathe 2.4s ease-in-out infinite;
+}
+
+// Skip ±N buttons that flank the play knob. Same gold language but smaller
+// and outline-only so the play knob keeps visual primacy.
+.dc-vlc__center-skip {
+  appearance: none;
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  border: 1.5px solid rgba(212, 183, 118, 0.7);
+  background: rgba(20, 16, 8, 0.55);
+  color: rgba(231, 207, 152, 0.95);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  backdrop-filter: blur(6px);
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease;
+
+  svg {
+    width: 26px;
+    height: 26px;
+    fill: currentColor;
+  }
+
+  .dc-vlc__skip-num {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    font-family: var(--dc-font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: currentColor;
+    transform: translateY(2px);
+    pointer-events: none;
+  }
+
+  &:hover {
+    background: rgba(40, 30, 12, 0.7);
+    border-color: rgba(231, 207, 152, 0.95);
+    color: #f4dca0;
+    transform: scale(1.05);
+  }
+
+  &:active {
+    transform: scale(0.96);
   }
 }
 
@@ -325,6 +423,34 @@
   font-family: var(--dc-font-mono);
   font-size: 12px;
   letter-spacing: 0.05em;
+}
+
+/* Skip-back / skip-forward in the bottom bar. Same icon language as the
+   center cluster's `.dc-vlc__center-skip` but in the bar's compact size,
+   with a subtle sakura-pink halo on hover to match the player's
+   gold + neon-pink palette. */
+.dc-vlc__btn--skip {
+  position: relative;
+
+  .dc-vlc__btn-skip-num {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    font-family: var(--dc-font-mono);
+    font-size: 9px;
+    font-weight: 600;
+    color: inherit;
+    transform: translateY(2px);
+    pointer-events: none;
+    opacity: 0.85;
+  }
+
+  &:hover {
+    background: rgba(231, 64, 116, 0.1);
+    color: #f4dca0;
+    box-shadow: 0 0 14px rgba(231, 64, 116, 0.28);
+  }
 }
 
 .dc-vlc__play {
@@ -511,6 +637,157 @@
   opacity: 0.9;
   min-width: 4ch;
   text-align: center;
+}
+
+/* Settings popover — wider than the speed/sub menus to fit the slider.
+   Capped vertical extent + internal scroll so the new typography knobs
+   don't punch out of the bottom of the player chrome. */
+.dc-vlc__menu--settings {
+  min-width: 296px;
+  max-width: 320px;
+  padding: 8px;
+  max-height: min(72vh, 560px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(212, 183, 118, 0.5) transparent;
+
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: rgba(212, 183, 118, 0.4);
+    border-radius: 3px;
+  }
+}
+
+/* Subtitle preview pill — renders the current style settings against a
+   muted backdrop so users can see live what the cue will look like over
+   real video. */
+.dc-vlc__sub-preview {
+  margin: 6px 2px 4px;
+  border-radius: 8px;
+  padding: 14px 12px;
+  background:
+    radial-gradient(
+      ellipse at center,
+      rgba(231, 64, 116, 0.16) 0%,
+      rgba(10, 10, 15, 0.95) 70%
+    ),
+    repeating-linear-gradient(
+      45deg,
+      rgba(255, 255, 255, 0.02) 0 6px,
+      transparent 6px 12px
+    );
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  text-align: center;
+  overflow: hidden;
+}
+
+.dc-vlc__sub-preview-text {
+  display: inline-block;
+  font-size: 13px;
+  line-height: 1.3;
+  text-align: center;
+  paint-order: stroke fill;
+  font-synthesis: style weight;
+}
+
+/* Color chips — native <input type=color> reshelled in a pill that
+   matches the rest of the settings UI. */
+.dc-vlc__settings-row--colors {
+  gap: 10px;
+}
+
+.dc-vlc__color-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--dc-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.78);
+  cursor: pointer;
+
+  input[type="color"] {
+    appearance: none;
+    width: 28px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 6px;
+    background: transparent;
+    cursor: pointer;
+
+    &::-webkit-color-swatch-wrapper {
+      padding: 0;
+      border-radius: 5px;
+    }
+    &::-webkit-color-swatch {
+      border: 0;
+      border-radius: 5px;
+    }
+  }
+}
+
+.dc-vlc__settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px 10px;
+}
+
+.dc-vlc__settings-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--dc-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.7);
+  text-transform: uppercase;
+}
+
+.dc-vlc__settings-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.dc-vlc__settings-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.dc-vlc__pill {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.78);
+  font-family: var(--dc-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  padding: 5px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+  }
+
+  &.is-active {
+    background: rgba(212, 183, 118, 0.18);
+    border-color: rgba(212, 183, 118, 0.55);
+    color: var(--dc-gold);
+  }
 }
 
 .dc-vlc__menu-mini {

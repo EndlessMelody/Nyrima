@@ -18,6 +18,14 @@ import "@fontsource/geist-mono/500.css";
 import "@fontsource/geist-mono/600.css";
 import "@fontsource/zen-kaku-gothic-new/400.css";
 import "@fontsource/zen-kaku-gothic-new/500.css";
+// Comic Neue — FOSS Comic Sans clone for the SubtitleOverlay. Falls back to
+// system "Comic Sans MS" when present (Windows/macOS) and to Comic Neue on
+// Linux/cross-OS so the fansub-style subtitle look stays consistent. We
+// intentionally *don't* import Itim anymore: it was only ever a per-glyph
+// fallback for stacked Vietnamese diacritics, but its cursive character bled
+// into italic cues and made the look drift away from Comic Sans.
+import "@fontsource/comic-neue/700.css";
+import "@fontsource/comic-neue/700-italic.css";
 
 import "./styles/global.scss";
 

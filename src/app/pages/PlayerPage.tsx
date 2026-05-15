@@ -44,7 +44,10 @@ import {
 } from "../services/subtitles";
 import { extractMkvSubtitles } from "../services/mkv-subtitles";
 import { MkvMseController } from "../services/mkv-remux/mse-controller";
-import { normalizeMovieTitle } from "../services/title-normalizer";
+import {
+  buildDisplayTitle,
+  normalizeMovieTitle,
+} from "../services/title-normalizer";
 import {
   formatBytes,
   formatRuntime,
@@ -70,6 +73,7 @@ export function PlayerPage() {
   const navigate = useNavigate();
 
   const [file, setFile] = useState<DriveFile | null>(null);
+  const [folderName, setFolderName] = useState<string>("");
   const [subtitleTracks, setSubtitleTracks] = useState<SubtitleTrack[]>([]);
   const [folderVideos, setFolderVideos] = useState<DriveFile[]>([]);
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
@@ -121,6 +125,7 @@ export function PlayerPage() {
     setStreamUrl(null);
     setSubtitleTracks([]);
     setFolderVideos([]);
+    setFolderName("");
     setInitialSeek(0);
     if (blobUrlRef.current) {
       URL.revokeObjectURL(blobUrlRef.current);
@@ -138,10 +143,10 @@ export function PlayerPage() {
 
     async function run() {
       try {
-        // Fan-out: the video metadata, sibling listing, and resume position
-        // are independent of each other. Sequential await chains added a
-        // round-trip per request to TTFP.
-        const [video, siblingsResult, saved] = await Promise.all([
+        // Fan-out: video metadata, sibling listing, resume position, and
+        // the parent folder's display name are independent — fetching them
+        // in parallel saves a round-trip per request from TTFP.
+        const [video, siblingsResult, saved, folder] = await Promise.all([
           getFile(fileId),
           listFolderAll(folderId).catch((err) => {
             // eslint-disable-next-line no-console
@@ -149,9 +154,11 @@ export function PlayerPage() {
             return [] as DriveFile[];
           }),
           getPlaybackPosition(fileId).catch(() => undefined),
+          getFile(folderId).catch(() => null),
         ]);
         if (cancelled) return;
         setFile(video);
+        if (folder?.name) setFolderName(folder.name);
 
         const siblings = siblingsResult;
         setFolderVideos(siblings.filter(isVideoFile));
@@ -553,7 +560,15 @@ export function PlayerPage() {
   }
 
   // Main player -------------------------------------------------------------
+  // Anime-aware folder + episode title is the primary display; the movie
+  // normalizer is kept only for the year/quality pills below since
+  // `buildDisplayTitle` is intentionally formatting-only and doesn't extract
+  // those fields.
+  const parsed = file
+    ? buildDisplayTitle(folderName, file.name)
+    : null;
   const cleaned = file ? normalizeMovieTitle(file.name) : null;
+  const displayTitle = parsed?.displayTitle ?? cleaned?.title ?? file?.name ?? "";
   const progressPct = file
     ? playbackProgressPct(positions[file.id])
     : 0;
@@ -601,7 +616,7 @@ export function PlayerPage() {
               <DrivePlayer
                 src={streamUrl ?? ""}
                 subtitleTracks={subtitleTracks}
-                title={file?.name}
+                title={displayTitle || file?.name}
                 initialSeek={initialSeek}
                 onMediaError={handleMediaError}
                 onTimeUpdate={handleTimeUpdate}
@@ -619,9 +634,7 @@ export function PlayerPage() {
               <div className="ny-player-info">
                 <div className="ny-player-info__head">
                   <div>
-                    <h2 className="ny-player-info__title">
-                      {cleaned?.title ?? file.name}
-                    </h2>
+                    <h2 className="ny-player-info__title">{displayTitle}</h2>
                     <p className="ny-player-info__filename">{file.name}</p>
                   </div>
                   <button

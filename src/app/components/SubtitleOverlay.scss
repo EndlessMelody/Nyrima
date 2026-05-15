@@ -16,12 +16,15 @@
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  padding: 12% 6% 10%;
+  // Top breathing room stays fixed; bottom offset is user-controlled so the
+  // cue line can lift off the very bottom edge when watching on TVs that
+  // clip overscan, etc. Defaults to ~10 % of overlay height.
+  padding: 12% 6% calc(8% + var(--dc-sub-bottom-offset, 0%));
   transition: padding 200ms ease;
 }
 
 .dc-sub-overlay.is-fs {
-  padding: 10% 8% 8%;
+  padding: 10% 8% calc(6% + var(--dc-sub-bottom-offset, 0%));
 }
 
 .dc-sub-zone {
@@ -41,47 +44,50 @@
   }
 }
 
+// Base font-size for windowed playback. The `--dc-sub-scale` multiplier
+// (set inline on the overlay by SubtitleOverlay.tsx, defaulting to 1) lets
+// the user re-scale 50–200 % from settings without touching this clamp.
+$sub-base-windowed: clamp(0.95rem, 2.2vw, 1.4rem);
+// Fullscreen wants a much larger base because the viewport is now the whole
+// screen — keyed off `vh` (cue sits at the bottom of the video, height is
+// the natural reference), capped so 4K monitors don't get billboard sub.
+$sub-base-fullscreen: clamp(1.55rem, 3.4vh, 3rem);
+
 .dc-sub-cue {
   display: inline-block;
   padding: 0 0.15em;
   background: transparent;
-  color: #ffffff;
-  font-family: var(--dc-font-body);
-  font-weight: 600;
-  line-height: 1.35;
+  color: var(--dc-sub-color, #e8e8e8);
+  // Family driven by the SubtitleOverlay's inline `--dc-sub-font` var so
+  // SettingsPopover's font picker (Anime Brush / Comic Dialogue / Clean
+  // Sans / System / Custom) takes effect without re-rendering the SCSS.
+  font-family: var(--dc-sub-font, var(--dc-font-subtitle));
+  font-weight: var(--dc-sub-weight, 700);
+  // Force the browser to *synthesize* italic on Comic Sans MS (which has no
+  // italic face) instead of silently falling through the font stack to a
+  // font that does — that fallback is what makes ASS-italic cues stop
+  // looking like Comic Sans entirely.
+  font-synthesis: style weight;
+  line-height: 1.3;
+  letter-spacing: var(--dc-sub-letter-spacing, 0.01em);
+  // No more uppercase pass — anime fansub style and natural mixed-case
+  // dialogue both look better in their authored capitalization.
   text-align: center;
   word-break: normal;
   overflow-wrap: anywhere;
   max-width: 92%;
-  // VLC / Plex legibility recipe: a 1.5px black stroke painted *under*
-  // the white fill, plus a layered text-shadow halo for soft anchoring
-  // on bright frames.
-  -webkit-text-stroke: 1.5px #000;
+  font-size: calc(#{$sub-base-windowed} * var(--dc-sub-scale, 1));
+  // Stroke + soft halo shadow keep cues readable on bright frames; both
+  // come from CSS vars so SettingsPopover can dial them independently.
+  -webkit-text-stroke:
+    var(--dc-sub-stroke-width, 2.5px) var(--dc-sub-stroke-color, #000);
   paint-order: stroke fill;
   text-shadow:
-    0 0 3px rgba(0, 0, 0, 0.95),
-    0 0 8px rgba(0, 0, 0, 0.55),
-    0 2px 4px rgba(0, 0, 0, 0.7);
+    0 0 calc(2px * var(--dc-sub-shadow, 1)) rgba(0, 0, 0, calc(0.9 * var(--dc-sub-shadow, 1))),
+    0 2px calc(4px * var(--dc-sub-shadow, 1)) rgba(0, 0, 0, calc(0.6 * var(--dc-sub-shadow, 1)));
   transition:
     opacity 160ms ease,
     transform 160ms ease;
-
-  // Size variants
-  &--xs {
-    font-size: clamp(0.65rem, 1.6vw, 0.8rem);
-  }
-  &--sm {
-    font-size: clamp(0.75rem, 1.9vw, 0.95rem);
-  }
-  &--md {
-    font-size: clamp(0.9rem, 2.3vw, 1.15rem);
-  }
-  &--lg {
-    font-size: clamp(1.05rem, 2.8vw, 1.45rem);
-  }
-  &--xl {
-    font-size: clamp(1.25rem, 3.4vw, 1.85rem);
-  }
 
   // ASS-derived styles
   &[data-bold="true"] {
@@ -99,6 +105,14 @@
   &[data-align="right"] {
     text-align: right;
   }
+}
+
+// In fullscreen swap the base to a vh-driven clamp so the cue stays in
+// proportion with the actual screen. Stroke is scaled relative to the user
+// setting so the outline keeps its weight against the larger glyphs.
+.dc-sub-overlay.is-fs .dc-sub-cue {
+  font-size: calc(#{$sub-base-fullscreen} * var(--dc-sub-scale, 1));
+  -webkit-text-stroke-width: calc(var(--dc-sub-stroke-width, 2.5px) * 1.2);
 }
 
 // Entrance / exit

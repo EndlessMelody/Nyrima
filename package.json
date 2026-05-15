@@ -14,8 +14,10 @@
     "zip": "node scripts/zip.mjs"
   },
   "dependencies": {
+    "@fontsource/comic-neue": "^5.2.7",
     "@fontsource/geist-mono": "^5.2.7",
     "@fontsource/geist-sans": "^5.2.5",
+    "@fontsource/itim": "^5.2.7",
     "@fontsource/klee-one": "^5.2.8",
     "@fontsource/m-plus-rounded-1c": "^5.2.10",
     "@fontsource/zen-kaku-gothic-new": "^5.2.7",

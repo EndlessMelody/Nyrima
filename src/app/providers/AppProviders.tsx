@@ -58,6 +58,15 @@ export function AppProviders({ children }: { children: ReactNode }) {
   const [mode, setMode] = useState<ThemeMode>("dark");
   const resolved = resolveTheme(mode);
 
+  // Hydrate the persisted user settings (subtitle scale/font, skip seconds,
+  // …) once on boot so the player can read straight from the store. Lazy
+  // import keeps the providers file's dependency graph thin.
+  useEffect(() => {
+    void import("../stores/settings-store").then(({ useSettingsStore }) =>
+      useSettingsStore.getState().load(),
+    );
+  }, []);
+
   // Reflect resolved theme onto <html> so Once UI's CSS variables flip correctly.
   useEffect(() => {
     const html = document.documentElement;

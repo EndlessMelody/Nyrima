@@ -21,10 +21,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import cn from "classnames";
 import "./DrivePlayer.scss";
-import { SubtitleOverlay, type SubSize } from "./SubtitleOverlay";
+import { SubtitleOverlay } from "./SubtitleOverlay";
+import { SettingsPopover } from "./SettingsPopover";
 import type { SubCue } from "../services/subtitles";
 import { EMPTY_CUES } from "../services/subtitles";
 import { formatTimecode } from "../services/formatters";
+import { useSettingsStore } from "../stores/settings-store";
+import { fontStackFor } from "../services/subtitle-font";
 
 export interface SubtitleTrack {
   id: string;
@@ -58,7 +61,9 @@ interface Props {
 }
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
-const SUB_SIZES: SubSize[] = ["xs", "sm", "md", "lg", "xl"];
+const SCALE_STEP = 0.1;
+const SCALE_MIN = 0.5;
+const SCALE_MAX = 2.0;
 
 export function DrivePlayer({
   src,
@@ -108,7 +113,14 @@ export function DrivePlayer({
   // Subtitle state -----------------------------------------------------------
   const [activeSubId, setActiveSubId] = useState<string | null>(null);
   const [subDelay, setSubDelay] = useState(0);
-  const [subSizeIdx, setSubSizeIdx] = useState(2); // md
+
+  // Persisted settings (subtitle scale/font, skip seconds) ------------------
+  const settings = useSettingsStore((s) => s.settings);
+  const setScale = useSettingsStore((s) => s.setScale);
+  const subFontStack = useMemo(
+    () => fontStackFor(settings.subtitleFont),
+    [settings.subtitleFont],
+  );
 
   // Auto-select first non-image-based subtitle track when tracks load
   useEffect(() => {
@@ -123,6 +135,7 @@ export function DrivePlayer({
   const [hudOn, setHudOn] = useState(true);
   const [showSubMenu, setShowSubMenu] = useState(false);
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [hoverTime, setHoverTime] = useState<number | null>(null);
   const [hoverX, setHoverX] = useState<number>(0);
   const [scrubbing, setScrubbing] = useState(false);
@@ -216,6 +229,7 @@ export function DrivePlayer({
       setHudOn(false);
       setShowSubMenu(false);
       setShowSpeedMenu(false);
+      setShowSettings(false);
     }, 2600);
   }, [playing]);
 
@@ -301,12 +315,15 @@ export function DrivePlayer({
           break;
         case "arrowleft":
           e.preventDefault();
-          v.currentTime = Math.max(0, v.currentTime - 10);
+          v.currentTime = Math.max(0, v.currentTime - settings.skipSeconds);
           kickIdleTimer();
           break;
         case "arrowright":
           e.preventDefault();
-          v.currentTime = Math.min(v.duration || 0, v.currentTime + 10);
+          v.currentTime = Math.min(
+            v.duration || 0,
+            v.currentTime + settings.skipSeconds,
+          );
           kickIdleTimer();
           break;
         case "j":
@@ -350,13 +367,17 @@ export function DrivePlayer({
         case "+":
         case "=":
           e.preventDefault();
-          setSubSizeIdx((i) => Math.min(SUB_SIZES.length - 1, i + 1));
+          void setScale(
+            Math.min(SCALE_MAX, settings.subtitleScale + SCALE_STEP),
+          );
           kickIdleTimer();
           break;
         case "-":
         case "_":
           e.preventDefault();
-          setSubSizeIdx((i) => Math.max(0, i - 1));
+          void setScale(
+            Math.max(SCALE_MIN, settings.subtitleScale - SCALE_STEP),
+          );
           kickIdleTimer();
           break;
         case "<":
@@ -398,7 +419,26 @@ export function DrivePlayer({
     c.addEventListener("keydown", onKey);
     return () => c.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [subtitleTracks.length, playing, onNext, onPrev]);
+  }, [
+    subtitleTracks.length,
+    playing,
+    onNext,
+    onPrev,
+    settings.skipSeconds,
+    settings.subtitleScale,
+  ]);
+
+  // Skip-back / skip-forward by the user-configured `skipSeconds`. Bound to
+  // the HUD buttons; keyboard already has ←/→ for the same jump.
+  function skipBy(delta: number) {
+    const v = videoRef.current;
+    if (!v) return;
+    v.currentTime = Math.max(
+      0,
+      Math.min(v.duration || 0, v.currentTime + delta),
+    );
+    kickIdleTimer();
+  }
 
   // Actions ------------------------------------------------------------------
   function togglePlay() {
@@ -496,10 +536,6 @@ export function DrivePlayer({
     setSubDelay((d) => Math.round((d + delta) * 10) / 10);
   }
 
-  function cycleSubSize() {
-    setSubSizeIdx((i) => (i + 1) % SUB_SIZES.length);
-  }
-
   // Timeline scrubbing -------------------------------------------------------
   function pctFromEvent(e: { clientX: number }): number {
     const t = timelineRef.current;
@@ -568,6 +604,7 @@ export function DrivePlayer({
       ref={containerRef}
       className={cn("dc-vlc", {
         "is-hud-on": hudOn || !playing,
+        "is-playing": playing,
         "is-fullscreen": isFullscreen,
       })}
       onMouseMove={kickIdleTimer}
@@ -600,7 +637,15 @@ export function DrivePlayer({
         videoRef={videoRef}
         cues={activeCues}
         delay={subDelay}
-        size={SUB_SIZES[subSizeIdx]}
+        scale={settings.subtitleScale}
+        fontFamily={subFontStack}
+        fontWeight={settings.subtitleWeight}
+        color={settings.subtitleColor}
+        outlineColor={settings.subtitleOutlineColor}
+        outlineWidth={settings.subtitleOutlineWidth}
+        shadowStrength={settings.subtitleShadow}
+        letterSpacing={settings.subtitleLetterSpacing}
+        bottomOffset={settings.subtitlePosition}
         isFullscreen={isFullscreen}
       />
 
@@ -620,21 +665,63 @@ export function DrivePlayer({
         {title && <span className="dc-vlc__top-title">{title}</span>}
       </div>
 
-      {/* Center resume knob */}
-      {!playing && !buffering && (
+      {/* Center playback cluster — skip-back / play-pause / skip-forward, all
+          gold-themed to match the player. Always mounted so we get a real
+          fade in/out animation; visibility is driven by `is-on` (paused or
+          HUD visible) instead of conditional unmount, otherwise the buttons
+          would pop in and out of the DOM without a transition. The cluster
+          stops short of the subtitle bottom zone so it never overlaps cues. */}
+      <div
+        className={cn("dc-vlc__center", {
+          "is-on": (hudOn || !playing) && !buffering,
+        })}
+        role="group"
+        aria-label="Playback"
+        aria-hidden={!((hudOn || !playing) && !buffering)}
+      >
         <button
           type="button"
-          className="dc-vlc__center"
-          onClick={togglePlay}
-          aria-label="Play"
+          className="dc-vlc__center-skip"
+          onClick={() => skipBy(-settings.skipSeconds)}
+          title={`Skip back ${settings.skipSeconds}s (←)`}
+          aria-label={`Skip back ${settings.skipSeconds} seconds`}
         >
-          <span className="dc-vlc__center-knob">
+          <svg viewBox="0 0 24 24" aria-hidden>
+            <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z" />
+          </svg>
+          <span className="dc-vlc__skip-num">{settings.skipSeconds}</span>
+        </button>
+
+        <button
+          type="button"
+          className="dc-vlc__center-knob"
+          onClick={togglePlay}
+          aria-label={playing ? "Pause" : "Play"}
+        >
+          {playing ? (
+            <svg viewBox="0 0 24 24" aria-hidden>
+              <path d="M6 5h4v14H6zM14 5h4v14h-4z" />
+            </svg>
+          ) : (
             <svg viewBox="0 0 24 24" aria-hidden>
               <path d="M8 5v14l11-7L8 5z" />
             </svg>
-          </span>
+          )}
         </button>
-      )}
+
+        <button
+          type="button"
+          className="dc-vlc__center-skip"
+          onClick={() => skipBy(settings.skipSeconds)}
+          title={`Skip forward ${settings.skipSeconds}s (→)`}
+          aria-label={`Skip forward ${settings.skipSeconds} seconds`}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden>
+            <path d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z" />
+          </svg>
+          <span className="dc-vlc__skip-num">{settings.skipSeconds}</span>
+        </button>
+      </div>
 
       {/* Buffering spinner */}
       {buffering && (
@@ -693,6 +780,21 @@ export function DrivePlayer({
             </button>
           )}
 
+          {/* Bottom-bar skip back — mirrors the center-cluster skip button
+              with the same icon family and the seconds badge. */}
+          <button
+            type="button"
+            className="dc-vlc__btn dc-vlc__btn--skip"
+            onClick={() => skipBy(-settings.skipSeconds)}
+            title={`Skip back ${settings.skipSeconds}s (←)`}
+            aria-label={`Skip back ${settings.skipSeconds} seconds`}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden>
+              <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z" />
+            </svg>
+            <span className="dc-vlc__btn-skip-num">{settings.skipSeconds}</span>
+          </button>
+
           <button
             type="button"
             className="dc-vlc__btn dc-vlc__play"
@@ -709,6 +811,20 @@ export function DrivePlayer({
                 <path d="M8 5v14l11-7L8 5z" />
               </svg>
             )}
+          </button>
+
+          {/* Bottom-bar skip forward. */}
+          <button
+            type="button"
+            className="dc-vlc__btn dc-vlc__btn--skip"
+            onClick={() => skipBy(settings.skipSeconds)}
+            title={`Skip forward ${settings.skipSeconds}s (→)`}
+            aria-label={`Skip forward ${settings.skipSeconds} seconds`}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden>
+              <path d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z" />
+            </svg>
+            <span className="dc-vlc__btn-skip-num">{settings.skipSeconds}</span>
           </button>
 
           {/* Next */}
@@ -873,12 +989,16 @@ export function DrivePlayer({
                     <button
                       type="button"
                       className="dc-vlc__menu-item"
-                      onClick={cycleSubSize}
+                      onClick={() => {
+                        setShowSubMenu(false);
+                        setShowSettings(true);
+                      }}
                       role="menuitem"
+                      title="Open subtitle settings"
                     >
-                      <span>Font size</span>
+                      <span>More settings…</span>
                       <span className="dc-vlc__menu-side">
-                        {SUB_SIZES[subSizeIdx]}
+                        {Math.round(settings.subtitleScale * 100)}%
                       </span>
                     </button>
                   </>
@@ -939,6 +1059,29 @@ export function DrivePlayer({
               <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z" />
             </svg>
           </button>
+
+          {/* Settings (gear) */}
+          <div className="dc-vlc__menu-host">
+            <button
+              type="button"
+              className={cn("dc-vlc__btn", { "is-on": showSettings })}
+              onClick={() => {
+                setShowSubMenu(false);
+                setShowSpeedMenu(false);
+                setShowSettings((v) => !v);
+              }}
+              title="Player settings"
+              aria-label="Player settings"
+              aria-expanded={showSettings}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden>
+                <path d="M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65a.5.5 0 0 0 .12-.64l-2-3.46a.5.5 0 0 0-.61-.22l-2.49 1a7.03 7.03 0 0 0-1.69-.98l-.38-2.65A.488.488 0 0 0 14 2h-4a.488.488 0 0 0-.49.42l-.38 2.65c-.61.25-1.17.58-1.69.98l-2.49-1a.5.5 0 0 0-.61.22l-2 3.46a.5.5 0 0 0 .12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65a.5.5 0 0 0-.12.64l2 3.46a.5.5 0 0 0 .61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.04.24.25.42.49.42h4c.24 0 .45-.18.49-.42l.38-2.65c.61-.25 1.17-.58 1.69-.98l2.49 1a.5.5 0 0 0 .61-.22l2-3.46a.5.5 0 0 0-.12-.64l-2.11-1.65zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z" />
+              </svg>
+            </button>
+            {showSettings && (
+              <SettingsPopover onClose={() => setShowSettings(false)} />
+            )}
+          </div>
 
           {/* PiP */}
           {"pictureInPictureEnabled" in document && (

@@ -97,3 +97,116 @@ function toTitleCase(str: string): string {
     })
     .join(" ");
 }
+
+// ---------------------------------------------------------------------------
+// Folder-aware "Episode N" titles
+//
+// The PlayerPage already has the parent folder name (we navigate via
+// `/play/:folderId/:fileId`) and the raw filename. `buildDisplayTitle`
+// merges them into the cinematic header the user sees on the player:
+//
+//   Folder: "Gimai Seikatsu"
+//   File:   "[GS]07.mkv"
+//   →       "Gimai Seikatsu - Ep07"
+//
+// Episode detection is conservative: 4-digit numbers that look like years
+// (1900-2099) and known resolution/codec stems (1080p, 720p, x264…) are
+// excluded so movie filenames like "Inception 2010.mkv" don't get tagged
+// as "Episode 2010".
+// ---------------------------------------------------------------------------
+
+export interface ParsedTitle {
+  folderName: string;
+  rawFileName: string;
+  displayTitle: string;
+  episodeNumber?: string;
+  cleanedFileName: string;
+}
+
+// Tokens we strip before looking for an episode number.
+const NOISE_TOKEN_PATTERNS = [
+  /\[[^\]]+\]/g, // bracketed groups like [Erai-raws], [GS], [1080p]
+  /\([^)]+\)/g, // parenthesised tags
+  /\b(?:1080p|720p|480p|2160p|4k|hdr|hevc|x265|x264|h\.?264|h\.?265|aac|flac|ac3|dts|atmos|web-?dl|web-?rip|bluray|bd-?rip|hd-?rip|dvd-?rip|remux|10bit|8bit|multi|subbed|dubbed)\b/gi,
+];
+
+const EPISODE_PATTERNS: RegExp[] = [
+  /\bS\d{1,2}E(\d{1,3})\b/i, // S01E07
+  /\b(?:episode|ep|epi)[\s._-]*?(\d{1,3})\b/i, // Episode 07, Ep07
+  /\bE(\d{1,3})\b/, // E07 (uppercase E to avoid matching "Erai")
+  // Standalone numeric segment preceded by any common separator (incl.
+  // `]` and `)` so bracket-prefix styles like `[GS]07` match too).
+  /(?:^|[\s\-_.\]\)])(\d{1,3})(?=\s*(?:v\d)?\s*(?:\[|\(|$|\.|\s))/,
+];
+
+/** Strip release-group/quality/codec tags and the file extension. */
+function cleanFileName(rawFileName: string): string {
+  let s = rawFileName.replace(/\.[^.]+$/, "");
+  for (const re of NOISE_TOKEN_PATTERNS) s = s.replace(re, " ");
+  s = s.replace(/[._]/g, " ").replace(/\s+/g, " ").trim();
+  // Trailing/leading dashes left after token removal.
+  s = s.replace(/^[-–—\s]+|[-–—\s]+$/g, "").trim();
+  return s;
+}
+
+/** Extract an episode number string, preserving the source's leading zero
+ *  where possible (so `07` stays `07`, not `7`). Returns `undefined` when
+ *  the filename has no recognizable episode marker. */
+function extractEpisodeNumber(rawFileName: string): string | undefined {
+  const stem = rawFileName.replace(/\.[^.]+$/, "");
+
+  for (const re of EPISODE_PATTERNS) {
+    const match = stem.match(re);
+    if (!match) continue;
+    const num = match[1];
+    if (!num) continue;
+    const value = Number(num);
+    // Filter out four-digit "years" so movie filenames don't get tagged.
+    if (num.length === 4 && value >= 1900 && value <= 2099) continue;
+    // Two-digit numbers that are actually resolution stems (1080, 720, etc.)
+    // are already swallowed by NOISE_TOKEN_PATTERNS, but guard episode <= 200
+    // anyway so `1080p`-adjacent matches don't sneak through.
+    if (value > 200) continue;
+    // Preserve the source's padding so `07` stays `07`; pad shorter numbers
+    // to two digits because that's what fansub naming conventions use.
+    return num.length >= 2 ? num : num.padStart(2, "0");
+  }
+  return undefined;
+}
+
+/**
+ * Build the player's display title from the Drive parent-folder name and
+ * the raw video filename.
+ *
+ * - When an episode number is detected, format as `${folder} - Ep${nn}`.
+ * - When not (movies, one-shots), fall back to the cleaned filename so
+ *   `Movie Collection / Your Name.mkv` → `Your Name`.
+ * - Both inputs are trimmed; a blank folder collapses to the filename.
+ */
+export function buildDisplayTitle(
+  folderName: string,
+  rawFileName: string,
+): ParsedTitle {
+  const folder = (folderName ?? "").trim();
+  const cleaned = cleanFileName(rawFileName);
+  const episodeNumber = extractEpisodeNumber(rawFileName);
+
+  let displayTitle: string;
+  if (episodeNumber && folder) {
+    displayTitle = `${folder} - Ep${episodeNumber}`;
+  } else if (cleaned) {
+    displayTitle = cleaned;
+  } else if (folder) {
+    displayTitle = folder;
+  } else {
+    displayTitle = rawFileName;
+  }
+
+  return {
+    folderName: folder,
+    rawFileName,
+    displayTitle,
+    episodeNumber,
+    cleanedFileName: cleaned,
+  };
+}
