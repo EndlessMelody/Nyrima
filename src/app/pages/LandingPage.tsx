@@ -37,7 +37,12 @@ export function LandingPage() {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [setupOpen, setSetupOpen] = useState(false);
+  const [setupOpen, setSetupOpen] = useState(() => {
+    if (typeof window !== "undefined") {
+      return new URLSearchParams(window.location.search).get("setup") === "1";
+    }
+    return false;
+  });
   const [keyConfigured, setKeyConfigured] = useState<boolean | null>(null);
   const [positions] = usePlaybackPositions();
   const [featured, setFeatured] = useState<DriveFile | null>(null);
@@ -48,21 +53,6 @@ export function LandingPage() {
   useEffect(() => {
     void load();
   }, [load]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("setup") === "1") {
-      setSetupOpen(true);
-      params.delete("setup");
-      const next = params.toString();
-      const url =
-        window.location.pathname +
-        (next ? `?${next}` : "") +
-        window.location.hash;
-      window.history.replaceState({}, "", url);
-    }
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -113,6 +103,23 @@ export function LandingPage() {
 
   const pinned = folders.filter((f) => f.pinned);
   const others = folders.filter((f) => !f.pinned);
+
+  const handleCloseSetup = () => {
+    setSetupOpen(false);
+    // Chỉ dọn dẹp URL sau khi popup đã được đóng
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("setup") === "1") {
+        params.delete("setup");
+        const next = params.toString();
+        const url =
+          window.location.pathname +
+          (next ? `?${next}` : "") +
+          window.location.hash;
+        window.history.replaceState({}, "", url);
+      }
+    }
+  };
 
   function onSubmit() {
     const id = extractFolderId(input.trim());
@@ -189,7 +196,7 @@ export function LandingPage() {
 
       <SetupAccessDialog
         isOpen={setupOpen}
-        onClose={() => setSetupOpen(false)}
+        onClose={handleCloseSetup}
         onSaved={() => setKeyConfigured(true)}
       />
 
@@ -201,6 +208,9 @@ export function LandingPage() {
         }}
         title="Open a Drive folder"
         description="Paste a Google Drive folder URL or its ID."
+        style={{
+          backgroundColor: "var(--page-background)",
+        }}
         footer={
           <Row gap="8">
             <Button variant="tertiary" onClick={() => setOpen(false)}>
