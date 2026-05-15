@@ -322,100 +322,137 @@ export class MkvMseController {
     }
     this.fetching = true;
 
-    try {
-      const url = buildMediaUrl(this.fileId);
-      const res = await authedFetch(
-        url,
-        {
-          headers: { Range: `bytes=${this.fetchOffset}-` },
-          signal: this.abortController?.signal,
-        },
-        {
-          kind: "media-stream",
-          priority: "critical",
-          signal: this.abortController?.signal,
-        },
-      );
-      if (this.destroyed) return;
+    const MAX_STREAM_RETRIES = 3;
+    let streamAttempt = 0;
 
-      const reader = res.body?.getReader();
-      if (!reader) {
-        // Fallback: ReadableStream not available — read the tail as a single
-        // ArrayBuffer. This is the rare path (older WebView only).
-        const ab = await res.arrayBuffer();
-        if (this.destroyed) return;
-        const data = new Uint8Array(ab);
-        const full = this.leftoverBuf
-          ? concatBuffers(this.leftoverBuf, data)
-          : data;
-        this.leftoverBuf = null;
-        this.processChunk(full);
-        this.fetchOffset = this.fileSize;
-      } else {
-        this.streamReader = reader;
-        let accumulated: Uint8Array | null = this.leftoverBuf;
-        this.leftoverBuf = null;
+    while (streamAttempt <= MAX_STREAM_RETRIES && !this.destroyed) {
+      try {
+        const url = buildMediaUrl(this.fileId);
+        const res = await authedFetch(
+          url,
+          {
+            headers: { Range: `bytes=${this.fetchOffset}-` },
+            signal: this.abortController?.signal,
+          },
+          {
+            kind: "media-stream",
+            priority: "critical",
+            signal: this.abortController?.signal,
+          },
+        );
+        if (this.destroyed) break;
 
-        // eslint-disable-next-line no-constant-condition
-        while (true) {
-          if (this.destroyed || this.mediaSource?.readyState !== "open") break;
+        const reader = res.body?.getReader();
+        if (!reader) {
+          // Fallback: ReadableStream not available — read the tail as a single
+          // ArrayBuffer. This is the rare path (older WebView only).
+          const ab = await res.arrayBuffer();
+          if (this.destroyed) break;
+          const data = new Uint8Array(ab);
+          const full = this.leftoverBuf
+            ? concatBuffers(this.leftoverBuf, data)
+            : data;
+          this.leftoverBuf = null;
+          this.processChunk(full);
+          this.fetchOffset = this.fileSize;
+        } else {
+          this.streamReader = reader;
+          let accumulated: Uint8Array | null = this.leftoverBuf;
+          this.leftoverBuf = null;
 
-          // Back-pressure: pause when tab hidden, video idle, or cooldown.
-          // We stop pulling from the stream but keep the connection alive;
-          // Drive will close it if it idles too long, which is acceptable.
-          if (this.suspended) {
-            await this.waitWhileSuspended();
-            if (this.destroyed) break;
+          // eslint-disable-next-line no-constant-condition
+          while (true) {
+            if (this.destroyed || this.mediaSource?.readyState !== "open") break;
+
+            // Back-pressure: pause when tab hidden, video idle, or cooldown.
+            // We stop pulling from the stream but keep the connection alive;
+            // Drive will close it if it idles too long, which is acceptable.
+            if (this.suspended) {
+              await this.waitWhileSuspended();
+              if (this.destroyed) break;
+            }
+
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            // Track bytes received so we can resume from here on reconnect.
+            this.fetchOffset += value.length;
+
+            accumulated = accumulated
+              ? concatBuffers(accumulated, value)
+              : value;
+
+            if (accumulated.length >= STREAM_PROCESS_SIZE) {
+              // Throttle if we're far enough ahead — keeps SourceBuffer small.
+              await this.waitUntilBufferNeeded();
+              if (this.destroyed) break;
+
+              this.processChunk(accumulated);
+              accumulated = this.leftoverBuf;
+              this.leftoverBuf = null;
+              this.evictOldBuffers();
+            }
           }
 
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          accumulated = accumulated
-            ? concatBuffers(accumulated, value)
-            : value;
-
-          if (accumulated.length >= STREAM_PROCESS_SIZE) {
-            // Throttle if we're far enough ahead — keeps SourceBuffer small.
-            await this.waitUntilBufferNeeded();
-            if (this.destroyed) break;
-
+          if (accumulated && accumulated.length > 0 && !this.destroyed) {
             this.processChunk(accumulated);
-            accumulated = this.leftoverBuf;
-            this.leftoverBuf = null;
-            this.evictOldBuffers();
+          }
+
+          this.streamReader = null;
+          try {
+            reader.releaseLock();
+          } catch {
+            // ignore
           }
         }
 
-        if (accumulated && accumulated.length > 0 && !this.destroyed) {
-          this.processChunk(accumulated);
+        // If we reach here without an error, the stream completed successfully.
+        // Set fetchOffset to fileSize to signal completion.
+        this.fetchOffset = this.fileSize;
+        break; // exit retry loop
+      } catch (e) {
+        this.streamReader = null;
+        // Abort-on-destroy raises an AbortError that we swallow silently.
+        const isAbort =
+          e instanceof DOMException && e.name === "AbortError";
+        if (this.destroyed || isAbort) {
+          break;
         }
 
-        this.streamReader = null;
-        try {
-          reader.releaseLock();
-        } catch {
-          // ignore
+        // Only retry transient errors (network failures, 5xx). Permission
+        // errors (403 private-folder), auth errors, etc. are non-retryable —
+        // surfacing them immediately avoids wasting API calls and triggering
+        // rate-limit cascades.
+        const retryable =
+          (e instanceof TypeError) ||
+          (e instanceof DOMException && e.name === "NetworkError") ||
+          (e instanceof Error && "status" in e &&
+            typeof (e as { status?: number }).status === "number" &&
+            (e as { status: number }).status >= 500);
+
+        streamAttempt++;
+        if (!retryable || streamAttempt > MAX_STREAM_RETRIES) {
+          this.onError?.(e instanceof Error ? e : new Error(String(e)));
+          break;
         }
-        this.fetchOffset = this.fileSize;
+
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[mse] stream error (attempt ${streamAttempt}/${MAX_STREAM_RETRIES}), ` +
+          `retrying from offset ${this.fetchOffset} in ${streamAttempt * 2}s:`,
+          e,
+        );
+        // Exponential backoff: 2s, 4s, 6s
+        await sleep(streamAttempt * 2000);
+        // leftoverBuf is preserved — the next iteration will pick up from
+        // fetchOffset with any partial data still intact.
       }
-    } catch (e) {
-      this.streamReader = null;
-      // Abort-on-destroy raises an AbortError that we swallow silently;
-      // anything else bubbles up to the player as a fatal error. Retry
-      // policy (429/5xx/network) lives in DriveRequestQueue now, so by
-      // the time we land here the queue has already exhausted retries.
-      const isAbort =
-        e instanceof DOMException && e.name === "AbortError";
-      if (!this.destroyed && !isAbort) {
-        this.onError?.(e instanceof Error ? e : new Error(String(e)));
-      }
-      return;
-    } finally {
-      this.fetching = false;
     }
 
-    this.finalizeStream();
+    this.fetching = false;
+    if (this.fetchOffset >= this.fileSize) {
+      this.finalizeStream();
+    }
   }
 
   /** Wait until the buffer-ahead threshold allows more data to be processed. */

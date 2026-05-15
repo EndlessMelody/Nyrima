@@ -308,11 +308,6 @@ export function PlayerPage() {
           // Non-MKV: direct streaming (preferred) with blob fallback.
           const directUrl = await buildPublicStreamUrl(fileId);
           if (directUrl) {
-            markPlayback("media:first-range:start");
-            await authedFetch(buildMediaUrl(fileId), {
-              headers: { Range: "bytes=0-0" },
-            });
-            markPlayback("media:first-range:end");
             if (cancelled) return;
             setStreamUrl(directUrl);
           } else {
@@ -463,9 +458,16 @@ export function PlayerPage() {
   );
 
   // Transition native MKV → MSE remux. Safe to call from both the watchdog
-  // timer and from `handleMediaError`; second-call guards keep it idempotent.
+  // timer and from `handleMediaError`; ref-based guard keeps it idempotent
+  // even when React hasn't re-rendered the callback closure yet.
+  const fallbackTriggeredRef = useRef(false);
+  useEffect(() => {
+    fallbackTriggeredRef.current = false;
+  }, [fileId]);
   const fallbackToMse = useCallback(() => {
     if (canPlayFiredRef.current) return; // already playing — too late to switch
+    if (fallbackTriggeredRef.current) return; // already triggered this load
+    fallbackTriggeredRef.current = true;
     if (nativeWatchdogRef.current !== null) {
       window.clearTimeout(nativeWatchdogRef.current);
       nativeWatchdogRef.current = null;
@@ -520,6 +522,18 @@ export function PlayerPage() {
       const code = err?.code ?? 0;
       // eslint-disable-next-line no-console
       console.error("handleMediaError code:", code, "message:", err?.message);
+
+      // When MSE is active, the MSE controller's own onError already handles
+      // failures (network, decode, etc.) and calls reportError. The <video>
+      // element may still fire its own error event (e.g. because the
+      // MediaSource was never fed valid data), but responding to it here
+      // would duplicate error handling and trigger wasteful probe fetches
+      // that cascade into rate-limit storms. Ignore it.
+      if (isMkvMse) {
+        // eslint-disable-next-line no-console
+        console.info("[handleMediaError] ignoring — MSE controller owns errors");
+        return;
+      }
 
       // MKV native → MSE fallback: if the browser can't play the MKV
       // natively (unsupported codec like HEVC, or container issue), switch
