@@ -1,29 +1,63 @@
+/**
+ * PlaylistSidebar — Up Next + Random Picks rail.
+ *
+ * Visual language follows the player chrome: pearl text on a near-black
+ * surface, hairline borders, neon pink accent for the active row, neon
+ * cyan reserved for progress + meta hover.
+ */
+
 .ny-playlist {
   display: flex;
   flex-direction: column;
-  gap: 2rem;
+  gap: 1.5rem;
   padding: 1rem;
-  background-color: var(--surface-background);
-  border-left: var(--dc-hairline);
+  background:
+    linear-gradient(
+      180deg,
+      var(--surface-background) 0%,
+      var(--surface-background-weak) 100%
+    );
+  border: 1px solid var(--hairline-pink);
+  border-radius: var(--ny-radius-md);
   height: 100%;
   overflow-y: auto;
+  box-shadow:
+    0 0 0 1px var(--hairline-pink),
+    0 12px 40px -16px rgba(0, 0, 0, 0.6);
 }
 
 .ny-playlist__section {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.75rem;
 }
 
 .ny-playlist__heading {
-  font-family: var(--dc-font-display);
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: var(--neutral-on-background-medium);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 0 0.5rem;
+  position: relative;
+  padding: 0 0.5rem 0 1rem;
   margin: 0;
+  font-family: var(--dc-font-display);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--neutral-on-background-medium);
+
+  &::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.15em;
+    bottom: 0.15em;
+    width: 2px;
+    border-radius: 2px;
+    background: linear-gradient(
+      180deg,
+      var(--brand-solid-medium),
+      var(--accent-solid-medium)
+    );
+    box-shadow: 0 0 8px var(--brand-alpha-medium);
+  }
 }
 
 .ny-playlist__list {
@@ -33,24 +67,57 @@
 }
 
 .ny-playlist__item {
+  position: relative;
   display: flex;
-  gap: 1rem;
-  padding: 0.5rem;
-  border-radius: 8px;
+  gap: 0.875rem;
+  padding: 0.5rem 0.625rem 0.5rem 0.75rem;
+  border-radius: var(--ny-radius-sm);
   cursor: pointer;
   transition:
-    background-color 200ms ease;
-  position: relative;
+    background-color 200ms ease,
+    border-color 200ms ease,
+    box-shadow 200ms ease,
+    transform 200ms ease;
   border: 1px solid transparent;
   text-decoration: none;
 
+  &::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.5rem;
+    bottom: 0.5rem;
+    width: 2px;
+    border-radius: 2px;
+    background: transparent;
+    transition: background 200ms ease, box-shadow 200ms ease;
+  }
+
   &.is-current {
-    background-color: var(--brand-alpha-weak);
+    background: var(--brand-alpha-weak);
     border-color: var(--brand-border-medium);
+    box-shadow:
+      0 0 0 1px var(--brand-border-medium),
+      0 8px 24px -12px var(--brand-alpha-medium);
+
+    &::before {
+      background: linear-gradient(
+        180deg,
+        var(--brand-solid-strong),
+        var(--accent-solid-strong)
+      );
+      box-shadow: 0 0 10px var(--brand-alpha-strong);
+    }
   }
 
   &:hover:not(.is-current) {
-    background-color: var(--surface-background-strong);
+    background: var(--surface-background-strong);
+    border-color: var(--accent-border-weak);
+    transform: translateX(2px);
+
+    &::before {
+      background: var(--accent-alpha-strong);
+    }
   }
 
   &:hover .ny-playlist__thumb-overlay {
@@ -60,11 +127,16 @@
   &:hover .ny-playlist__thumb img {
     transform: scale(1.05);
   }
+
+  &:focus-visible {
+    outline: 2px solid var(--brand-border-strong);
+    outline-offset: 2px;
+  }
 }
 
 .ny-playlist__thumb {
   flex-shrink: 0;
-  width: 160px;
+  width: 144px;
   aspect-ratio: 16 / 9;
   border-radius: 6px;
   overflow: hidden;
@@ -73,12 +145,15 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  border: 1px solid var(--neutral-border-weak);
 
   img {
     width: 100%;
     height: 100%;
     object-fit: cover;
-    transition: transform 300ms ease, opacity 300ms ease;
+    transition:
+      transform 300ms ease,
+      opacity 300ms ease;
 
     &.is-preview-active {
       opacity: 0;
@@ -89,7 +164,11 @@
 .ny-playlist__thumb-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: linear-gradient(
+    180deg,
+    rgba(6, 8, 20, 0.1) 0%,
+    rgba(6, 8, 20, 0.65) 100%
+  );
   display: flex;
   align-items: center;
   justify-content: center;
@@ -111,21 +190,24 @@
 .ny-playlist__play-icon {
   width: 36px;
   height: 36px;
-  color: white;
+  color: #fff;
+  filter: drop-shadow(0 0 10px var(--brand-alpha-strong));
 }
 
 .ny-playlist__body {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 0.25rem;
+  gap: 0.3rem;
   min-width: 0;
+  flex: 1;
 }
 
 .ny-playlist__title {
   font-family: var(--dc-font-display);
   font-size: 0.9rem;
   font-weight: 500;
+  letter-spacing: -0.005em;
   color: var(--neutral-on-background-strong);
   white-space: nowrap;
   overflow: hidden;
@@ -135,21 +217,22 @@
 .ny-playlist__meta {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.625rem;
   font-family: var(--dc-font-mono);
   font-size: 0.7rem;
+  letter-spacing: 0.04em;
   color: var(--neutral-on-background-weak);
 }
 
 .ny-playlist__progress {
-  color: var(--dc-sakura);
+  color: var(--accent-on-background-strong);
   font-weight: 600;
 }
 
 .ny-playlist__progress-bar-container {
   width: 100%;
   height: 3px;
-  background-color: rgba(255, 255, 255, 0.1);
+  background-color: var(--neutral-alpha-weak);
   border-radius: 3px;
   margin-top: 0.25rem;
   overflow: hidden;
@@ -157,6 +240,11 @@
 
 .ny-playlist__progress-bar {
   height: 100%;
-  background: linear-gradient(90deg, var(--dc-sakura), var(--dc-gold));
+  background: linear-gradient(
+    90deg,
+    var(--brand-solid-medium),
+    var(--accent-solid-medium)
+  );
   border-radius: 3px;
+  box-shadow: 0 0 8px var(--brand-alpha-medium);
 }

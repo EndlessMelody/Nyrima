@@ -26,6 +26,7 @@ import { SettingsPopover } from "./SettingsPopover";
 import type { SubCue } from "../services/subtitles";
 import { EMPTY_CUES } from "../services/subtitles";
 import { formatTimecode } from "../services/formatters";
+import { markPlayback } from "../services/playback-telemetry";
 import { useSettingsStore } from "../stores/settings-store";
 import { fontStackFor } from "../services/subtitle-font";
 
@@ -52,6 +53,17 @@ interface Props {
   onLoadedMetadata?: (duration: number) => void;
   /** Called every timeupdate; useful for persisting playback position. */
   onTimeUpdate?: (currentTime: number, duration: number) => void;
+  /**
+   * Fires the first time the browser reports `canplay` for the current src.
+   * Used by the player page to log a startup-timing summary.
+   */
+  onCanPlay?: () => void;
+  /**
+   * Fires the first time `requestVideoFrameCallback` reports a painted frame
+   * for the current src. Telemetry only — falls back to silent no-op when the
+   * API is missing (older WebView).
+   */
+  onFirstFrame?: () => void;
   /** Exposes the raw <video> element so the parent can attach MSE. */
   onVideoRef?: (el: HTMLVideoElement | null) => void;
   nextVideo?: { fileId: string; title: string } | null;
@@ -73,6 +85,8 @@ export function DrivePlayer({
   onMediaError,
   onLoadedMetadata,
   onTimeUpdate,
+  onCanPlay,
+  onFirstFrame,
   onVideoRef,
   nextVideo,
   prevVideo,
@@ -87,10 +101,30 @@ export function DrivePlayer({
   // Stash callback props in a ref so the <video> event-binding effect only
   // runs once. Without this, every parent render that produces fresh
   // callback identities tears down and re-attaches all 12 media listeners.
-  const callbacksRef = useRef({ onMediaError, onLoadedMetadata, onTimeUpdate });
-  useEffect(() => {
-    callbacksRef.current = { onMediaError, onLoadedMetadata, onTimeUpdate };
+  const callbacksRef = useRef({
+    onMediaError,
+    onLoadedMetadata,
+    onTimeUpdate,
+    onCanPlay,
+    onFirstFrame,
   });
+  useEffect(() => {
+    callbacksRef.current = {
+      onMediaError,
+      onLoadedMetadata,
+      onTimeUpdate,
+      onCanPlay,
+      onFirstFrame,
+    };
+  });
+
+  // Guards: telemetry callbacks fire at most once per src.
+  const canPlayFiredRef = useRef(false);
+  const firstFrameFiredRef = useRef(false);
+  useEffect(() => {
+    canPlayFiredRef.current = false;
+    firstFrameFiredRef.current = false;
+  }, [src]);
 
   // Track whether we've already applied the parent-supplied initialSeek so
   // subsequent `loadedmetadata` events (e.g. user reload) don't re-seek.
@@ -187,7 +221,14 @@ export function DrivePlayer({
       },
       ratechange: () => setSpeed(v.playbackRate),
       waiting: () => setBuffering(true),
-      canplay: () => setBuffering(false),
+      canplay: () => {
+        setBuffering(false);
+        if (!canPlayFiredRef.current) {
+          canPlayFiredRef.current = true;
+          markPlayback("video:canplay");
+          callbacksRef.current.onCanPlay?.();
+        }
+      },
       playing: () => setBuffering(false),
       error: () => {
         setBuffering(false);
@@ -212,6 +253,25 @@ export function DrivePlayer({
   useEffect(() => {
     if (onVideoRef) onVideoRef(videoRef.current);
   }, [onVideoRef]);
+
+  // Telemetry: mark the first painted frame for the current src.
+  // requestVideoFrameCallback is Chromium-only and the only reliable way to
+  // tell "the user actually saw a pixel" vs "the browser thinks it can play".
+  useEffect(() => {
+    const v = videoRef.current as HTMLVideoElement &
+      { requestVideoFrameCallback?: (cb: () => void) => number };
+    if (!v || typeof v.requestVideoFrameCallback !== "function") return;
+    let cancelled = false;
+    v.requestVideoFrameCallback(() => {
+      if (cancelled || firstFrameFiredRef.current) return;
+      firstFrameFiredRef.current = true;
+      markPlayback("video:first-frame");
+      callbacksRef.current.onFirstFrame?.();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [src]);
 
   // Sync loop attribute on <video>
   useEffect(() => {
@@ -780,21 +840,6 @@ export function DrivePlayer({
             </button>
           )}
 
-          {/* Bottom-bar skip back — mirrors the center-cluster skip button
-              with the same icon family and the seconds badge. */}
-          <button
-            type="button"
-            className="dc-vlc__btn dc-vlc__btn--skip"
-            onClick={() => skipBy(-settings.skipSeconds)}
-            title={`Skip back ${settings.skipSeconds}s (←)`}
-            aria-label={`Skip back ${settings.skipSeconds} seconds`}
-          >
-            <svg viewBox="0 0 24 24" aria-hidden>
-              <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z" />
-            </svg>
-            <span className="dc-vlc__btn-skip-num">{settings.skipSeconds}</span>
-          </button>
-
           <button
             type="button"
             className="dc-vlc__btn dc-vlc__play"
@@ -811,20 +856,6 @@ export function DrivePlayer({
                 <path d="M8 5v14l11-7L8 5z" />
               </svg>
             )}
-          </button>
-
-          {/* Bottom-bar skip forward. */}
-          <button
-            type="button"
-            className="dc-vlc__btn dc-vlc__btn--skip"
-            onClick={() => skipBy(settings.skipSeconds)}
-            title={`Skip forward ${settings.skipSeconds}s (→)`}
-            aria-label={`Skip forward ${settings.skipSeconds} seconds`}
-          >
-            <svg viewBox="0 0 24 24" aria-hidden>
-              <path d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z" />
-            </svg>
-            <span className="dc-vlc__btn-skip-num">{settings.skipSeconds}</span>
           </button>
 
           {/* Next */}

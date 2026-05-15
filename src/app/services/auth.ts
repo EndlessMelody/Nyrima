@@ -19,6 +19,9 @@
 import type { DcResponse } from "@shared/messages";
 import { getApiKey, appendApiKey } from "./api-key";
 import { classifyDriveError, DriveAccessError } from "./errors";
+import { driveQueue } from "./drive/request-queue";
+import { trackRequest } from "./drive/dev-mode";
+import type { RequestOptions } from "./drive/types";
 
 let cachedToken: { value: string; fetchedAt: number } | null = null;
 const TOKEN_TTL_MS = 50 * 60 * 1000; // chrome.identity tokens last ~60min
@@ -67,19 +70,43 @@ export async function signOut(): Promise<void> {
 }
 
 /**
- * Make a Drive API request with the best credential available.
+ * Public entry point for every Drive API call.
  *
- *  1. If we have an API key, try `?key=<KEY>` first (no Authorization header).
- *     This is enough for files shared as "Anyone with the link".
- *  2. If that returns 401/403 AND OAuth is available, retry with the Bearer
- *     token for private folders.
- *  3. If neither succeeds, throw a typed DriveAccessError so the UI can show
- *     the right "share this folder publicly OR sign in" prompt.
+ * Routes the request through DriveRequestQueue (concurrency cap, priority,
+ * retry + backoff with jitter, cooldown signal on rate-limit), then performs
+ * the actual auth-aware fetch via `authedFetchRaw`, which tries API key
+ * first and falls back to OAuth if available.
  *
- * Throws DriveAccessError on any non-OK response. Returns the Response only
- * when it's `ok` (or a 206 partial-content for ranged streams).
+ * Pass `opts.kind` so the queue applies the right concurrency cap, and
+ * `opts.signal` so cancellations propagate. Without opts, the request is
+ * scheduled as a normal-priority "metadata" call.
+ *
+ * Throws DriveAccessError on permanent failure. Retryable errors are absorbed
+ * inside the queue until the retry budget is exhausted.
  */
-export async function authedFetch(
+export function authedFetch(
+  url: string,
+  init: RequestInit = {},
+  opts: RequestOptions = {},
+): Promise<Response> {
+  const { kind = "metadata", priority = "normal", signal } = opts;
+  // Compose the caller's signal with the queue's per-attempt signal so
+  // either one can cancel the underlying fetch.
+  const initSignal = init.signal as AbortSignal | undefined;
+  return driveQueue.run({
+    kind,
+    priority,
+    signal,
+    run: (attemptSignal) => {
+      const combined = combineSignals([signal, initSignal, attemptSignal]);
+      trackRequest();
+      return authedFetchRaw(url, { ...init, signal: combined });
+    },
+  });
+}
+
+/** Low-level: skip the queue. Reserved for the queue itself + cold paths. */
+export async function authedFetchRaw(
   url: string,
   init: RequestInit = {},
 ): Promise<Response> {
@@ -145,4 +172,34 @@ async function fetchWithBearer(
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${token}`);
   return fetch(url, { ...init, headers });
+}
+
+/**
+ * Merge multiple AbortSignals into one. Aborts as soon as any input aborts.
+ * AbortSignal.any() is the standard form but isn't in older Chromiums; this
+ * polyfills the behaviour and stays cheap (no listeners after settle).
+ */
+function combineSignals(
+  inputs: Array<AbortSignal | undefined>,
+): AbortSignal | undefined {
+  const signals = inputs.filter((s): s is AbortSignal => !!s);
+  if (signals.length === 0) return undefined;
+  if (signals.length === 1) return signals[0];
+  // Prefer the platform when available.
+  const anyFn = (
+    AbortSignal as unknown as { any?: (s: AbortSignal[]) => AbortSignal }
+  ).any;
+  if (typeof anyFn === "function") return anyFn(signals);
+  const ctrl = new AbortController();
+  const onAbort = (s: AbortSignal) => () => {
+    ctrl.abort((s as { reason?: unknown }).reason);
+  };
+  for (const s of signals) {
+    if (s.aborted) {
+      ctrl.abort((s as { reason?: unknown }).reason);
+      break;
+    }
+    s.addEventListener("abort", onAbort(s), { once: true });
+  }
+  return ctrl.signal;
 }

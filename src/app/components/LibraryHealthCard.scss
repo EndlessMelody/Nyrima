@@ -1,0 +1,162 @@
+/**
+ * LibraryHealthCard — right-rail status & metrics card.
+ *
+ * Glass panel with hairline border, four-metric grid, two pill rows, and
+ * an action stack at the bottom. Lives in `.ny-dashboard__rail`.
+ */
+
+.ny-health {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--neutral-border-weak);
+  border-radius: var(--ny-radius-md);
+  background: linear-gradient(
+    180deg,
+    var(--surface-background) 0%,
+    var(--surface-background-weak) 100%
+  );
+  box-shadow:
+    0 0 0 1px var(--hairline-pink),
+    0 12px 40px -20px rgba(0, 0, 0, 0.45);
+}
+
+.ny-health__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ny-health__eyebrow {
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--brand-on-background-strong);
+}
+
+// --- Metric grid -----------------------------------------------------------
+.ny-health__metrics {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.ny-health__metric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--neutral-border-weak);
+  border-radius: var(--ny-radius-sm);
+  background: var(--surface-background-weak);
+
+  &.is-brand {
+    border-color: var(--brand-border-medium);
+    background: var(--brand-alpha-weak);
+  }
+
+  &.is-accent {
+    border-color: var(--accent-border-medium);
+    background: var(--accent-alpha-weak);
+  }
+}
+
+.ny-health__metric-value {
+  font-family: var(--dc-font-display);
+  font-size: 1.5rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--neutral-on-background-strong);
+
+  .ny-health__metric.is-brand & {
+    color: var(--brand-on-background-strong);
+  }
+  .ny-health__metric.is-accent & {
+    color: var(--accent-on-background-strong);
+  }
+}
+
+.ny-health__metric-label {
+  font-family: var(--dc-font-mono);
+  font-size: 0.625rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--neutral-on-background-weak);
+}
+
+// --- Status rows -----------------------------------------------------------
+.ny-health__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--neutral-border-weak);
+  border-radius: var(--ny-radius-sm);
+  background: var(--surface-background-weak);
+}
+
+.ny-health__row-label {
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--neutral-on-background-weak);
+}
+
+.ny-health__row-value {
+  font-family: var(--dc-font-mono);
+  font-size: 0.75rem;
+  color: var(--neutral-on-background-medium);
+}
+
+.ny-health__row-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-family: var(--dc-font-mono);
+  font-size: 0.625rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.ny-health__row-pill--ok {
+  color: var(--success-solid-strong);
+  background: color-mix(in srgb, var(--success-solid-strong) 14%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--success-solid-strong) 30%, transparent);
+}
+
+.ny-health__row-pill--warn {
+  color: var(--warning-solid-strong);
+  background: color-mix(in srgb, var(--warning-solid-strong) 14%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--warning-solid-strong) 30%, transparent);
+}
+
+// --- Actions ---------------------------------------------------------------
+.ny-health__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.ny-health__cta {
+  width: 100%;
+  justify-content: center;
+}

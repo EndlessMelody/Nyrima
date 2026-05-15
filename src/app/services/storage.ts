@@ -146,7 +146,9 @@ export async function getSettings(): Promise<AppSettings> {
 
 /** Fold the pre-2026-05-15 font-preset keys (`comic`, `geist`) into the new
  *  picker labels so users who hydrated with the old shape don't get reset to
- *  defaults. */
+ *  defaults. Also folds the legacy `subtitlePosition: 0.08` default into the
+ *  current default of 0 — the SCSS bottom offset tightened up, so 0.08 on
+ *  top of the new tighter base lifts cues into the middle of the frame. */
 function migrateSettings(
   s: Partial<AppSettings> & { subtitleFont?: string },
 ): Partial<AppSettings> {
@@ -154,6 +156,7 @@ function migrateSettings(
   const legacy = next.subtitleFont as string | undefined;
   if (legacy === "comic") next.subtitleFont = "anime-brush";
   else if (legacy === "geist") next.subtitleFont = "clean-sans";
+  if (next.subtitlePosition === 0.08) next.subtitlePosition = 0;
   return next as Partial<AppSettings>;
 }
 

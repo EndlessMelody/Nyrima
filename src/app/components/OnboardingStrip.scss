@@ -1,0 +1,143 @@
+/**
+ * OnboardingStrip — collapsed help/setup band for returning users.
+ *
+ * Sits at the bottom of the dashboard. Two states:
+ *   - Collapsed: one row with eyebrow + tagline + CTA cluster.
+ *   - Expanded: also shows the three-step setup walkthrough.
+ */
+
+.ny-onboard-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 18px;
+  border: 1px solid var(--neutral-border-weak);
+  border-radius: var(--ny-radius-md);
+  background: linear-gradient(
+    180deg,
+    var(--surface-background) 0%,
+    var(--surface-background-weak) 100%
+  );
+  box-shadow: 0 0 0 1px var(--hairline-blue);
+
+  &.is-open {
+    padding: 18px 18px 20px;
+  }
+}
+
+.ny-onboard-strip__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+}
+
+.ny-onboard-strip__eyebrow {
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent-on-background-strong);
+}
+
+.ny-onboard-strip__tagline {
+  font-family: var(--dc-font-body);
+  font-size: 0.875rem;
+  color: var(--neutral-on-background-medium);
+  flex: 1 1 220px;
+  min-width: 200px;
+}
+
+.ny-onboard-strip__actions {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.ny-onboard-strip__toggle {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--accent-on-background-strong);
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  transition:
+    background 140ms ease,
+    color 140ms ease;
+
+  &:hover {
+    background: var(--accent-alpha-weak);
+  }
+}
+
+// --- Steps -----------------------------------------------------------------
+.ny-onboard-strip__steps {
+  list-style: none;
+  margin: 0;
+  padding: 14px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  border: 1px solid var(--neutral-border-weak);
+  border-radius: var(--ny-radius-sm);
+  background: var(--surface-background-weak);
+}
+
+@media (max-width: 800px) {
+  .ny-onboard-strip__steps {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ny-onboard-strip__step {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.ny-onboard-strip__step-index {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--dc-font-mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  border-radius: 8px;
+  border: 1px solid var(--brand-border-medium);
+  background: var(--brand-alpha-weak);
+  color: var(--brand-on-background-strong);
+}
+
+.ny-onboard-strip__step-title {
+  display: block;
+  font-family: var(--dc-font-display);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--neutral-on-background-strong);
+  margin-bottom: 2px;
+}
+
+.ny-onboard-strip__step-text {
+  display: block;
+  font-family: var(--dc-font-body);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: var(--neutral-on-background-medium);
+}

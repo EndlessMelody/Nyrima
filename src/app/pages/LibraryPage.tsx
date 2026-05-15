@@ -21,6 +21,7 @@ import { PosterSkeleton } from "../components/PosterSkeleton";
 import { SuggestionList } from "../components/SuggestionList";
 import { SetupAccessDialog } from "../components/SetupAccessDialog";
 import { NyrimaMark } from "../components/NyrimaMark";
+import { DriveStatusBanner } from "../components/DriveStatusBanner";
 import { resolvePoster } from "../services/poster-resolver";
 import { getManyCached } from "../services/metadata-cache";
 import { isWatched } from "../services/storage";
@@ -32,8 +33,17 @@ import "./LibraryPage.scss";
 export function LibraryPage() {
   const { folderId = "" } = useParams();
   const navigate = useNavigate();
-  const { loading, error, errorReason, videos, subfolders, loadFolder } =
-    useLibraryStore();
+  const {
+    loading,
+    refreshing,
+    cacheAgeAt,
+    error,
+    errorReason,
+    videos,
+    subfolders,
+    loadFolder,
+    refresh,
+  } = useLibraryStore();
   const upsertRecent = useRecentStore((s) => s.upsert);
   const [setupOpen, setSetupOpen] = useState(false);
   const [positions] = usePlaybackPositions(folderId);
@@ -147,6 +157,12 @@ export function LibraryPage() {
         }
         shortFolderId={shortFolderId}
         onBack={() => navigate("/")}
+      />
+
+      <DriveStatusBanner
+        refreshing={refreshing}
+        cacheAgeAt={cacheAgeAt}
+        onRefresh={refresh}
       />
 
       {featured && (

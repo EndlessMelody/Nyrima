@@ -18,7 +18,12 @@ export const STORAGE_KEYS = {
   SETTINGS: "dc.settings",
   METADATA_CACHE: "dc.metadataCache",
   TMDB_KEY: "dc.tmdbKey",
+  /** Per-file last-known playback mode (native vs mse-remux) for MKV files. */
+  PLAYBACK_ENGINE_CACHE: "dc.playbackEngineCache",
 } as const;
+
+/** Max entries kept in the per-file playback-mode LRU. */
+export const MAX_PLAYBACK_ENGINE_ENTRIES = 50;
 
 /** Maximum number of recent folders kept. */
 export const MAX_RECENT_FOLDERS = 20;

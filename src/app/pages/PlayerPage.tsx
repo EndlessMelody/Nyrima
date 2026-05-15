@@ -16,18 +16,20 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import {
-  getFile,
-  listFolderAll,
   matchSubtitlesForVideo,
-  downloadTextFile,
   buildMediaUrl,
   buildPublicStreamUrl,
   isSubtitleFile,
   isVideoFile,
   getExtension,
 } from "../services/drive-api";
+import {
+  getFileMetadata,
+  listFolder as cachedListFolder,
+  getSubtitleText,
+} from "../services/drive/metadata-service";
 import { authedFetch } from "../services/auth";
 import { DriveAccessError, type DriveAccessReason } from "../services/errors";
 import {
@@ -37,11 +39,7 @@ import {
 } from "../services/storage";
 import { SetupAccessDialog } from "../components/SetupAccessDialog";
 import { DrivePlayer, type SubtitleTrack } from "../components/DrivePlayer";
-import {
-  parseSubtitles,
-  detectLang,
-  prettyLangLabel,
-} from "../services/subtitles";
+import { DriveStatusBanner } from "../components/DriveStatusBanner";
 import { extractMkvSubtitles } from "../services/mkv-subtitles";
 import { MkvMseController } from "../services/mkv-remux/mse-controller";
 import {
@@ -53,6 +51,20 @@ import {
   formatRuntime,
 } from "../services/formatters";
 import { usePlaybackPositions } from "../hooks/usePlaybackPositions";
+import {
+  markPlayback,
+  resetPlaybackTelemetry,
+  summarizePlaybackStartup,
+} from "../services/playback-telemetry";
+import {
+  NATIVE_WATCHDOG_MS,
+  allowsFallback,
+  decideInitialMode,
+  getRememberedMode,
+  rememberMode,
+  type PlaybackMode,
+  type PlaybackStrategy,
+} from "../services/playback-strategy";
 import { PlayerLayout } from "../components/PlayerLayout";
 import { PlaylistSidebar } from "../components/PlaylistSidebar";
 import { NyrimaMark } from "../components/NyrimaMark";
@@ -68,9 +80,15 @@ import "./PlayerPage.scss";
 // onTimeUpdate. Going lower than this would flood chrome.storage writes.
 const POSITION_SAVE_MS = 4000;
 
+// MKV playback strategy. Hard-coded today; the user-facing settings dropdown
+// will read this from the settings store in a later pass.
+const ACTIVE_STRATEGY: PlaybackStrategy = "auto";
+
 export function PlayerPage() {
   const { folderId = "", fileId = "" } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const restartRequested = searchParams.get("restart") === "1";
 
   const [file, setFile] = useState<DriveFile | null>(null);
   const [folderName, setFolderName] = useState<string>("");
@@ -89,6 +107,7 @@ export function PlayerPage() {
   const [initialSeek, setInitialSeek] = useState<number>(0);
   const [positions, setPositions] = usePlaybackPositions(folderId);
   const [theater, setTheater] = useState(false);
+  const [playbackMode, setPlaybackMode] = useState<PlaybackMode | null>(null);
 
   const blobUrlRef = useRef<string | null>(null);
   const lastSaveRef = useRef<number>(0);
@@ -97,6 +116,20 @@ export function PlayerPage() {
     null,
   );
   const mkvExtractAbortRef = useRef<AbortController | null>(null);
+  // Native-attempt watchdog. Armed when we start a native MKV stream; cleared
+  // once `canplay` fires or fallback is triggered.
+  const nativeWatchdogRef = useRef<number | null>(null);
+  // Set true the first time `onCanPlay` fires for the current src. Used to
+  // suppress fallback if playback is already healthy.
+  const canPlayFiredRef = useRef(false);
+  // Latest fileId/mode pair, read by the watchdog timer + fallback handler
+  // without having to be re-bound on every render.
+  const playbackContextRef = useRef<{ fileId: string; mode: PlaybackMode | null }>(
+    { fileId: "", mode: null },
+  );
+  useEffect(() => {
+    playbackContextRef.current = { fileId, mode: playbackMode };
+  }, [fileId, playbackMode]);
 
   // Surface a typed DriveAccessError into the UI state.
   const reportError = useCallback((e: unknown) => {
@@ -115,6 +148,13 @@ export function PlayerPage() {
   // Load video metadata + decide a streaming URL + load subtitles.
   useEffect(() => {
     let cancelled = false;
+    // One AbortController per route so navigating away cancels in-flight
+    // Drive calls (metadata, subtitle text, range probes) before they
+    // burn quota or fight with the next page's requests.
+    const loadAbort = new AbortController();
+    // Telemetry: clear marks from the prior playback and stamp t=0 for this one.
+    resetPlaybackTelemetry();
+    markPlayback("player:init");
     // Reset everything so retries (navigate(0)) start clean.
     setError(null);
     setErrorReason(null);
@@ -139,23 +179,40 @@ export function PlayerPage() {
       mkvExtractAbortRef.current.abort();
       mkvExtractAbortRef.current = null;
     }
+    if (nativeWatchdogRef.current !== null) {
+      window.clearTimeout(nativeWatchdogRef.current);
+      nativeWatchdogRef.current = null;
+    }
+    canPlayFiredRef.current = false;
+    setPlaybackMode(null);
     mkvHeaderRef.current = null;
 
     async function run() {
       try {
         // Fan-out: video metadata, sibling listing, resume position, and
         // the parent folder's display name are independent — fetching them
-        // in parallel saves a round-trip per request from TTFP.
+        // in parallel saves a round-trip per request from TTFP. Metadata +
+        // folder listing go through the cache-first service so repeated
+        // navigation inside the same library hits IndexedDB, not Drive.
+        markPlayback("drive:metadata:start");
         const [video, siblingsResult, saved, folder] = await Promise.all([
-          getFile(fileId),
-          listFolderAll(folderId).catch((err) => {
-            // eslint-disable-next-line no-console
-            console.warn("listFolderAll failed:", err);
-            return [] as DriveFile[];
-          }),
+          getFileMetadata(fileId, { signal: loadAbort.signal, priority: "high" }),
+          cachedListFolder(folderId, { signal: loadAbort.signal, priority: "high" })
+            .then((r) => r.files)
+            .catch((err) => {
+              if (!loadAbort.signal.aborted) {
+                // eslint-disable-next-line no-console
+                console.warn("listFolder failed:", err);
+              }
+              return [] as DriveFile[];
+            }),
           getPlaybackPosition(fileId).catch(() => undefined),
-          getFile(folderId).catch(() => null),
+          getFileMetadata(folderId, {
+            signal: loadAbort.signal,
+            priority: "normal",
+          }).catch(() => null),
         ]);
+        markPlayback("drive:metadata:end");
         if (cancelled) return;
         setFile(video);
         if (folder?.name) setFolderName(folder.name);
@@ -180,45 +237,90 @@ export function PlayerPage() {
           return;
         }
 
-        // MKV → try native streaming first (works for H.264+AAC/Opus in
-        // Chrome/Edge/Firefox). Subtitles are extracted separately from the
-        // MKV header and rendered via our own SubtitleOverlay.
-        // If native playback fails, handleMediaError will fall back to MSE.
+        // MKV → native-first with MSE fallback.
+        //
+        // The historical decision was to always route MKV to MSE because
+        // failed native attempts wasted Drive Range requests. That tradeoff
+        // flipped once the subtitle pipeline stopped needing remux: the
+        // common H.264+AAC MKV plays natively in ~1 s, and a single wasted
+        // Range on a HEVC file is far cheaper than 30 s+ of always-on remux.
+        //
+        // Flow:
+        //   1. decideInitialMode (see playback-strategy.ts) picks native
+        //      unless the user forced MSE or we previously remembered this
+        //      file failed native.
+        //   2. The watchdog below trips after NATIVE_WATCHDOG_MS if the
+        //      native attempt hasn't reached `canplay` — common for HEVC,
+        //      where the browser refuses silently rather than throwing.
+        //   3. `handleMediaError` triggers fallback synchronously when the
+        //      <video> emits MEDIA_ERR_SRC_NOT_SUPPORTED / MEDIA_ERR_DECODE.
+        //   4. On either fallback path we `rememberMode(fileId, "mse-remux")`
+        //      so re-opening the same file skips the watchdog cost.
         if (isMkv) {
+          const remembered = await getRememberedMode(fileId);
           if (cancelled) return;
-          let nativeOk = false;
-          try {
-            const directUrl = await buildPublicStreamUrl(fileId);
-            if (directUrl) {
-              await authedFetch(buildMediaUrl(fileId), {
-                headers: { Range: "bytes=0-0" },
-              });
-              if (cancelled) return;
-              setStreamUrl(directUrl);
-              setIsMkvNative(true);
-              nativeOk = true;
-            }
-          } catch {
-            // Direct URL not accessible (private file, no API key, etc.)
-            // — fall through to MSE below.
-          }
-          if (!nativeOk && !cancelled) {
-            // No direct URL or probe failed → go straight to MSE remux.
+          const decision = decideInitialMode(video, ACTIVE_STRATEGY, remembered);
+          markPlayback("playback:mode-initial");
+          setPlaybackMode(decision.mode);
+          // eslint-disable-next-line no-console
+          console.info(
+            `[playback] mode=${decision.mode} reason=${decision.reason} file=${video.name}`,
+          );
+
+          if (decision.mode === "mse-remux") {
             setIsMkvMse(true);
+          } else {
+            // Native attempt — needs an API-key-stamped URL because we can't
+            // pass an Authorization header to <video src=…>. Without a key,
+            // direct streaming is impossible (OAuth-only mode); fall straight
+            // to MSE in that case.
+            const directUrl = await buildPublicStreamUrl(fileId);
+            if (cancelled) return;
+            if (!directUrl) {
+              // eslint-disable-next-line no-console
+              console.info("[playback] no API key; MKV → MSE (OAuth mode)");
+              setPlaybackMode("mse-remux");
+              setIsMkvMse(true);
+            } else {
+              setIsMkvNative(true);
+              setStreamUrl(directUrl);
+              // Arm the watchdog. If `canplay` lands first, `handleCanPlay`
+              // clears it and remembers `native`. If decode error lands
+              // first, `handleMediaError` calls `fallbackToMse`.
+              if (allowsFallback(ACTIVE_STRATEGY)) {
+                // eslint-disable-next-line no-console
+                console.info(
+                  `[playback] native attempt armed; watchdog=${NATIVE_WATCHDOG_MS}ms`,
+                );
+                nativeWatchdogRef.current = window.setTimeout(() => {
+                  nativeWatchdogRef.current = null;
+                  if (canPlayFiredRef.current) return;
+                  // eslint-disable-next-line no-console
+                  console.warn(
+                    `[playback] native MKV watchdog tripped after ${NATIVE_WATCHDOG_MS}ms; falling back to MSE`,
+                  );
+                  fallbackToMse();
+                }, NATIVE_WATCHDOG_MS);
+              }
+            }
           }
         } else {
           // Non-MKV: direct streaming (preferred) with blob fallback.
           const directUrl = await buildPublicStreamUrl(fileId);
           if (directUrl) {
+            markPlayback("media:first-range:start");
             await authedFetch(buildMediaUrl(fileId), {
               headers: { Range: "bytes=0-0" },
             });
+            markPlayback("media:first-range:end");
             if (cancelled) return;
             setStreamUrl(directUrl);
           } else {
             setBufferingBlob(true);
+            markPlayback("media:first-range:start");
             const res = await authedFetch(buildMediaUrl(fileId));
             const blob = await res.blob();
+            markPlayback("media:first-range:end");
             if (cancelled) return;
             const u = URL.createObjectURL(blob);
             blobUrlRef.current = u;
@@ -227,21 +329,23 @@ export function PlayerPage() {
           }
         }
 
-        // Subtitles — fetch all matched external subs in parallel.
+        // Subtitles — pull all matched external subs through the cache.
+        // getSubtitleText returns parsed cues so we don't re-parse on revisit.
         const matchedSubs = matchSubtitlesForVideo(video, siblings).filter(
           isSubtitleFile,
         );
         const tracksResults = await Promise.all(
           matchedSubs.map(async (s) => {
             try {
-              const text = await downloadTextFile(s.id);
-              const cues = parseSubtitles(text, getExtension(s.name));
-              const lang = detectLang(s.name);
+              const entry = await getSubtitleText(s, {
+                signal: loadAbort.signal,
+                priority: "high",
+              });
               return {
                 id: `ext-${s.id}`,
-                lang,
-                label: prettyLangLabel(lang, s.name),
-                cues,
+                lang: entry.lang,
+                label: entry.label,
+                cues: entry.cues,
               } as SubtitleTrack;
             } catch {
               return null;
@@ -291,8 +395,15 @@ export function PlayerPage() {
           });
         }
 
-        // Resume position (came in from the parallel fetch above).
-        if (!cancelled && saved && saved.positionSeconds > 5) {
+        // Resume position (came in from the parallel fetch above). Skipped
+        // when the caller navigated here with `?restart=1` (the lobby's
+        // Restart button on the Continue Watching hero).
+        if (
+          !cancelled &&
+          !restartRequested &&
+          saved &&
+          saved.positionSeconds > 5
+        ) {
           setInitialSeek(saved.positionSeconds);
         }
       } catch (e) {
@@ -302,9 +413,14 @@ export function PlayerPage() {
     void run();
     return () => {
       cancelled = true;
+      loadAbort.abort();
       mkvExtractAbortRef.current?.abort();
+      if (nativeWatchdogRef.current !== null) {
+        window.clearTimeout(nativeWatchdogRef.current);
+        nativeWatchdogRef.current = null;
+      }
     };
-  }, [folderId, fileId, reportError]);
+  }, [folderId, fileId, reportError, restartRequested]);
 
   // Clean up blob URLs and MSE controller on unmount.
   useEffect(
@@ -346,6 +462,39 @@ export function PlayerPage() {
     [isMkvMse, file, fileId, reportError],
   );
 
+  // Transition native MKV → MSE remux. Safe to call from both the watchdog
+  // timer and from `handleMediaError`; second-call guards keep it idempotent.
+  const fallbackToMse = useCallback(() => {
+    if (canPlayFiredRef.current) return; // already playing — too late to switch
+    if (nativeWatchdogRef.current !== null) {
+      window.clearTimeout(nativeWatchdogRef.current);
+      nativeWatchdogRef.current = null;
+    }
+    markPlayback("playback:fallback-to-mse");
+    const ctx = playbackContextRef.current;
+    if (ctx.fileId) void rememberMode(ctx.fileId, "mse-remux");
+    setIsMkvNative(false);
+    setPlaybackMode("mse-remux");
+    setStreamUrl(null);
+    setIsMkvMse(true);
+  }, []);
+
+  // Telemetry: once the browser reports `canplay`, lock in the mode, cancel
+  // the watchdog, persist the outcome, and dump the startup table.
+  const handleCanPlay = useCallback(() => {
+    canPlayFiredRef.current = true;
+    if (nativeWatchdogRef.current !== null) {
+      window.clearTimeout(nativeWatchdogRef.current);
+      nativeWatchdogRef.current = null;
+    }
+    const ctx = playbackContextRef.current;
+    // eslint-disable-next-line no-console
+    console.info(`[playback] canplay reached; mode=${ctx.mode ?? "?"}`);
+    if (ctx.fileId && ctx.mode) void rememberMode(ctx.fileId, ctx.mode);
+    if (!file) return;
+    summarizePlaybackStartup(file.name);
+  }, [file]);
+
   // Throttled playback-position persistence.
   const handleTimeUpdate = useCallback(
     (t: number, d: number) => {
@@ -374,18 +523,20 @@ export function PlayerPage() {
 
       // MKV native → MSE fallback: if the browser can't play the MKV
       // natively (unsupported codec like HEVC, or container issue), switch
-      // to the MSE remux pipeline transparently.
+      // to the MSE remux pipeline transparently. `fallbackToMse` also
+      // remembers the outcome so we skip the wasted native attempt next time.
+      // Under `force-native` the user explicitly opted out of fallback —
+      // surface the error instead of silently swapping engines.
       if (
         isMkvNative &&
         !isMkvMse &&
+        allowsFallback(ACTIVE_STRATEGY) &&
         (code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED ||
           code === MediaError.MEDIA_ERR_DECODE)
       ) {
         // eslint-disable-next-line no-console
         console.warn("MKV native playback failed, falling back to MSE remux");
-        setIsMkvNative(false);
-        setIsMkvMse(true);
-        setStreamUrl(null);
+        fallbackToMse();
         return;
       }
 
@@ -437,7 +588,7 @@ export function PlayerPage() {
         reportError(e);
       }
     },
-    [fileId, reportError, isMkvNative, isMkvMse],
+    [fileId, reportError, isMkvNative, isMkvMse, fallbackToMse],
   );
 
   const loading =
@@ -620,6 +771,7 @@ export function PlayerPage() {
                 initialSeek={initialSeek}
                 onMediaError={handleMediaError}
                 onTimeUpdate={handleTimeUpdate}
+                onCanPlay={handleCanPlay}
                 onVideoRef={
                   isMkvMse && !isMkvNative ? handleVideoRef : undefined
                 }
@@ -632,6 +784,7 @@ export function PlayerPage() {
 
             {file && (
               <div className="ny-player-info">
+                <DriveStatusBanner />
                 <div className="ny-player-info__head">
                   <div>
                     <h2 className="ny-player-info__title">{displayTitle}</h2>

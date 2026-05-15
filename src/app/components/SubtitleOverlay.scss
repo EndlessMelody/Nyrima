@@ -1,95 +1,126 @@
 /**
- * SubtitleOverlay — custom subtitle rendering above the video frame.
+ * SubtitleOverlay — bottom-anchored cinema-style subtitles.
  *
- * Design notes:
- *  - Absolutely positioned over the video element, same z-layer as corners.
- *  - Two rows: top and bottom, each with left/center/right alignment zones.
- *  - Respects user font-size scaling and delay offset.
- *  - Gold accent for active cues to match Obsidian Atelier theme.
+ * Positioning model:
+ *  - Overlay fills the player frame.
+ *  - Bottom zone is absolutely pinned near the bottom safe area, sitting
+ *    above the control dock when the HUD is visible and drifting lower
+ *    when it auto-hides.
+ *  - Top zone stays at the top for ASS-positioned overhead lines.
+ *
+ * Readability:
+ *  - Strong layered text-shadow + paint-order stroke survives bright frames.
+ *  - Font scales fluidly via clamp() and the user's --dc-sub-scale.
  */
 
 .dc-sub-overlay {
+  // Distance from the bottom of the player to the cue baseline. We size
+  // these relative to the player container (cqh = % of container height)
+  // so windowed and fullscreen scale proportionally instead of using
+  // hard-coded pixel clamps that look right in only one mode.
+  // 11cqh ≈ above the HUD when controls are visible.
+  // 5cqh  ≈ closer to the bottom edge when HUD is hidden.
+  --dc-sub-bottom-visible: clamp(56px, 11cqh, 132px);
+  --dc-sub-bottom-hidden: clamp(28px, 5cqh, 72px);
+
   position: absolute;
   inset: 0;
-  z-index: 2;
+  z-index: 35;
   pointer-events: none;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  // Top breathing room stays fixed; bottom offset is user-controlled so the
-  // cue line can lift off the very bottom edge when watching on TVs that
-  // clip overscan, etc. Defaults to ~10 % of overlay height.
-  padding: 12% 6% calc(8% + var(--dc-sub-bottom-offset, 0%));
-  transition: padding 200ms ease;
 }
 
-.dc-sub-overlay.is-fs {
-  padding: 10% 8% calc(6% + var(--dc-sub-bottom-offset, 0%));
-}
-
-.dc-sub-zone {
+// --- Top zone --------------------------------------------------------------
+// Only used by ASS cues that explicitly opt into top placement.
+.dc-sub-zone--top {
+  position: absolute;
+  top: clamp(24px, 5vh, 80px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(86%, 1100px);
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
   justify-content: center;
-  align-content: flex-end;
-  min-height: 1.5em;
-
-  &--top {
-    align-content: flex-start;
-  }
-
-  &--bottom {
-    align-content: flex-end;
-  }
+  text-align: center;
 }
 
-// Base font-size for windowed playback. The `--dc-sub-scale` multiplier
-// (set inline on the overlay by SubtitleOverlay.tsx, defaulting to 1) lets
-// the user re-scale 50–200 % from settings without touching this clamp.
-$sub-base-windowed: clamp(0.95rem, 2.2vw, 1.4rem);
-// Fullscreen wants a much larger base because the viewport is now the whole
-// screen — keyed off `vh` (cue sits at the bottom of the video, height is
-// the natural reference), capped so 4K monitors don't get billboard sub.
-$sub-base-fullscreen: clamp(1.55rem, 3.4vh, 3rem);
+// --- Bottom zone -----------------------------------------------------------
+// The cinema cue line. Pinned to the bottom safe area, lifted by the
+// user-controlled subtitle position offset (% of overlay height).
+.dc-sub-zone--bottom {
+  position: absolute;
+  left: 50%;
+  bottom: calc(
+    var(--dc-sub-bottom-visible) + var(--dc-sub-bottom-offset, 0%)
+  );
+  transform: translateX(-50%);
+  width: min(86%, 1200px);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+  text-align: center;
+  transition: bottom 220ms ease;
+}
+
+// When the HUD auto-hides, drop the cue closer to the bottom of the frame
+// so the dialogue sits where the eye naturally rests in a wide cinematic
+// composition.
+.dc-vlc:not(.is-hud-on) .dc-sub-zone--bottom {
+  bottom: calc(
+    var(--dc-sub-bottom-hidden) + var(--dc-sub-bottom-offset, 0%)
+  );
+}
+
+// Fullscreen uses the same container-relative offsets — because cqh is
+// now relative to the player itself (which fills the viewport in FS),
+// the spacing scales naturally. We only nudge the offsets a touch
+// higher to clear TV overscan.
+.dc-sub-overlay.is-fs {
+  --dc-sub-bottom-visible: clamp(72px, 11cqh, 160px);
+  --dc-sub-bottom-hidden: clamp(40px, 6cqh, 100px);
+}
+
+// Base font-size scales with the PLAYER container, not the viewport. cqi
+// = % of container inline (width) — so a 640px-wide windowed player and a
+// 1920px fullscreen frame both end up with proportionally-sized cues.
+//
+// 3.4cqi ≈ ~22px on a small 640px player, ~46px on a 1366px theater frame,
+// ~65px on a 1920px fullscreen frame (then the clamp pulls it back).
+//
+// The `--dc-sub-scale` multiplier lets users dial 50–200 % in settings.
+$sub-base-windowed: clamp(16px, 3.4cqi, 48px);
+$sub-base-fullscreen: clamp(22px, 3.4cqi, 64px);
 
 .dc-sub-cue {
   display: inline-block;
   padding: 0 0.15em;
   background: transparent;
-  color: var(--dc-sub-color, #e8e8e8);
-  // Family driven by the SubtitleOverlay's inline `--dc-sub-font` var so
-  // SettingsPopover's font picker (Anime Brush / Comic Dialogue / Clean
-  // Sans / System / Custom) takes effect without re-rendering the SCSS.
+  color: var(--dc-sub-color, #fff);
   font-family: var(--dc-sub-font, var(--dc-font-subtitle));
   font-weight: var(--dc-sub-weight, 700);
-  // Force the browser to *synthesize* italic on Comic Sans MS (which has no
-  // italic face) instead of silently falling through the font stack to a
-  // font that does — that fallback is what makes ASS-italic cues stop
-  // looking like Comic Sans entirely.
   font-synthesis: style weight;
-  line-height: 1.3;
+  line-height: 1.25;
   letter-spacing: var(--dc-sub-letter-spacing, 0.01em);
-  // No more uppercase pass — anime fansub style and natural mixed-case
-  // dialogue both look better in their authored capitalization.
   text-align: center;
   word-break: normal;
   overflow-wrap: anywhere;
-  max-width: 92%;
+  max-width: 100%;
   font-size: calc(#{$sub-base-windowed} * var(--dc-sub-scale, 1));
-  // Stroke + soft halo shadow keep cues readable on bright frames; both
-  // come from CSS vars so SettingsPopover can dial them independently.
   -webkit-text-stroke:
     var(--dc-sub-stroke-width, 2.5px) var(--dc-sub-stroke-color, #000);
   paint-order: stroke fill;
+  // Layered shadow — a tight dark drop for contrast against bright frames,
+  // plus a softer halo for legibility over busy backgrounds. The user's
+  // `--dc-sub-shadow` multiplier scales both at once.
   text-shadow:
-    0 0 calc(2px * var(--dc-sub-shadow, 1)) rgba(0, 0, 0, calc(0.9 * var(--dc-sub-shadow, 1))),
-    0 2px calc(4px * var(--dc-sub-shadow, 1)) rgba(0, 0, 0, calc(0.6 * var(--dc-sub-shadow, 1)));
+    0 2px 2px rgba(0, 0, 0, calc(0.95 * var(--dc-sub-shadow, 1))),
+    0 0 4px rgba(0, 0, 0, calc(0.9 * var(--dc-sub-shadow, 1))),
+    0 0 10px rgba(0, 0, 0, calc(0.65 * var(--dc-sub-shadow, 1)));
   transition:
     opacity 160ms ease,
     transform 160ms ease;
 
-  // ASS-derived styles
   &[data-bold="true"] {
     font-weight: 700;
   }
@@ -107,15 +138,11 @@ $sub-base-fullscreen: clamp(1.55rem, 3.4vh, 3rem);
   }
 }
 
-// In fullscreen swap the base to a vh-driven clamp so the cue stays in
-// proportion with the actual screen. Stroke is scaled relative to the user
-// setting so the outline keeps its weight against the larger glyphs.
 .dc-sub-overlay.is-fs .dc-sub-cue {
   font-size: calc(#{$sub-base-fullscreen} * var(--dc-sub-scale, 1));
   -webkit-text-stroke-width: calc(var(--dc-sub-stroke-width, 2.5px) * 1.2);
 }
 
-// Entrance / exit
 .dc-sub-cue.is-enter {
   animation: dc-sub-in 180ms ease forwards;
 }

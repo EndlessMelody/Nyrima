@@ -1,0 +1,113 @@
+/**
+ * DriveStatusBanner — calm, non-blocking informational pills.
+ *
+ * Visual language matches the dc- chips used elsewhere in the lobby:
+ * thin border, mono-cap label, subtle gradient on the accent variants.
+ */
+
+.ny-drive-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0.4rem 0;
+  padding: 0.45rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(20, 18, 28, 0.65);
+  font-size: 0.78rem;
+  line-height: 1.2;
+  color: rgba(232, 232, 240, 0.86);
+  backdrop-filter: blur(6px);
+  white-space: nowrap;
+
+  strong {
+    color: #fff;
+    font-variant-numeric: tabular-nums;
+  }
+
+  &__sub {
+    color: rgba(232, 232, 240, 0.55);
+    font-size: 0.72rem;
+    margin-left: 0.4rem;
+  }
+
+  &__btn {
+    margin-left: 0.4rem;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    color: inherit;
+    padding: 0.18rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    cursor: pointer;
+    transition: background 120ms ease, border-color 120ms ease;
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.06);
+      border-color: rgba(255, 255, 255, 0.28);
+    }
+  }
+
+  // --- Cooling-down --------------------------------------------------------
+  &--cooling {
+    border-color: rgba(247, 167, 121, 0.4);
+    background: linear-gradient(
+      90deg,
+      rgba(247, 167, 121, 0.12),
+      rgba(247, 121, 138, 0.08)
+    );
+    color: #ffe3cf;
+  }
+
+  &__pulse {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #f7a779;
+    box-shadow: 0 0 0 0 rgba(247, 167, 121, 0.6);
+    animation: ny-drive-pulse 1.8s ease-out infinite;
+  }
+
+  @keyframes ny-drive-pulse {
+    0% {
+      box-shadow: 0 0 0 0 rgba(247, 167, 121, 0.6);
+    }
+    70% {
+      box-shadow: 0 0 0 10px rgba(247, 167, 121, 0);
+    }
+    100% {
+      box-shadow: 0 0 0 0 rgba(247, 167, 121, 0);
+    }
+  }
+
+  // --- Refreshing ----------------------------------------------------------
+  &--refreshing {
+    border-color: rgba(174, 156, 255, 0.32);
+    background: linear-gradient(
+      90deg,
+      rgba(174, 156, 255, 0.12),
+      rgba(232, 168, 204, 0.08)
+    );
+    color: #e7e0ff;
+  }
+
+  &__spinner {
+    width: 10px;
+    height: 10px;
+    border: 1.5px solid rgba(174, 156, 255, 0.35);
+    border-top-color: #c8b9ff;
+    border-radius: 50%;
+    animation: ny-drive-spin 0.9s linear infinite;
+  }
+
+  @keyframes ny-drive-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  // --- Cached (idle) -------------------------------------------------------
+  &--cached {
+    color: rgba(232, 232, 240, 0.6);
+  }
+}

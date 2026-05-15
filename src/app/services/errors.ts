@@ -16,19 +16,39 @@ export class DriveAccessError extends Error {
   reason: DriveAccessReason;
   status?: number;
   driveMessage?: string;
+  /**
+   * Server-suggested wait, in ms, parsed from the Retry-After header. The
+   * queue honors this on the next retry instead of its own backoff math.
+   */
+  retryAfterMs?: number;
 
   constructor(
     reason: DriveAccessReason,
     message: string,
     status?: number,
     driveMessage?: string,
+    retryAfterMs?: number,
   ) {
     super(message);
     this.name = "DriveAccessError";
     this.reason = reason;
     this.status = status;
     this.driveMessage = driveMessage;
+    this.retryAfterMs = retryAfterMs;
   }
+}
+
+function readRetryAfter(res: Response): number | undefined {
+  const raw = res.headers.get("retry-after");
+  if (!raw) return undefined;
+  const trimmed = raw.trim();
+  if (/^\d+$/.test(trimmed)) return Number(trimmed) * 1000;
+  const ts = Date.parse(trimmed);
+  if (!Number.isNaN(ts)) {
+    const ms = ts - Date.now();
+    return ms > 0 ? ms : 0;
+  }
+  return undefined;
 }
 
 /**
@@ -51,6 +71,7 @@ export async function classifyDriveError(
   }
 
   const m = driveMessage.toLowerCase();
+  const retryAfterMs = readRetryAfter(res);
 
   // API key invalid
   if (
@@ -63,6 +84,7 @@ export async function classifyDriveError(
       "The configured Drive API key is invalid. Open Setup access and try a fresh key.",
       res.status,
       driveMessage,
+      retryAfterMs,
     );
   }
 
@@ -83,6 +105,7 @@ export async function classifyDriveError(
         "Hit Drive's rate limit. Wait a minute and try again.",
         res.status,
         driveMessage,
+        retryAfterMs,
       );
     }
     return new DriveAccessError(
@@ -108,6 +131,7 @@ export async function classifyDriveError(
       "Drive is rate-limiting us. Wait a minute, then retry.",
       res.status,
       driveMessage,
+      retryAfterMs,
     );
   }
 
@@ -116,5 +140,6 @@ export async function classifyDriveError(
     `Drive API ${res.status} ${res.statusText}${driveMessage ? `: ${driveMessage}` : ""}`,
     res.status,
     driveMessage,
+    retryAfterMs,
   );
 }

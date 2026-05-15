@@ -197,10 +197,17 @@ async function streamRemainder(
   opts: MkvExtractOptions,
 ): Promise<void> {
   const signal = opts.signal;
-  const res = await authedFetch(buildMediaUrl(fileId), {
-    headers: { Range: `bytes=${startOffset}-` },
-    signal,
-  });
+  // Subtitle stream runs in PARALLEL with the MSE media stream — both pull
+  // bytes of the same MKV. Keep it low-priority so the queue's cooldown
+  // pauses subtitle work first if Drive starts pushing back.
+  const res = await authedFetch(
+    buildMediaUrl(fileId),
+    {
+      headers: { Range: `bytes=${startOffset}-` },
+      signal,
+    },
+    { kind: "subtitle", priority: "low", signal },
+  );
 
   const reader = res.body?.getReader();
   if (!reader) {

@@ -1,0 +1,154 @@
+/**
+ * Drive debug panel — floats bottom-right; mono font; collapsible.
+ *
+ * Visually quiet so it doesn't fight the real UI when left open during
+ * development. Reads as a small inspector rather than a banner.
+ */
+
+.ny-debug {
+  position: fixed;
+  bottom: 12px;
+  right: 12px;
+  width: 280px;
+  max-height: calc(100vh - 24px);
+  display: flex;
+  flex-direction: column;
+  background: rgba(14, 12, 22, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  color: rgba(232, 232, 240, 0.86);
+  font-family:
+    "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  z-index: 9999;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 10px 28px -10px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+
+  &.is-collapsed {
+    width: 160px;
+  }
+
+  &__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  &__title {
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    color: rgba(232, 232, 240, 0.6);
+  }
+
+  &__toggle {
+    background: transparent;
+    border: none;
+    color: rgba(232, 232, 240, 0.7);
+    cursor: pointer;
+    font-size: 12px;
+    padding: 0 4px;
+  }
+
+  &__body {
+    padding: 8px 10px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  section {
+    h4 {
+      margin: 0 0 4px 0;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      color: rgba(174, 156, 255, 0.85);
+      text-transform: uppercase;
+    }
+  }
+
+  &__row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 1px 0;
+
+    strong {
+      color: #fff;
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+    }
+
+    &.is-warn strong,
+    strong.is-warn {
+      color: #ffc69d;
+    }
+  }
+
+  &__sub {
+    color: rgba(232, 232, 240, 0.5);
+    font-size: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6em;
+    padding-bottom: 4px;
+  }
+
+  &__check {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 0;
+    cursor: pointer;
+
+    input {
+      accent-color: #c8b9ff;
+    }
+
+    span {
+      flex: 1;
+    }
+  }
+
+  &__field {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 2px 0;
+
+    input {
+      width: 60px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: #fff;
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-family: inherit;
+      font-size: 11px;
+    }
+  }
+
+  &__action {
+    margin-top: 6px;
+    width: 100%;
+    background: rgba(247, 121, 138, 0.14);
+    border: 1px solid rgba(247, 121, 138, 0.4);
+    color: #ffd2da;
+    padding: 6px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 11px;
+    transition: background 120ms ease;
+
+    &:hover {
+      background: rgba(247, 121, 138, 0.22);
+    }
+  }
+}

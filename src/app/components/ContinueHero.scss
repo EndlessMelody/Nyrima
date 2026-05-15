@@ -1,0 +1,273 @@
+/**
+ * ContinueHero — neon cinema "resume watching" hero.
+ *
+ * Layout: full-bleed backdrop with a glass panel anchored bottom-left.
+ * The panel holds eyebrow + title + filename + progress + actions.
+ */
+
+.ny-continue-hero {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 6.5;
+  min-height: 320px;
+  border-radius: var(--ny-radius-lg);
+  overflow: hidden;
+  border: 1px solid var(--hairline-pink);
+  box-shadow:
+    0 24px 60px -32px rgba(0, 0, 0, 0.9),
+    0 12px 60px -28px var(--brand-alpha-medium);
+  isolation: isolate;
+}
+
+@media (max-width: 800px) {
+  .ny-continue-hero {
+    aspect-ratio: 16 / 10;
+  }
+}
+
+// --- Backdrop --------------------------------------------------------------
+.ny-continue-hero__backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    filter: saturate(0.95);
+  }
+}
+
+.ny-continue-hero__backdrop-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(
+      ellipse at 30% 30%,
+      var(--brand-alpha-strong) 0%,
+      transparent 60%
+    ),
+    radial-gradient(
+      ellipse at 70% 80%,
+      var(--accent-alpha-strong) 0%,
+      transparent 60%
+    ),
+    var(--surface-background-strong);
+  opacity: 0.85;
+}
+
+.ny-continue-hero__scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background:
+    linear-gradient(
+      90deg,
+      rgba(6, 8, 20, 0.92) 0%,
+      rgba(6, 8, 20, 0.6) 45%,
+      rgba(6, 8, 20, 0.1) 80%,
+      transparent 100%
+    ),
+    linear-gradient(
+      0deg,
+      rgba(6, 8, 20, 0.85) 0%,
+      transparent 60%
+    );
+}
+
+:root[data-theme="light"] .ny-continue-hero__scrim {
+  background:
+    linear-gradient(
+      90deg,
+      rgba(251, 248, 255, 0.92) 0%,
+      rgba(251, 248, 255, 0.65) 45%,
+      rgba(251, 248, 255, 0.15) 80%,
+      transparent 100%
+    ),
+    linear-gradient(
+      0deg,
+      rgba(251, 248, 255, 0.7) 0%,
+      transparent 60%
+    );
+}
+
+// Neon edge bloom on the top-right + bottom-left
+.ny-continue-hero__neon {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      600px 360px at 100% 0%,
+      var(--brand-alpha-weak) 0%,
+      transparent 60%
+    ),
+    radial-gradient(
+      500px 320px at 0% 100%,
+      var(--accent-alpha-weak) 0%,
+      transparent 60%
+    );
+  mix-blend-mode: screen;
+}
+
+:root[data-theme="light"] .ny-continue-hero__neon {
+  mix-blend-mode: multiply;
+  opacity: 0.4;
+}
+
+// --- Panel -----------------------------------------------------------------
+.ny-continue-hero__panel {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(620px, 60%);
+  height: 100%;
+  padding: 36px 36px 32px;
+  justify-content: flex-end;
+}
+
+@media (max-width: 800px) {
+  .ny-continue-hero__panel {
+    width: 100%;
+    padding: 24px 22px 22px;
+  }
+}
+
+.ny-continue-hero__eyebrow {
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--brand-on-background-strong);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.625rem;
+
+  &::before {
+    content: "";
+    width: 22px;
+    height: 1px;
+    background: currentColor;
+    opacity: 0.7;
+  }
+}
+
+.ny-continue-hero__title {
+  font-family: var(--dc-font-display);
+  font-size: clamp(1.5rem, 3.2vw, 2.25rem);
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+  color: var(--neutral-on-background-strong);
+  margin: 0;
+  text-shadow: 0 2px 12px rgba(6, 8, 20, 0.45);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:root[data-theme="light"] .ny-continue-hero__title {
+  text-shadow: 0 2px 6px rgba(251, 248, 255, 0.6);
+}
+
+.ny-continue-hero__filename {
+  font-family: var(--dc-font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  color: var(--neutral-on-background-weak);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+// --- Progress --------------------------------------------------------------
+.ny-continue-hero__progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+  max-width: 460px;
+}
+
+.ny-continue-hero__progress-track {
+  height: 4px;
+  border-radius: 4px;
+  background: rgba(248, 247, 255, 0.18);
+  overflow: hidden;
+  position: relative;
+}
+
+:root[data-theme="light"] .ny-continue-hero__progress-track {
+  background: rgba(23, 16, 34, 0.14);
+}
+
+.ny-continue-hero__progress-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    var(--brand-solid-medium),
+    var(--accent-solid-medium)
+  );
+  box-shadow: 0 0 12px var(--brand-alpha-medium);
+  transition: width 280ms ease;
+}
+
+.ny-continue-hero__progress-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--dc-font-mono);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: var(--neutral-on-background-medium);
+
+  .ny-continue-hero__progress-sep {
+    opacity: 0.4;
+  }
+}
+
+.ny-continue-hero__remaining {
+  color: var(--accent-on-background-strong);
+  font-weight: 500;
+}
+
+// --- Actions ---------------------------------------------------------------
+.ny-continue-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.ny-continue-hero__resume {
+  // Bigger than the surrounding ghost buttons; pink→cyan gradient comes
+  // from .ny-btn--primary in anime-theme.scss.
+  padding: 12px 20px;
+  font-size: 0.9375rem;
+  box-shadow:
+    0 12px 28px -8px var(--brand-alpha-strong),
+    0 0 0 1px rgba(255, 255, 255, 0.18) inset;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    opacity 160ms ease;
+
+  &:hover {
+    transform: translateY(-1px);
+    box-shadow:
+      0 14px 30px -8px var(--brand-alpha-strong),
+      0 0 28px var(--accent-alpha-medium),
+      0 0 0 1px rgba(255, 255, 255, 0.22) inset;
+    opacity: 1;
+  }
+}

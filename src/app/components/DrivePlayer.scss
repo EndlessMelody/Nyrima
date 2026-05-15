@@ -1,11 +1,11 @@
 /**
- * Nyrima player chrome — Obsidian Atelier.
+ * Nyrima player chrome — Neon Cinema.
  *
  * Design pillars:
  *  - Dark-first cinematic surface; the player is its own room.
  *  - Tech HUD: monospace timecodes, hairline borders, mono labels.
- *  - Luxury minimal: champagne gold is the only chromatic accent; sakura
- *    pink is reserved as the "now active" state on menu items only.
+ *  - Brand chroma: neon pink primary, neon cyan accent. Pink → cyan
+ *    gradients drive the play knob and the timeline.
  *  - Auto-hide HUD after ~2.5s of mouse inactivity while playing.
  */
 
@@ -14,15 +14,22 @@
   width: 100%;
   aspect-ratio: 16 / 9;
   background: #000;
-  border-radius: 12px;
+  border-radius: var(--ny-radius-md);
   overflow: hidden;
   isolation: isolate;
   user-select: none;
   outline: none;
-  border: var(--dc-hairline);
+  border: 1px solid var(--hairline-pink);
+  // Establish a containment context so subtitles can scale to the player
+  // size rather than the viewport. Without this, a 640px-wide player in
+  // windowed mode renders the same 46px cue as a 1920px fullscreen frame.
+  container-type: size;
+  container-name: dc-vlc;
   box-shadow:
     0 24px 60px -28px rgba(0, 0, 0, 0.9),
-    var(--dc-glow);
+    0 0 0 1px var(--hairline-pink),
+    0 12px 60px -28px var(--brand-alpha-medium),
+    0 12px 60px -28px var(--accent-alpha-medium);
 
   & > video {
     position: relative;
@@ -74,7 +81,7 @@
   font-weight: 500;
   letter-spacing: 0.24em;
   text-transform: uppercase;
-  color: var(--dc-gold);
+  color: var(--brand-on-background-strong);
   display: inline-flex;
   align-items: center;
   gap: 0.625rem;
@@ -108,17 +115,15 @@
 // ---------------------------------------------------------------------------
 .dc-vlc__center {
   position: absolute;
-  // Stop short of the subtitle bottom zone (cues sit at ~10 % of the
-  // overlay from the bottom edge) so the play knob never sits on top of
-  // a line of dialogue.
-  inset: 0 0 18% 0;
+  // Stop short of the subtitle bottom zone so the play knob never sits on
+  // top of a line of dialogue.
+  inset: 0 0 22% 0;
   z-index: 2;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 32px;
-  pointer-events: none; // child buttons re-enable; turned back off below
-                       // when the cluster is faded out
+  pointer-events: none;
   opacity: 0;
   transform: translateY(6px);
   transition:
@@ -142,8 +147,8 @@
 .dc-vlc:not(.is-playing) .dc-vlc__center.is-on {
   background: radial-gradient(
     ellipse at center,
-    rgba(0, 0, 0, 0.25) 0%,
-    rgba(0, 0, 0, 0.55) 100%
+    rgba(6, 8, 20, 0.25) 0%,
+    rgba(6, 8, 20, 0.55) 100%
   );
 }
 
@@ -156,17 +161,17 @@
   height: 88px;
   border-radius: 999px;
   background: linear-gradient(
-    180deg,
-    rgba(212, 183, 118, 0.95) 0%,
-    rgba(184, 152, 85, 0.92) 100%
+    135deg,
+    var(--brand-solid-medium) 0%,
+    var(--accent-solid-medium) 100%
   );
   display: flex;
   align-items: center;
   justify-content: center;
   box-shadow:
-    0 20px 48px -8px rgba(212, 183, 118, 0.45),
-    0 0 0 1px rgba(255, 255, 255, 0.18) inset,
-    0 0 60px rgba(212, 183, 118, 0.3);
+    0 20px 48px -8px var(--brand-alpha-strong),
+    0 0 0 1px rgba(255, 255, 255, 0.22) inset,
+    0 0 60px var(--accent-alpha-medium);
   transition:
     transform 160ms ease,
     box-shadow 160ms ease;
@@ -174,17 +179,16 @@
   svg {
     width: 36px;
     height: 36px;
-    fill: #1a1408;
-    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
-    // Center the play triangle visually; pause icon doesn't need the offset.
+    fill: #fff;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.35));
   }
 
   &:hover {
     transform: scale(1.04);
     box-shadow:
-      0 22px 52px -8px rgba(212, 183, 118, 0.55),
-      0 0 0 1px rgba(255, 255, 255, 0.22) inset,
-      0 0 70px rgba(212, 183, 118, 0.4);
+      0 22px 52px -8px var(--brand-alpha-strong),
+      0 0 0 1px rgba(255, 255, 255, 0.28) inset,
+      0 0 80px var(--accent-alpha-strong);
   }
 }
 
@@ -194,17 +198,17 @@
   animation: dc-vlc-breathe 2.4s ease-in-out infinite;
 }
 
-// Skip ±N buttons that flank the play knob. Same gold language but smaller
-// and outline-only so the play knob keeps visual primacy.
+// Skip ±N buttons that flank the play knob. Same neon language but
+// outline-only so the play knob keeps visual primacy.
 .dc-vlc__center-skip {
   appearance: none;
   position: relative;
   width: 56px;
   height: 56px;
   border-radius: 999px;
-  border: 1.5px solid rgba(212, 183, 118, 0.7);
-  background: rgba(20, 16, 8, 0.55);
-  color: rgba(231, 207, 152, 0.95);
+  border: 1.5px solid var(--brand-border-strong);
+  background: rgba(6, 8, 20, 0.55);
+  color: var(--brand-on-background-strong);
   cursor: pointer;
   display: grid;
   place-items: center;
@@ -212,7 +216,9 @@
   transition:
     background 160ms ease,
     border-color 160ms ease,
-    transform 160ms ease;
+    color 160ms ease,
+    transform 160ms ease,
+    box-shadow 160ms ease;
 
   svg {
     width: 26px;
@@ -235,10 +241,13 @@
   }
 
   &:hover {
-    background: rgba(40, 30, 12, 0.7);
-    border-color: rgba(231, 207, 152, 0.95);
-    color: #f4dca0;
+    background: rgba(20, 12, 28, 0.7);
+    border-color: var(--accent-border-strong);
+    color: var(--accent-on-background-strong);
     transform: scale(1.05);
+    box-shadow:
+      0 0 24px var(--accent-alpha-medium),
+      0 0 0 1px var(--accent-border-strong) inset;
   }
 
   &:active {
@@ -266,8 +275,8 @@
   padding: 18px 20px 16px;
   background: linear-gradient(
     to top,
-    rgba(0, 0, 0, 0.94) 0%,
-    rgba(0, 0, 0, 0.65) 55%,
+    rgba(6, 8, 20, 0.96) 0%,
+    rgba(6, 8, 20, 0.7) 55%,
     transparent 100%
   );
   transform: translateY(110%);
@@ -315,7 +324,7 @@
   position: absolute;
   inset: 0 auto 0 0;
   border-radius: inherit;
-  background: rgba(255, 255, 255, 0.25);
+  background: rgba(248, 247, 255, 0.28);
   pointer-events: none;
 }
 
@@ -323,8 +332,12 @@
   position: absolute;
   inset: 0 auto 0 0;
   border-radius: inherit;
-  background: var(--dc-gold);
-  box-shadow: 0 0 8px rgba(212, 183, 118, 0.45);
+  background: linear-gradient(
+    90deg,
+    var(--brand-solid-medium) 0%,
+    var(--accent-solid-medium) 100%
+  );
+  box-shadow: 0 0 10px var(--brand-alpha-medium);
   pointer-events: none;
 }
 
@@ -335,10 +348,10 @@
   height: 12px;
   transform: translate(-50%, -50%);
   border-radius: 999px;
-  background: var(--dc-gold);
+  background: var(--brand-solid-strong);
   box-shadow:
-    0 0 0 2px rgba(255, 255, 255, 0.85),
-    0 0 14px rgba(212, 183, 118, 0.6);
+    0 0 0 2px rgba(255, 255, 255, 0.9),
+    0 0 14px var(--brand-alpha-strong);
   opacity: 0;
   transition: opacity 140ms ease;
   pointer-events: none;
@@ -355,16 +368,16 @@
   transform: translateX(-50%);
   padding: 4px 10px;
   border-radius: 4px;
-  background: rgba(10, 10, 15, 0.94);
-  color: var(--dc-gold);
+  background: rgba(6, 8, 20, 0.94);
+  color: var(--brand-on-background-strong);
   font-family: var(--dc-font-mono);
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.08em;
   pointer-events: none;
   white-space: nowrap;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--hairline-pink);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
 }
 
 // ---------------------------------------------------------------------------
@@ -381,7 +394,7 @@
   appearance: none;
   border: 0;
   background: transparent;
-  color: rgba(255, 255, 255, 0.78);
+  color: rgba(255, 255, 255, 0.82);
   width: 34px;
   height: 34px;
   border-radius: 8px;
@@ -391,7 +404,8 @@
   justify-content: center;
   transition:
     background 140ms ease,
-    color 140ms ease;
+    color 140ms ease,
+    box-shadow 140ms ease;
   position: relative;
 
   svg {
@@ -401,18 +415,20 @@
   }
 
   &:hover {
-    background: rgba(255, 255, 255, 0.08);
-    color: var(--dc-gold);
+    background: var(--brand-alpha-weak);
+    color: var(--brand-on-background-strong);
+    box-shadow: 0 0 18px var(--brand-alpha-weak);
   }
 
   &:focus-visible {
-    outline: 1px solid var(--dc-gold);
+    outline: 1px solid var(--brand-border-strong);
     outline-offset: 2px;
   }
 
   &.is-on {
-    color: var(--dc-gold);
-    background: rgba(212, 183, 118, 0.12);
+    color: var(--accent-on-background-strong);
+    background: var(--accent-alpha-medium);
+    box-shadow: 0 0 14px var(--accent-alpha-medium);
   }
 }
 
@@ -425,64 +441,44 @@
   letter-spacing: 0.05em;
 }
 
-/* Skip-back / skip-forward in the bottom bar. Same icon language as the
-   center cluster's `.dc-vlc__center-skip` but in the bar's compact size,
-   with a subtle sakura-pink halo on hover to match the player's
-   gold + neon-pink palette. */
-.dc-vlc__btn--skip {
-  position: relative;
-
-  .dc-vlc__btn-skip-num {
-    position: absolute;
-    inset: 0;
-    display: grid;
-    place-items: center;
-    font-family: var(--dc-font-mono);
-    font-size: 9px;
-    font-weight: 600;
-    color: inherit;
-    transform: translateY(2px);
-    pointer-events: none;
-    opacity: 0.85;
-  }
-
-  &:hover {
-    background: rgba(231, 64, 116, 0.1);
-    color: #f4dca0;
-    box-shadow: 0 0 14px rgba(231, 64, 116, 0.28);
-  }
-}
-
 .dc-vlc__play {
   width: 40px;
   height: 40px;
   border-radius: 999px;
   background: linear-gradient(
-    180deg,
-    rgba(212, 183, 118, 0.95) 0%,
-    rgba(184, 152, 85, 0.92) 100%
+    135deg,
+    var(--brand-solid-medium) 0%,
+    var(--accent-solid-medium) 100%
   );
-  color: #1a1408;
+  color: #fff;
   box-shadow:
-    0 8px 20px -6px rgba(212, 183, 118, 0.42),
-    0 0 0 1px rgba(255, 255, 255, 0.18) inset;
+    0 8px 20px -6px var(--brand-alpha-strong),
+    0 0 0 1px rgba(255, 255, 255, 0.2) inset;
 
   svg {
     width: 18px;
     height: 18px;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35));
   }
 
   &:hover {
-    background: linear-gradient(180deg, #e2c989 0%, #c4a866 100%);
-    color: #1a1408;
+    background: linear-gradient(
+      135deg,
+      var(--brand-solid-strong) 0%,
+      var(--accent-solid-strong) 100%
+    );
+    color: #fff;
+    box-shadow:
+      0 10px 24px -6px var(--brand-alpha-strong),
+      0 0 30px var(--accent-alpha-medium),
+      0 0 0 1px rgba(255, 255, 255, 0.24) inset;
     transform: none;
   }
 }
 
-// Prev / next buttons use the same base style as dc-vlc__btn
+// Prev / next sit immediately next to the play knob.
 .dc-vlc__bar > .dc-vlc__btn:first-child,
 .dc-vlc__bar > .dc-vlc__btn:nth-child(3) {
-  // prev/next adjacent to play
   margin: 0 2px;
 }
 
@@ -544,8 +540,8 @@
   --pct: 0%;
   background-image: linear-gradient(
     90deg,
-    var(--dc-gold) 0%,
-    var(--dc-gold) var(--pct),
+    var(--brand-solid-medium) 0%,
+    var(--accent-solid-medium) var(--pct),
     rgba(255, 255, 255, 0.16) var(--pct),
     rgba(255, 255, 255, 0.16) 100%
   );
@@ -559,9 +555,9 @@
     width: 10px;
     height: 10px;
     border-radius: 999px;
-    background: var(--dc-gold);
+    background: var(--brand-solid-strong);
     border: 0;
-    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85);
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9);
     cursor: pointer;
     margin-top: -3px;
   }
@@ -570,9 +566,9 @@
     width: 10px;
     height: 10px;
     border-radius: 999px;
-    background: var(--dc-gold);
+    background: var(--brand-solid-strong);
     border: 0;
-    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.85);
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9);
     cursor: pointer;
   }
 }
@@ -589,15 +585,16 @@
   position: absolute;
   bottom: calc(100% + 10px);
   right: 0;
-  min-width: 180px;
+  min-width: 200px;
   padding: 6px;
-  border-radius: 8px;
-  background: rgba(10, 10, 15, 0.96);
+  border-radius: var(--ny-radius-sm);
+  background: rgba(8, 11, 24, 0.96);
   backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--hairline-pink);
   box-shadow:
     0 18px 40px rgba(0, 0, 0, 0.6),
-    0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+    0 0 0 1px rgba(255, 255, 255, 0.04) inset,
+    0 0 32px -8px var(--brand-alpha-weak);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -609,7 +606,7 @@
   font-size: 10px;
   font-weight: 500;
   letter-spacing: 0.24em;
-  color: var(--dc-gold);
+  color: var(--brand-on-background-strong);
   text-transform: uppercase;
   padding: 8px 12px 6px;
 }
@@ -633,7 +630,7 @@
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.06em;
-  color: var(--dc-gold);
+  color: var(--accent-on-background-strong);
   opacity: 0.9;
   min-width: 4ch;
   text-align: center;
@@ -649,13 +646,13 @@
   max-height: min(72vh, 560px);
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: rgba(212, 183, 118, 0.5) transparent;
+  scrollbar-color: var(--brand-alpha-strong) transparent;
 
   &::-webkit-scrollbar {
     width: 6px;
   }
   &::-webkit-scrollbar-thumb {
-    background: rgba(212, 183, 118, 0.4);
+    background: var(--brand-alpha-medium);
     border-radius: 3px;
   }
 }
@@ -670,15 +667,15 @@
   background:
     radial-gradient(
       ellipse at center,
-      rgba(231, 64, 116, 0.16) 0%,
-      rgba(10, 10, 15, 0.95) 70%
+      var(--brand-alpha-medium) 0%,
+      rgba(8, 11, 24, 0.95) 70%
     ),
     repeating-linear-gradient(
       45deg,
       rgba(255, 255, 255, 0.02) 0 6px,
       transparent 6px 12px
     );
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--hairline-pink);
   text-align: center;
   overflow: hidden;
 }
@@ -784,9 +781,9 @@
   }
 
   &.is-active {
-    background: rgba(212, 183, 118, 0.18);
-    border-color: rgba(212, 183, 118, 0.55);
-    color: var(--dc-gold);
+    background: var(--brand-alpha-medium);
+    border-color: var(--brand-border-strong);
+    color: var(--brand-on-background-strong);
   }
 }
 
@@ -816,7 +813,7 @@
   appearance: none;
   border: 0;
   background: transparent;
-  color: rgba(255, 255, 255, 0.82);
+  color: rgba(255, 255, 255, 0.85);
   font-family: var(--dc-font-body);
   font-size: 13px;
   padding: 8px 12px;
@@ -837,9 +834,9 @@
   }
 
   &.is-active {
-    background: rgba(212, 183, 118, 0.14);
-    color: var(--dc-gold);
-    box-shadow: 0 0 0 1px rgba(212, 183, 118, 0.4) inset;
+    background: var(--brand-alpha-medium);
+    color: var(--brand-on-background-strong);
+    box-shadow: 0 0 0 1px var(--brand-border-strong) inset;
   }
 
   &.is-disabled {
@@ -857,7 +854,7 @@
     font-family: var(--dc-font-mono);
     font-size: 11px;
     font-weight: 500;
-    opacity: 0.55;
+    opacity: 0.6;
     letter-spacing: 0.06em;
   }
 }
@@ -881,46 +878,45 @@
 }
 
 // ---------------------------------------------------------------------------
-// Brackets at the four corners — film-cell vibe
+// Brackets at the four corners — film-cell vibe, painted in pink/cyan.
 // ---------------------------------------------------------------------------
 .dc-vlc__corners span {
   position: absolute;
   width: 14px;
   height: 14px;
-  border: 1px solid rgba(212, 183, 118, 0.6);
   pointer-events: none;
   z-index: 4;
-  opacity: 0.7;
+  opacity: 0.75;
   transition: opacity 200ms ease;
 
   &.tl {
     top: 10px;
     left: 10px;
-    border-right: 0;
-    border-bottom: 0;
+    border-top: 1px solid var(--brand-border-strong);
+    border-left: 1px solid var(--brand-border-strong);
   }
   &.tr {
     top: 10px;
     right: 10px;
-    border-left: 0;
-    border-bottom: 0;
+    border-top: 1px solid var(--accent-border-strong);
+    border-right: 1px solid var(--accent-border-strong);
   }
   &.bl {
     bottom: 10px;
     left: 10px;
-    border-right: 0;
-    border-top: 0;
+    border-bottom: 1px solid var(--accent-border-strong);
+    border-left: 1px solid var(--accent-border-strong);
   }
   &.br {
     bottom: 10px;
     right: 10px;
-    border-left: 0;
-    border-top: 0;
+    border-bottom: 1px solid var(--brand-border-strong);
+    border-right: 1px solid var(--brand-border-strong);
   }
 }
 
 .dc-vlc.is-fullscreen .dc-vlc__corners span {
-  opacity: 0.4;
+  opacity: 0.45;
 }
 
 // ---------------------------------------------------------------------------
@@ -934,7 +930,7 @@
   justify-content: center;
   flex-direction: column;
   gap: 14px;
-  color: rgba(255, 255, 255, 0.85);
+  color: rgba(255, 255, 255, 0.9);
   z-index: 2;
   pointer-events: none;
 
@@ -943,8 +939,8 @@
     height: 42px;
     border-radius: 999px;
     border: 1.5px solid rgba(255, 255, 255, 0.16);
-    border-top-color: var(--dc-gold);
-    border-right-color: rgba(212, 183, 118, 0.6);
+    border-top-color: var(--brand-solid-strong);
+    border-right-color: var(--accent-solid-strong);
     animation: dc-vlc-spin 0.9s linear infinite;
   }
 
@@ -954,7 +950,7 @@
     font-weight: 500;
     letter-spacing: 0.24em;
     text-transform: uppercase;
-    color: var(--dc-gold);
+    color: var(--brand-on-background-strong);
   }
 }
 

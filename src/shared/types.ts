@@ -124,6 +124,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   subtitleOutlineWidth: 2.5,
   subtitleShadow: 1,
   subtitleLetterSpacing: 0.01,
-  subtitlePosition: 0.08,
+  subtitlePosition: 0,
   skipSeconds: 10,
 };

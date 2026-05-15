@@ -1,0 +1,146 @@
+/**
+ * SearchFilterBar — search input + filter chip row.
+ *
+ * Glass panel with hairline border. Focuses to a neon-blue ring. Chips
+ * use a subtle pill style that highlights pink when active.
+ */
+
+.ny-search-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--neutral-border-weak);
+  border-radius: var(--ny-radius-md);
+  background: linear-gradient(
+    180deg,
+    var(--surface-background) 0%,
+    var(--surface-background-weak) 100%
+  );
+  box-shadow:
+    0 0 0 1px var(--hairline-blue),
+    0 8px 32px -16px rgba(0, 0, 0, 0.4);
+}
+
+.ny-search-bar__input {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 280px;
+  min-width: 240px;
+  padding: 8px 12px;
+  border: 1px solid var(--neutral-border-weak);
+  border-radius: var(--ny-radius-sm);
+  background: var(--surface-background);
+  color: var(--neutral-on-background-strong);
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+
+  &:focus-within {
+    border-color: var(--accent-border-strong);
+    box-shadow: 0 0 0 3px var(--accent-alpha-weak);
+  }
+
+  > svg {
+    color: var(--neutral-on-background-medium);
+    flex-shrink: 0;
+  }
+
+  input {
+    flex: 1;
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font-family: var(--dc-font-body);
+    font-size: 0.875rem;
+    letter-spacing: -0.005em;
+    outline: none;
+    min-width: 0;
+
+    &::placeholder {
+      color: var(--neutral-on-background-weak);
+    }
+    &::-webkit-search-cancel-button {
+      appearance: none;
+    }
+  }
+}
+
+.ny-search-bar__clear {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--neutral-on-background-medium);
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    color 140ms ease;
+
+  &:hover {
+    background: var(--neutral-alpha-weak);
+    color: var(--neutral-on-background-strong);
+  }
+}
+
+.ny-search-bar__chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ny-search-bar__chip {
+  appearance: none;
+  border: 1px solid var(--neutral-border-weak);
+  background: var(--surface-background);
+  color: var(--neutral-on-background-medium);
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease;
+
+  &:hover {
+    background: var(--surface-background-strong);
+    color: var(--neutral-on-background-strong);
+    border-color: var(--neutral-border-medium);
+  }
+
+  &.is-active {
+    background: var(--brand-alpha-medium);
+    border-color: var(--brand-border-strong);
+    color: var(--brand-on-background-strong);
+    box-shadow: 0 0 18px -4px var(--brand-alpha-strong);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--brand-border-strong);
+    outline-offset: 2px;
+  }
+}
+
+.ny-search-bar__count {
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--neutral-on-background-weak);
+  margin-left: auto;
+}

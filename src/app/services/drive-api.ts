@@ -2,14 +2,18 @@
  * Thin wrapper over the Google Drive v3 REST API.
  *
  * We intentionally avoid the official `googleapis` JS client to keep the
- * bundle small and the surface area auditable. Every request goes through
- * authedFetch which handles token refresh.
+ * bundle small and the surface area auditable. Every request flows through
+ * `authedFetch` (auth + queue + retry/backoff) and is de-duplicated by op
+ * key (see drive/dedup.ts) so concurrent callers share a single underlying
+ * Drive call.
  *
  * Docs: https://developers.google.com/drive/api/v3/reference
  */
 
 import { authedFetch } from "./auth";
 import { getApiKey, appendApiKey } from "./api-key";
+import { inflight } from "./drive/dedup";
+import type { RequestOptions } from "./drive/types";
 import type { DriveFile } from "@shared/types";
 import {
   VIDEO_EXTENSIONS,
@@ -25,7 +29,7 @@ const DEFAULT_FILE_FIELDS = [
   "mimeType",
   "size",
   "modifiedTime",
-  "iconLink",
+  "md5Checksum",
   "thumbnailLink",
   "parents",
   "videoMediaMetadata(width,height,durationMillis)",
@@ -49,18 +53,27 @@ export interface ListResult {
 // Folder / file metadata
 // ---------------------------------------------------------------------------
 
-export async function getFile(
+export function getFile(
   fileId: string,
   fields = DEFAULT_FILE_FIELDS,
+  reqOpts: RequestOptions = {},
 ): Promise<DriveFile> {
-  const url = `${API_BASE}/files/${encodeURIComponent(fileId)}?fields=${encodeURIComponent(fields)}&supportsAllDrives=true`;
-  const res = await authedFetch(url);
-  return (await res.json()) as DriveFile;
+  const key = `file:metadata:${fileId}:${fields}`;
+  return inflight(key, async () => {
+    const url = `${API_BASE}/files/${encodeURIComponent(fileId)}?fields=${encodeURIComponent(fields)}&supportsAllDrives=true`;
+    const res = await authedFetch(
+      url,
+      { signal: reqOpts.signal },
+      { kind: "metadata", priority: reqOpts.priority ?? "high", signal: reqOpts.signal },
+    );
+    return (await res.json()) as DriveFile;
+  });
 }
 
-export async function listFolder(
+export function listFolder(
   folderId: string,
   opts: ListOptions = {},
+  reqOpts: RequestOptions = {},
 ): Promise<ListResult> {
   const q = [`'${folderId}' in parents`, "trashed = false", opts.q]
     .filter(Boolean)
@@ -75,18 +88,30 @@ export async function listFolder(
   });
   if (opts.pageToken) params.set("pageToken", opts.pageToken);
 
-  const res = await authedFetch(`${API_BASE}/files?${params}`);
-  return (await res.json()) as ListResult;
+  // Dedup key: same folder + same page = same request. We deliberately
+  // include the page token so paginated calls don't collide.
+  const key = `folder:list:${folderId}:${opts.pageToken ?? ""}:${opts.q ?? ""}:${opts.orderBy ?? ""}`;
+  return inflight(key, async () => {
+    const res = await authedFetch(
+      `${API_BASE}/files?${params}`,
+      { signal: reqOpts.signal },
+      { kind: "metadata", priority: reqOpts.priority ?? "high", signal: reqOpts.signal },
+    );
+    return (await res.json()) as ListResult;
+  });
 }
 
 /**
  * List every page of a folder. Use cautiously for very large libraries.
  */
-export async function listFolderAll(folderId: string): Promise<DriveFile[]> {
+export async function listFolderAll(
+  folderId: string,
+  reqOpts: RequestOptions = {},
+): Promise<DriveFile[]> {
   const all: DriveFile[] = [];
   let pageToken: string | undefined;
   do {
-    const page = await listFolder(folderId, { pageToken });
+    const page = await listFolder(folderId, { pageToken }, reqOpts);
     all.push(...page.files);
     pageToken = page.nextPageToken;
   } while (pageToken);
@@ -177,16 +202,27 @@ export async function buildPublicStreamUrl(
 }
 
 /**
- * Fetch a byte range. Used by the player to feed MSE buffers.
+ * Fetch a byte range. Used by the player to feed MSE buffers and by the
+ * MKV subtitle extractor for the 4 MB header sniff.
  */
 export async function fetchRange(
   fileId: string,
   start: number,
   end: number,
+  reqOpts: RequestOptions = {},
 ): Promise<{ blob: Blob; total: number }> {
-  const res = await authedFetch(buildMediaUrl(fileId), {
-    headers: { Range: `bytes=${start}-${end}` },
-  });
+  const res = await authedFetch(
+    buildMediaUrl(fileId),
+    {
+      headers: { Range: `bytes=${start}-${end}` },
+      signal: reqOpts.signal,
+    },
+    {
+      kind: reqOpts.kind ?? "media-range",
+      priority: reqOpts.priority ?? "high",
+      signal: reqOpts.signal,
+    },
+  );
   const contentRange = res.headers.get("content-range");
   const total = contentRange
     ? Number(contentRange.split("/")[1])
@@ -197,12 +233,29 @@ export async function fetchRange(
 /**
  * Download a (small) file entirely. For subtitles, posters, etc. Not for video.
  */
-export async function downloadFile(fileId: string): Promise<Blob> {
-  const res = await authedFetch(buildMediaUrl(fileId));
-  return await res.blob();
+export async function downloadFile(
+  fileId: string,
+  reqOpts: RequestOptions = {},
+): Promise<Blob> {
+  const key = `file:download:${fileId}`;
+  return inflight(key, async () => {
+    const res = await authedFetch(
+      buildMediaUrl(fileId),
+      { signal: reqOpts.signal },
+      {
+        kind: reqOpts.kind ?? "subtitle",
+        priority: reqOpts.priority ?? "normal",
+        signal: reqOpts.signal,
+      },
+    );
+    return await res.blob();
+  });
 }
 
-export async function downloadTextFile(fileId: string): Promise<string> {
-  const blob = await downloadFile(fileId);
+export async function downloadTextFile(
+  fileId: string,
+  reqOpts: RequestOptions = {},
+): Promise<string> {
+  const blob = await downloadFile(fileId, reqOpts);
   return await blob.text();
 }

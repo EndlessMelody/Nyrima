@@ -18,12 +18,24 @@ import { parseMkvMediaInfo, extractClusterSamples } from "./demuxer";
 import { generateInitSegment, generateMediaSegment } from "./mp4-generator";
 import { buildMediaUrl } from "../drive-api";
 import { authedFetch } from "../auth";
+import {
+  useRateLimitStore,
+  isCoolingDown,
+} from "../drive/rate-limit-store";
+import { markPlayback } from "../playback-telemetry";
 import type { MkvMediaInfo } from "./types";
 
 const HEADER_FETCH_SIZE = 4 * 1024 * 1024; // 4 MB — enough for header + several clusters
 const STREAM_PROCESS_SIZE = 2 * 1024 * 1024; // accumulate 2 MB from stream before processing
 const BUFFER_AHEAD_SEC = 30;                // how far ahead to keep buffered
 const BUFFER_BEHIND_SEC = 60;               // how far behind to keep
+
+// Stop reading the stream entirely when the video has been paused this long.
+// We don't tear down the connection — we just stop pulling bytes. Drive will
+// close the conn from its side after a while, which is fine; the next play
+// will reopen from the current offset. This keeps a paused tab from chewing
+// through quota for a video the user may never resume.
+const PAUSE_IDLE_MS = 60_000;
 
 export class MkvMseController {
   private mediaSource: MediaSource | null = null;
@@ -41,6 +53,15 @@ export class MkvMseController {
   private videoElement: HTMLVideoElement | null = null;
   private initDone = false;
   private streamReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  /** Aborts the active fetch when destroy() runs or the user navigates away. */
+  private abortController: AbortController | null = null;
+  /** Set when document.visibilityState becomes "hidden" (or video paused too
+   *  long); the streaming loop suspends until this clears. */
+  private suspended = false;
+  /** Flipped to true by the pause-idle timer; cleared by `play`. */
+  private pausedTooLong = false;
+  /** Cleanup functions registered while running; called from destroy(). */
+  private cleanups: Array<() => void> = [];
 
   // Callbacks for the UI
   onReady?: (url: string, durationMs: number) => void;
@@ -58,6 +79,8 @@ export class MkvMseController {
     this.fileId = fileId;
     this.videoElement = videoElement;
     this.destroyed = false;
+    this.abortController = new AbortController();
+    this.installBackpressureHooks(videoElement);
 
     try {
       let buf: Uint8Array;
@@ -65,12 +88,24 @@ export class MkvMseController {
       if (preloaded) {
         buf = preloaded.buf;
         this.fileSize = preloaded.fileSize;
+        // eslint-disable-next-line no-console
+        console.info(
+          `[mse] using preloaded header buf=${buf.length} size=${this.fileSize}`,
+        );
       } else {
         // 1. Fetch header region (also contains the first clusters)
+        // eslint-disable-next-line no-console
+        console.info(
+          `[mse] fetching header ${HEADER_FETCH_SIZE} bytes for ${fileId}`,
+        );
+        markPlayback("media:first-range:start");
         const result = await this.fetchRange(0, HEADER_FETCH_SIZE - 1);
+        markPlayback("media:first-range:end");
         if (this.destroyed) return;
         buf = result.buf;
         this.fileSize = result.total;
+        // eslint-disable-next-line no-console
+        console.info(`[mse] header arrived; fileSize=${this.fileSize}`);
       }
 
       // 2. Parse MKV header
@@ -93,6 +128,7 @@ export class MkvMseController {
       this.fetchOffset = buf.length;
 
       // 4. Create MediaSource
+      markPlayback("remux:start");
       this.mediaSource = new MediaSource();
       this.objectUrl = URL.createObjectURL(this.mediaSource);
 
@@ -101,11 +137,16 @@ export class MkvMseController {
 
         try {
           const mimeType = `video/mp4; codecs="${codecString}"`;
+          // eslint-disable-next-line no-console
+          console.info(`[mse] checking codec support: ${mimeType}`);
           if (!MediaSource.isTypeSupported(mimeType)) {
+            // eslint-disable-next-line no-console
+            console.error(`[mse] codec UNSUPPORTED: ${codecString}`);
             this.onError?.(
               new Error(
-                `Browser does not support codec "${codecString}". ` +
-                `For HEVC, install HEVC Video Extensions from the Microsoft Store.`,
+                `This file's codec (${codecString}) isn't supported by your browser. ` +
+                `Common causes: 10-bit H.264 (Hi10P), HEVC/H.265, or AV1. ` +
+                `For HEVC on Windows, install "HEVC Video Extensions" from the Microsoft Store.`,
               ),
             );
             return;
@@ -147,11 +188,29 @@ export class MkvMseController {
 
   destroy(): void {
     this.destroyed = true;
+    // Cancel the in-flight Drive stream so we don't keep pulling bytes for
+    // a video the user has navigated away from.
+    if (this.abortController) {
+      try {
+        this.abortController.abort();
+      } catch {
+        // ignore
+      }
+      this.abortController = null;
+    }
     // Cancel the streaming reader if active
     if (this.streamReader) {
       this.streamReader.cancel().catch(() => {/* ignore */});
       this.streamReader = null;
     }
+    for (const fn of this.cleanups) {
+      try {
+        fn();
+      } catch {
+        // ignore
+      }
+    }
+    this.cleanups = [];
     if (this.objectUrl) {
       URL.revokeObjectURL(this.objectUrl);
       this.objectUrl = null;
@@ -173,6 +232,75 @@ export class MkvMseController {
     this.leftoverBuf = null;
   }
 
+  /**
+   * Wire up the conditions that should pause the streaming loop:
+   *   - tab hidden (document.visibilityState)
+   *   - video paused continuously for PAUSE_IDLE_MS
+   *   - Drive is in a global cooldown
+   * The loop checks `this.suspended` between chunks; it does not tear down
+   * the connection itself, so a brief blur won't drop the underlying TCP
+   * stream and force a reconnect.
+   */
+  private installBackpressureHooks(videoEl: HTMLVideoElement): void {
+    const refresh = () => this.refreshSuspendState(videoEl);
+
+    const onVis = () => refresh();
+    document.addEventListener("visibilitychange", onVis);
+    this.cleanups.push(() =>
+      document.removeEventListener("visibilitychange", onVis),
+    );
+
+    let pauseTimer: number | null = null;
+    const onPause = () => {
+      if (pauseTimer !== null) window.clearTimeout(pauseTimer);
+      pauseTimer = window.setTimeout(() => {
+        pauseTimer = null;
+        this.pausedTooLong = true;
+        refresh();
+      }, PAUSE_IDLE_MS);
+    };
+    const onPlay = () => {
+      if (pauseTimer !== null) {
+        window.clearTimeout(pauseTimer);
+        pauseTimer = null;
+      }
+      this.pausedTooLong = false;
+      refresh();
+    };
+    videoEl.addEventListener("pause", onPause);
+    videoEl.addEventListener("play", onPlay);
+    this.cleanups.push(() => {
+      videoEl.removeEventListener("pause", onPause);
+      videoEl.removeEventListener("play", onPlay);
+      if (pauseTimer !== null) window.clearTimeout(pauseTimer);
+    });
+
+    const unsubscribeCooldown = useRateLimitStore.subscribe((s, prev) => {
+      if (s.isCooling !== prev.isCooling) refresh();
+    });
+    this.cleanups.push(unsubscribeCooldown);
+
+    refresh();
+  }
+
+  private refreshSuspendState(_videoEl: HTMLVideoElement): void {
+    if (this.destroyed) return;
+    const tabHidden =
+      typeof document !== "undefined" && document.visibilityState === "hidden";
+    const cooling = isCoolingDown();
+    this.suspended = tabHidden || cooling || this.pausedTooLong;
+  }
+
+  /**
+   * Loop-helper: wait until the suspend conditions clear. Returns when the
+   * controller is destroyed so the streaming loop can break out cleanly.
+   */
+  private async waitWhileSuspended(): Promise<void> {
+    while (!this.destroyed && this.suspended) {
+      await sleep(500);
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Streaming fetch — ONE request for the entire remaining file
   // -------------------------------------------------------------------------
@@ -181,6 +309,10 @@ export class MkvMseController {
    * Uses a single HTTP request with an open-ended Range header and reads the
    * response body as a ReadableStream. This replaces hundreds of per-chunk
    * Range requests, reducing Drive API calls from ~500 to 1.
+   *
+   * Retries: handled by the central DriveRequestQueue (see authedFetch).
+   * The local 3-retry loop is gone — it duplicated work the queue already
+   * does and didn't honor Retry-After.
    */
   private async progressiveStream(): Promise<void> {
     if (this.fetching || this.destroyed) return;
@@ -190,31 +322,36 @@ export class MkvMseController {
     }
     this.fetching = true;
 
-    const MAX_RETRIES = 3;
-
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        const url = buildMediaUrl(this.fileId);
-        const res = await authedFetch(url, {
+    try {
+      const url = buildMediaUrl(this.fileId);
+      const res = await authedFetch(
+        url,
+        {
           headers: { Range: `bytes=${this.fetchOffset}-` },
-        });
+          signal: this.abortController?.signal,
+        },
+        {
+          kind: "media-stream",
+          priority: "critical",
+          signal: this.abortController?.signal,
+        },
+      );
+      if (this.destroyed) return;
+
+      const reader = res.body?.getReader();
+      if (!reader) {
+        // Fallback: ReadableStream not available — read the tail as a single
+        // ArrayBuffer. This is the rare path (older WebView only).
+        const ab = await res.arrayBuffer();
         if (this.destroyed) return;
-
-        const reader = res.body?.getReader();
-        if (!reader) {
-          // Fallback: ReadableStream not available — read as ArrayBuffer
-          const ab = await res.arrayBuffer();
-          if (this.destroyed) return;
-          const data = new Uint8Array(ab);
-          const full = this.leftoverBuf
-            ? concatBuffers(this.leftoverBuf, data)
-            : data;
-          this.leftoverBuf = null;
-          this.processChunk(full);
-          this.fetchOffset = this.fileSize;
-          break;
-        }
-
+        const data = new Uint8Array(ab);
+        const full = this.leftoverBuf
+          ? concatBuffers(this.leftoverBuf, data)
+          : data;
+        this.leftoverBuf = null;
+        this.processChunk(full);
+        this.fetchOffset = this.fileSize;
+      } else {
         this.streamReader = reader;
         let accumulated: Uint8Array | null = this.leftoverBuf;
         this.leftoverBuf = null;
@@ -223,17 +360,23 @@ export class MkvMseController {
         while (true) {
           if (this.destroyed || this.mediaSource?.readyState !== "open") break;
 
+          // Back-pressure: pause when tab hidden, video idle, or cooldown.
+          // We stop pulling from the stream but keep the connection alive;
+          // Drive will close it if it idles too long, which is acceptable.
+          if (this.suspended) {
+            await this.waitWhileSuspended();
+            if (this.destroyed) break;
+          }
+
           const { done, value } = await reader.read();
           if (done) break;
 
-          // Accumulate stream chunks
           accumulated = accumulated
             ? concatBuffers(accumulated, value)
             : value;
 
-          // Process when we have enough data accumulated
           if (accumulated.length >= STREAM_PROCESS_SIZE) {
-            // Throttle if we're far enough ahead to avoid SourceBuffer overflow
+            // Throttle if we're far enough ahead — keeps SourceBuffer small.
             await this.waitUntilBufferNeeded();
             if (this.destroyed) break;
 
@@ -244,36 +387,32 @@ export class MkvMseController {
           }
         }
 
-        // Process remaining accumulated data
         if (accumulated && accumulated.length > 0 && !this.destroyed) {
           this.processChunk(accumulated);
         }
 
         this.streamReader = null;
-        reader.releaseLock();
+        try {
+          reader.releaseLock();
+        } catch {
+          // ignore
+        }
         this.fetchOffset = this.fileSize;
-        break; // success — exit retry loop
-
-      } catch (e) {
-        this.streamReader = null;
-        const isRetryable =
-          e instanceof Error &&
-          (e.message.includes("403") ||
-            e.message.includes("rate") ||
-            e.message.includes("429"));
-        if (isRetryable && attempt < MAX_RETRIES) {
-          // eslint-disable-next-line no-console
-          console.warn(`Stream retry ${attempt + 1}/${MAX_RETRIES}:`, (e as Error).message);
-          await sleep(1000 * Math.pow(2, attempt));
-          continue;
-        }
-        if (!this.destroyed) {
-          this.onError?.(e instanceof Error ? e : new Error(String(e)));
-        }
-        return;
-      } finally {
-        this.fetching = false;
       }
+    } catch (e) {
+      this.streamReader = null;
+      // Abort-on-destroy raises an AbortError that we swallow silently;
+      // anything else bubbles up to the player as a fatal error. Retry
+      // policy (429/5xx/network) lives in DriveRequestQueue now, so by
+      // the time we land here the queue has already exhausted retries.
+      const isAbort =
+        e instanceof DOMException && e.name === "AbortError";
+      if (!this.destroyed && !isAbort) {
+        this.onError?.(e instanceof Error ? e : new Error(String(e)));
+      }
+      return;
+    } finally {
+      this.fetching = false;
     }
 
     this.finalizeStream();
@@ -339,6 +478,9 @@ export class MkvMseController {
               this.info.video,
               this.info.audio,
             );
+            // Mark the moment the first remuxed media segment is ready to
+            // append. Tells us how long parse+remux took versus network.
+            if (this.seqNum === 1) markPlayback("remux:first-segment-ready");
             this.enqueueAppend(segment);
           }
         } catch (e) {
@@ -433,40 +575,31 @@ export class MkvMseController {
     end: number,
   ): Promise<{ buf: Uint8Array; total: number }> {
     const url = buildMediaUrl(this.fileId);
-    const MAX_RETRIES = 3;
+    // Retries (429/5xx/network) and backoff live in DriveRequestQueue now.
+    // Header fetch is "critical" because nothing else can start until it
+    // returns — the MediaSource has no init segment without it.
+    const res = await authedFetch(
+      url,
+      {
+        headers: { Range: `bytes=${start}-${end}` },
+        signal: this.abortController?.signal,
+      },
+      {
+        kind: "media-range",
+        priority: "critical",
+        signal: this.abortController?.signal,
+      },
+    );
 
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        const res = await authedFetch(url, {
-          headers: { Range: `bytes=${start}-${end}` },
-        });
-
-        const contentRange = res.headers.get("content-range");
-        let total = end + 1;
-        if (contentRange) {
-          const m = contentRange.match(/\/(\d+)/);
-          if (m) total = Number(m[1]);
-        }
-
-        const ab = await res.arrayBuffer();
-        return { buf: new Uint8Array(ab), total };
-      } catch (e) {
-        // Retry on rate-limit / transient 403
-        const isRetryable =
-          e instanceof Error &&
-          (e.message.includes("403") ||
-            e.message.includes("rate") ||
-            e.message.includes("429"));
-        if (isRetryable && attempt < MAX_RETRIES) {
-          // eslint-disable-next-line no-console
-          console.warn(`fetchRange retry ${attempt + 1}/${MAX_RETRIES} after error:`, e.message);
-          await sleep(1000 * Math.pow(2, attempt)); // 1s, 2s, 4s
-          continue;
-        }
-        throw e;
-      }
+    const contentRange = res.headers.get("content-range");
+    let total = end + 1;
+    if (contentRange) {
+      const m = contentRange.match(/\/(\d+)/);
+      if (m) total = Number(m[1]);
     }
-    throw new Error("fetchRange: max retries exceeded");
+
+    const ab = await res.arrayBuffer();
+    return { buf: new Uint8Array(ab), total };
   }
 }
 
