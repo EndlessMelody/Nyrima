@@ -37,14 +37,15 @@
 
   /* Subtitle: anime-fansub voice — system Comic Sans MS where present
      (Windows/macOS, full Vietnamese coverage), Comic Neue (bundled) as the
-     cross-OS clone. Itim is intentionally NOT in this stack: it has a more
-     cursive/handwritten character that "leaks" through whenever the ASS
-     source flags a cue italic (Comic Sans MS lacks an italic face), making
-     the rendering look like Itim instead of Comic Sans. We let
-     `font-synthesis: style weight` in SubtitleOverlay.scss synthesize the
-     italic on Comic Sans / Comic Neue instead. */
+     cross-OS clone. "Itim" is included with a Vietnamese-only unicode-range
+     subset (see main.tsx) so accented Vietnamese characters stay in a brush
+     face instead of falling through to the OS default sans. Italic leakage
+     into Latin can't happen because Itim's @font-face only declares the
+     Vietnamese unicode range. `font-synthesis: style weight` in
+     SubtitleOverlay.scss continues to synthesize italics on Comic Sans /
+     Comic Neue for the Latin path. */
   --dc-font-subtitle:
-    "Comic Sans MS", "Chalkboard SE", "Marker Felt", "Comic Neue",
+    "Comic Sans MS", "Chalkboard SE", "Marker Felt", "Comic Neue", "Itim",
     var(--dc-font-body);
 }
 

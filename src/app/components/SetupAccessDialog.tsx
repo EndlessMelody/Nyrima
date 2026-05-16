@@ -25,7 +25,6 @@ import {
   Spinner,
 } from "@once-ui-system/core/components";
 import { getApiKey, setApiKey, clearApiKey } from "../services/api-key";
-import { getTmdbKey, setTmdbKey, clearTmdbKey } from "../services/tmdb-key";
 
 interface Props {
   isOpen: boolean;
@@ -40,8 +39,6 @@ export function SetupAccessDialog({ isOpen, onClose, onSaved }: Props) {
   const [status, setStatus] = useState<Status>("idle");
   const [message, setMessage] = useState<string | null>(null);
   const [existing, setExisting] = useState<string | null>(null);
-  const [tmdbKey, setTmdbKeyState] = useState("");
-  const [tmdbExisting, setTmdbExisting] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -50,10 +47,6 @@ export function SetupAccessDialog({ isOpen, onClose, onSaved }: Props) {
     void getApiKey().then((stored) => {
       setExisting(stored);
       setKey(stored ?? "");
-    });
-    void getTmdbKey().then((stored) => {
-      setTmdbExisting(stored);
-      setTmdbKeyState(stored ?? "");
     });
   }, [isOpen]);
 
@@ -107,12 +100,6 @@ export function SetupAccessDialog({ isOpen, onClose, onSaved }: Props) {
       return;
     }
     await setApiKey(trimmed);
-    const tmdbTrimmed = tmdbKey.trim();
-    if (tmdbTrimmed) {
-      await setTmdbKey(tmdbTrimmed);
-    } else if (tmdbExisting) {
-      await clearTmdbKey();
-    }
     setStatus("valid");
     onSaved?.();
     onClose();
@@ -120,11 +107,8 @@ export function SetupAccessDialog({ isOpen, onClose, onSaved }: Props) {
 
   async function onRemove() {
     await clearApiKey();
-    await clearTmdbKey();
     setKey("");
-    setTmdbKeyState("");
     setExisting(null);
-    setTmdbExisting(null);
     setStatus("idle");
     setMessage("API key removed.");
   }
@@ -262,7 +246,7 @@ export function SetupAccessDialog({ isOpen, onClose, onSaved }: Props) {
           }}
         />
 
-        {/* Step 4: TMDB key */}
+        {/* Anime metadata note */}
         <Column
           gap="8"
           padding="12"
@@ -271,12 +255,12 @@ export function SetupAccessDialog({ isOpen, onClose, onSaved }: Props) {
           border="brand-alpha-weak"
         >
           <Text variant="body-strong-s">
-            Step 4 — Pair a TMDB API key (optional)
+            Anime metadata — automatic
           </Text>
           <Text variant="body-default-xs" onBackground="neutral-weak">
-            1. Open{" "}
+            Posters and series info come from{" "}
             <a
-              href="https://www.themoviedb.org/settings/api"
+              href="https://myanimelist.net"
               target="_blank"
               rel="noreferrer"
               style={{
@@ -284,25 +268,24 @@ export function SetupAccessDialog({ isOpen, onClose, onSaved }: Props) {
                 textDecoration: "underline",
               }}
             >
-              TMDB API Settings
-            </a>
-            .<br />
-            2. Sign up and request an API key.
-            <br />
-            3. Paste it below to fetch movie posters and metadata.
+              MyAnimeList
+            </a>{" "}
+            via the public{" "}
+            <a
+              href="https://jikan.moe"
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                color: "var(--brand-on-background-strong)",
+                textDecoration: "underline",
+              }}
+            >
+              Jikan
+            </a>{" "}
+            API. No account or API key needed — results are cached locally for
+            30 days.
           </Text>
         </Column>
-
-        <Input
-          id="dc-tmdb-key"
-          label="TMDB API key"
-          placeholder="eyJhbGciOiJIUzI1NiJ9..."
-          value={tmdbKey}
-          onChange={(e) => setTmdbKeyState(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") void onSave();
-          }}
-        />
 
         {message && (
           <Text
@@ -316,9 +299,9 @@ export function SetupAccessDialog({ isOpen, onClose, onSaved }: Props) {
         )}
 
         <Text variant="body-default-xs" onBackground="neutral-weak">
-          Keys are stored locally in your browser (chrome.storage.local). The
-          Google key is sent only to googleapis.com; the TMDB key is sent only
-          to api.themoviedb.org.
+          Your Google key is stored locally (chrome.storage.local) and sent
+          only to googleapis.com. Anime lookups go to api.jikan.moe with the
+          filename only — no personal data.
         </Text>
       </Column>
     </Dialog>

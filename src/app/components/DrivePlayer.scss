@@ -25,11 +25,28 @@
   // windowed mode renders the same 46px cue as a 1920px fullscreen frame.
   container-type: size;
   container-name: dc-vlc;
+  // Ambient glow channel — RGB triplets the DrivePlayer effect writes via
+  // `style.setProperty` after sampling the cached MAL poster. Defaults
+  // here are the dark base used in the rest of the chrome so the bloom
+  // doesn't disappear when sampling fails or no poster is available.
+  --ambient-r: 24;
+  --ambient-g: 16;
+  --ambient-b: 40;
+  // Smooth bloom transitions so jumping between episodes doesn't snap the
+  // surrounding light. The setter on the JS side writes the new RGB and
+  // the box-shadow recalcs over 800ms.
+  transition: box-shadow 800ms ease;
   box-shadow:
     0 24px 60px -28px rgba(0, 0, 0, 0.9),
     0 0 0 1px var(--hairline-pink),
     0 12px 60px -28px var(--brand-alpha-medium),
-    0 12px 60px -28px var(--accent-alpha-medium);
+    0 12px 60px -28px var(--accent-alpha-medium),
+    // Ambient bloom: large, very-soft spread anchored at the player edges
+    // so it leaks outward without darkening the frame itself. Two shadows
+    // stacked — a tighter halo for accent + a wide low-alpha spread for the
+    // room feel.
+    0 28px 90px -10px rgba(var(--ambient-r), var(--ambient-g), var(--ambient-b), 0.36),
+    0 0 160px -20px rgba(var(--ambient-r), var(--ambient-g), var(--ambient-b), 0.22);
 
   & > video {
     position: relative;
@@ -39,6 +56,15 @@
     display: block;
     background: #000;
     object-fit: contain;
+  }
+
+  .dc-vlc__preview-source {
+    position: fixed;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(-9999px, -9999px);
   }
 
   &.is-fullscreen {
@@ -75,6 +101,13 @@
     opacity 220ms ease;
 }
 
+.dc-vlc__top-left {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .dc-vlc__top-kana {
   font-family: var(--dc-font-mono);
   font-size: 0.6875rem;
@@ -103,21 +136,67 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 60%;
   opacity: 0.9;
+}
+
+.dc-vlc__sub-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 42%;
+  flex-shrink: 0;
+  padding: 5px 8px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(6, 8, 20, 0.62);
+  backdrop-filter: blur(10px);
+  font-family: var(--dc-font-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.78);
+
+  > span,
+  > em {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  > span {
+    color: rgba(255, 255, 255, 0.92);
+  }
+
+  > em {
+    color: rgba(255, 255, 255, 0.56);
+    font-style: normal;
+  }
+
+  &.is-ready {
+    border-color: var(--accent-border-medium);
+  }
+
+  &.is-loading {
+    border-color: var(--brand-border-medium);
+  }
+
+  &.is-unsupported {
+    border-color: var(--accent-border-medium);
+    color: var(--accent-on-background-strong);
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Center playback cluster — skip-back / play-pause / skip-forward.
-// Sits absolutely over the video. Backdrop only intensifies while paused
-// (where it doubles as the "your video is waiting" cue) so the playing-state
-// HUD doesn't dim the actual frame.
+// Sits absolutely over the video at the true geometric center. The breathing
+// animation on the knob (when paused) is enough of a "press me" affordance;
+// we deliberately avoid stacking a dimming overlay on the frame so the paused
+// poster stays crisp.
 // ---------------------------------------------------------------------------
 .dc-vlc__center {
   position: absolute;
-  // Stop short of the subtitle bottom zone so the play knob never sits on
-  // top of a line of dialogue.
-  inset: 0 0 22% 0;
+  inset: 0;
   z-index: 2;
   display: flex;
   align-items: center;
@@ -142,14 +221,6 @@
   &:not(.is-on) > * {
     pointer-events: none;
   }
-}
-
-.dc-vlc:not(.is-playing) .dc-vlc__center.is-on {
-  background: radial-gradient(
-    ellipse at center,
-    rgba(6, 8, 20, 0.25) 0%,
-    rgba(6, 8, 20, 0.55) 100%
-  );
 }
 
 .dc-vlc__center-knob {
@@ -364,20 +435,86 @@
 
 .dc-vlc__tl-preview {
   position: absolute;
-  bottom: calc(100% + 8px);
+  bottom: calc(100% + 10px);
   transform: translateX(-50%);
-  padding: 4px 10px;
-  border-radius: 4px;
+  width: 184px;
+  padding: 4px 4px 6px;
+  border-radius: 8px;
   background: rgba(6, 8, 20, 0.94);
   color: var(--brand-on-background-strong);
   font-family: var(--dc-font-mono);
-  font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.08em;
   pointer-events: none;
   white-space: nowrap;
   border: 1px solid var(--hairline-pink);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  box-shadow:
+    0 10px 26px rgba(0, 0, 0, 0.6),
+    0 0 18px -6px var(--brand-alpha-medium);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+
+  // Downward-pointing tail that anchors the bubble to the hovered timeline
+  // position. Two layered triangles produce the hairline border + the fill,
+  // keeping the same pink hairline language as the bubble itself.
+  &::before,
+  &::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+  }
+  &::before {
+    bottom: -7px;
+    border-left: 7px solid transparent;
+    border-right: 7px solid transparent;
+    border-top: 7px solid var(--hairline-pink);
+  }
+  &::after {
+    bottom: -6px;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 6px solid rgba(6, 8, 20, 0.94);
+  }
+
+  canvas {
+    width: 176px;
+    aspect-ratio: 16 / 9;
+    display: none;
+    border-radius: 5px;
+    background: #000;
+    object-fit: cover;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06) inset;
+  }
+
+  span {
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    color: rgba(255, 255, 255, 0.95);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  }
+
+  em {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: rgba(255, 255, 255, 0.5);
+    font-style: normal;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+  }
+
+  &.has-frame canvas {
+    display: block;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -609,6 +746,52 @@
   color: var(--brand-on-background-strong);
   text-transform: uppercase;
   padding: 8px 12px 6px;
+}
+
+.dc-vlc__menu-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 6px 4px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-family: var(--dc-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.72);
+
+  span,
+  em {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  span {
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  em {
+    font-style: normal;
+    color: rgba(255, 255, 255, 0.54);
+  }
+
+  &.is-ready {
+    border-color: var(--accent-border-medium);
+  }
+
+  &.is-loading {
+    border-color: var(--brand-border-medium);
+  }
+
+  &.is-unsupported {
+    border-color: var(--accent-border-medium);
+  }
 }
 
 .dc-vlc__menu-divider {
@@ -957,5 +1140,555 @@
 @keyframes dc-vlc-spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Keyboard shortcuts overlay
+//
+// Press `?` to toggle a hairline-framed cheatsheet that floats above the
+// player. Backdrop dims the frame just enough to focus the eye on the card;
+// the card itself uses the same mono labels and pink/cyan corners as the rest
+// of the HUD so it reads as part of the player room.
+// ---------------------------------------------------------------------------
+.dc-vlc__shortcuts {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(4, 6, 14, 0.62);
+  backdrop-filter: blur(6px);
+  animation: dc-vlc-fade-in 160ms ease;
+}
+
+.dc-vlc__shortcuts-card {
+  position: relative;
+  width: min(640px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 18px 22px 22px;
+  border-radius: var(--ny-radius-md);
+  background: rgba(8, 11, 24, 0.96);
+  border: 1px solid var(--hairline-pink);
+  box-shadow:
+    0 30px 60px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(255, 255, 255, 0.04) inset,
+    0 0 40px -10px var(--brand-alpha-weak);
+  color: rgba(255, 255, 255, 0.92);
+  scrollbar-width: thin;
+  scrollbar-color: var(--brand-alpha-strong) transparent;
+}
+
+.dc-vlc__shortcuts-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.dc-vlc__shortcuts-kana {
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--brand-on-background-strong);
+}
+
+.dc-vlc__shortcuts-close {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.72);
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+
+  &:hover {
+    background: var(--brand-alpha-weak);
+    color: var(--brand-on-background-strong);
+  }
+}
+
+.dc-vlc__shortcuts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px 22px;
+}
+
+.dc-vlc__shortcuts-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+
+  ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12.5px;
+    line-height: 1.4;
+    color: rgba(255, 255, 255, 0.82);
+  }
+
+  kbd {
+    flex-shrink: 0;
+    min-width: 64px;
+    text-align: center;
+    font-family: var(--dc-font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    padding: 3px 8px;
+    border-radius: 5px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--accent-on-background-strong);
+  }
+}
+
+.dc-vlc__shortcuts-group-title {
+  font-family: var(--dc-font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--accent-on-background-strong);
+  margin-bottom: 2px;
+}
+
+@keyframes dc-vlc-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Next-up autoplay card — bottom-right, above the HUD; appears during the
+// closing seconds of the episode. Poster sits left, kana eyebrow + parsed
+// title + actions stack on the right.
+// ---------------------------------------------------------------------------
+.dc-vlc__nextup {
+  position: absolute;
+  // 90px clear of the HUD so the timeline never sits behind the card.
+  bottom: 96px;
+  right: 24px;
+  z-index: 4;
+  display: flex;
+  gap: 12px;
+  width: min(360px, calc(100% - 48px));
+  padding: 10px;
+  border-radius: var(--ny-radius-md);
+  background: rgba(8, 11, 24, 0.94);
+  border: 1px solid var(--hairline-pink);
+  box-shadow:
+    0 20px 48px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(255, 255, 255, 0.04) inset,
+    0 0 40px -10px var(--accent-alpha-medium);
+  color: rgba(255, 255, 255, 0.92);
+  animation: dc-vlc-nextup-in 220ms ease;
+}
+
+.dc-vlc__nextup-poster {
+  position: relative;
+  flex-shrink: 0;
+  width: 64px;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--ny-radius-sm);
+  overflow: hidden;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.04) 0%,
+    rgba(255, 255, 255, 0.02) 100%
+  );
+  border: 1px solid rgba(255, 255, 255, 0.1);
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+}
+
+.dc-vlc__nextup-poster-fallback {
+  width: 100%;
+  height: 100%;
+  background: radial-gradient(
+      ellipse at center,
+      var(--brand-alpha-medium) 0%,
+      transparent 70%
+    ),
+    rgba(8, 11, 24, 0.85);
+}
+
+.dc-vlc__nextup-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.dc-vlc__nextup-kana {
+  font-family: var(--dc-font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--brand-on-background-strong);
+}
+
+.dc-vlc__nextup-title {
+  font-family: var(--dc-font-display);
+  font-size: 13.5px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  color: rgba(255, 255, 255, 0.95);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dc-vlc__nextup-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.dc-vlc__nextup-btn {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.85);
+  font-family: var(--dc-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    box-shadow 140ms ease;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+  }
+
+  &--primary {
+    background: linear-gradient(
+      135deg,
+      var(--brand-solid-medium) 0%,
+      var(--accent-solid-medium) 100%
+    );
+    border-color: transparent;
+    color: #fff;
+    box-shadow: 0 6px 16px -6px var(--brand-alpha-strong);
+
+    &:hover {
+      box-shadow:
+        0 8px 22px -6px var(--brand-alpha-strong),
+        0 0 22px var(--accent-alpha-medium);
+    }
+  }
+}
+
+@keyframes dc-vlc-nextup-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Smart-resume pill — top-left, above the kana eyebrow. Carries its own
+// progress sliver at the bottom that drains during the auto-confirm window
+// so the user can see the timer ticking without reading a number.
+// ---------------------------------------------------------------------------
+.dc-vlc__resume {
+  position: absolute;
+  top: 24px;
+  left: 24px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: var(--ny-radius-sm);
+  background: rgba(8, 11, 24, 0.94);
+  border: 1px solid var(--hairline-pink);
+  box-shadow:
+    0 14px 32px rgba(0, 0, 0, 0.55),
+    0 0 30px -10px var(--brand-alpha-medium);
+  color: rgba(255, 255, 255, 0.94);
+  font-family: var(--dc-font-mono);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  animation: dc-vlc-resume-in 220ms ease;
+  overflow: hidden;
+
+  &.is-resumed,
+  &.is-restarted {
+    animation: dc-vlc-resume-out 360ms ease forwards;
+    pointer-events: none;
+  }
+}
+
+.dc-vlc__resume-kana {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--brand-on-background-strong);
+}
+
+.dc-vlc__resume-time {
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-on-background-strong);
+}
+
+.dc-vlc__resume-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.dc-vlc__resume-btn {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.85);
+  font-family: var(--dc-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 5px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    box-shadow 140ms ease;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+  }
+
+  &--primary {
+    background: linear-gradient(
+      135deg,
+      var(--brand-solid-medium) 0%,
+      var(--accent-solid-medium) 100%
+    );
+    border-color: transparent;
+    color: #fff;
+    box-shadow: 0 6px 14px -6px var(--brand-alpha-strong);
+
+    &:hover {
+      box-shadow:
+        0 8px 18px -6px var(--brand-alpha-strong),
+        0 0 18px var(--accent-alpha-medium);
+    }
+  }
+}
+
+// Draining progress sliver at the bottom edge. The keyframe duration matches
+// RESUME_AUTO_MS in TS (3500 ms) so it lines up with the actual auto-resume.
+// If you bump RESUME_AUTO_MS, update the keyframe duration too — otherwise
+// the sliver finishes before/after the seek and the user sees a mismatch.
+.dc-vlc__resume-progress {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 100%;
+  background: linear-gradient(
+    90deg,
+    var(--brand-solid-medium) 0%,
+    var(--accent-solid-medium) 100%
+  );
+  transform-origin: left center;
+  animation: dc-vlc-resume-drain 3500ms linear forwards;
+}
+
+@keyframes dc-vlc-resume-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes dc-vlc-resume-out {
+  to {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes dc-vlc-resume-drain {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Pre-roll "Now playing" card — fades in, holds, fades out over ~3.4s total.
+//
+// Timeline:
+//   0.0s  fade-in starts (transform + opacity)
+//   0.4s  fully visible
+//   2.4s  hold ends, fade-out starts
+//   3.4s  fully transparent → onAnimationEnd unmounts
+// ---------------------------------------------------------------------------
+.dc-vlc__preroll {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  // Outer animation: pure opacity so the inner frame can also drift slightly
+  // without compounding transform math. Chained: fade-in → hold → fade-out.
+  animation:
+    dc-vlc-preroll-in 400ms ease forwards,
+    dc-vlc-preroll-out 1000ms ease 2400ms forwards;
+}
+
+.dc-vlc__preroll-frame {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 28px;
+  border-radius: var(--ny-radius-md);
+  background: rgba(8, 11, 24, 0.62);
+  border: 1px solid var(--hairline-pink);
+  box-shadow:
+    0 30px 70px rgba(0, 0, 0, 0.55),
+    0 0 60px -16px var(--brand-alpha-medium),
+    0 0 0 1px rgba(255, 255, 255, 0.05) inset;
+  backdrop-filter: blur(10px);
+  animation: dc-vlc-preroll-rise 800ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+}
+
+.dc-vlc__preroll-kana {
+  font-family: var(--dc-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--brand-on-background-strong);
+}
+
+.dc-vlc__preroll-show {
+  font-family: var(--dc-font-display);
+  font-size: clamp(1.4rem, 4cqi, 2.4rem);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.05;
+  text-align: center;
+  color: #fff;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  max-width: 80cqi;
+}
+
+.dc-vlc__preroll-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  font-family: var(--dc-font-mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.dc-vlc__preroll-episode {
+  color: var(--accent-on-background-strong);
+}
+
+.dc-vlc__preroll-runtime {
+  color: rgba(255, 255, 255, 0.7);
+
+  &::before {
+    content: "·";
+    margin-right: 14px;
+    opacity: 0.5;
+  }
+}
+
+// The meta row's separator dot belongs to runtime — when there's no episode
+// label (movies, one-shots), the dot would dangle, so suppress it.
+.dc-vlc__preroll-meta:has(> .dc-vlc__preroll-runtime:only-child)
+  .dc-vlc__preroll-runtime::before {
+  display: none;
+}
+
+@keyframes dc-vlc-preroll-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes dc-vlc-preroll-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes dc-vlc-preroll-rise {
+  from {
+    transform: translateY(12px);
+  }
+  to {
+    transform: translateY(0);
   }
 }

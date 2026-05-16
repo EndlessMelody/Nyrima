@@ -43,15 +43,19 @@ export function fontStackFor(
 ): string {
   switch (preset) {
     case "anime-brush":
-      return '"Comic Neue", "Comic Sans MS", "Chalkboard SE", "Marker Felt", system-ui, sans-serif';
+      // "Itim" carries Vietnamese-range glyphs via its unicode-range-scoped
+      // @font-face (imported in main.tsx). Placing it before system-ui means
+      // accented Vietnamese characters (`ế ữ ợ ầ ạ ẩ`) stay in a brush face
+      // instead of falling through to the OS default sans.
+      return '"Comic Neue", "Comic Sans MS", "Chalkboard SE", "Marker Felt", "Itim", system-ui, sans-serif';
     case "comic-dialogue":
-      return '"Comic Sans MS", "Chalkboard SE", "Marker Felt", "Comic Neue", system-ui, sans-serif';
+      return '"Comic Sans MS", "Chalkboard SE", "Marker Felt", "Comic Neue", "Itim", system-ui, sans-serif';
     case "clean-sans":
       return "var(--dc-font-body)";
     case "system":
       return '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
     case "custom":
-      return `"${CUSTOM_FONT_FAMILY}", "Comic Neue", system-ui, sans-serif`;
+      return `"${CUSTOM_FONT_FAMILY}", "Comic Neue", "Itim", system-ui, sans-serif`;
   }
 }
 

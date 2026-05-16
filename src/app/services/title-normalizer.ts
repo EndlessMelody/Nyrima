@@ -85,6 +85,20 @@ export function normalizeMovieTitle(filename: string): NormalizedTitle {
   return { title, year, quality };
 }
 
+/**
+ * True when the filename, on its own, doesn't contain enough title to query a
+ * metadata API (`[GS]01.mkv` → "01"). Callers should fall back to the parent
+ * folder name as the query string in these cases.
+ */
+export function isEpisodicFilename(rawFileName: string): boolean {
+  const normalized = normalizeMovieTitle(rawFileName).title.trim();
+  if (!normalized) return true;
+  if (/^\d{1,3}$/.test(normalized)) return true;
+  if (/\bS\d{1,2}E\d{1,3}\b/i.test(rawFileName)) return true;
+  if (/\b(?:episode|ep|epi)[\s._-]*\d{1,3}\b/i.test(rawFileName)) return true;
+  return false;
+}
+
 function toTitleCase(str: string): string {
   return str
     .split(" ")

@@ -185,7 +185,7 @@ export function LandingPage() {
         if (!cancelled) {
           setFeatured(pick);
           setFeaturedFolderId(target.id);
-          const meta = await resolvePoster(pick);
+          const meta = await resolvePoster(pick, target.name);
           if (!cancelled) setFeaturedMeta(meta);
         }
       } catch {

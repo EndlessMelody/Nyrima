@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import cn from "classnames";
 import { getApiKey, setApiKey, clearApiKey } from "../services/api-key";
-import { getTmdbKey, setTmdbKey, clearTmdbKey } from "../services/tmdb-key";
 import { getOAuthClientId, setOAuthClientId, clearOAuthClientId } from "../services/oauth-key";
 import "./ApiConfigPanel.scss";
 
@@ -12,9 +11,6 @@ export function ApiConfigPanel() {
   const [status, setStatus] = useState<Status>("idle");
   const [message, setMessage] = useState<string | null>(null);
   const [existing, setExisting] = useState<string | null>(null);
-  
-  const [tmdbKey, setTmdbKeyState] = useState("");
-  const [tmdbExisting, setTmdbExisting] = useState<string | null>(null);
 
   const [oauthClientId, setOAuthClientIdState] = useState("");
   const [oauthExisting, setOAuthExisting] = useState<string | null>(null);
@@ -23,10 +19,6 @@ export function ApiConfigPanel() {
     void getApiKey().then((stored) => {
       setExisting(stored);
       setKey(stored ?? "");
-    });
-    void getTmdbKey().then((stored) => {
-      setTmdbExisting(stored);
-      setTmdbKeyState(stored ?? "");
     });
     void getOAuthClientId().then((stored) => {
       setOAuthExisting(stored);
@@ -78,12 +70,6 @@ export function ApiConfigPanel() {
     }
 
     await setApiKey(trimmed);
-    const tmdbTrimmed = tmdbKey.trim();
-    if (tmdbTrimmed) {
-      await setTmdbKey(tmdbTrimmed);
-    } else if (tmdbExisting) {
-      await clearTmdbKey();
-    }
 
     const oauthTrimmed = oauthClientId.trim();
     if (oauthTrimmed) {
@@ -93,7 +79,6 @@ export function ApiConfigPanel() {
     }
 
     setExisting(trimmed);
-    setTmdbExisting(tmdbTrimmed || null);
     setOAuthExisting(oauthTrimmed || null);
     setStatus("valid");
     setTimeout(() => {
@@ -103,13 +88,10 @@ export function ApiConfigPanel() {
 
   async function onRemove() {
     await clearApiKey();
-    await clearTmdbKey();
     await clearOAuthClientId();
     setKey("");
-    setTmdbKeyState("");
     setOAuthClientIdState("");
     setExisting(null);
-    setTmdbExisting(null);
     setOAuthExisting(null);
     setStatus("idle");
     setMessage("API keys removed.");
@@ -142,25 +124,18 @@ export function ApiConfigPanel() {
       <div className="dc-api-cfg__divider" />
 
       <div className="dc-api-cfg__section">
-        <div className="dc-api-cfg__label">TMDB API Key (Optional)</div>
+        <div className="dc-api-cfg__label">Anime metadata</div>
         <p className="dc-api-cfg__desc">
-          Used to automatically fetch high-quality posters and metadata for your media. Get one from{" "}
-          <a
-            href="https://www.themoviedb.org/settings/api"
-            target="_blank"
-            rel="noreferrer"
-          >
-            TMDB Settings
-          </a>.
+          Posters and series info are fetched from{" "}
+          <a href="https://myanimelist.net" target="_blank" rel="noreferrer">
+            MyAnimeList
+          </a>{" "}
+          via the public{" "}
+          <a href="https://jikan.moe" target="_blank" rel="noreferrer">
+            Jikan
+          </a>{" "}
+          API. No key required — results are cached locally for 30 days.
         </p>
-        <input
-          type="text"
-          className="dc-api-cfg__input"
-          placeholder="eyJhbGciOiJIUzI1NiJ9..."
-          value={tmdbKey}
-          onChange={(e) => setTmdbKeyState(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && void onSave()}
-        />
       </div>
 
       <div className="dc-api-cfg__divider" />

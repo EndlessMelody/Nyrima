@@ -1,0 +1,18 @@
+// JASSUB canvas — absolutely positioned over the <video> inside DrivePlayer.
+// JASSUB resizes the canvas's internal width/height to match the video frame;
+// the CSS box below stretches the canvas to fill the player container while
+// preserving aspect via object-fit semantics. pointer-events:none keeps the
+// HUD click-throughs working.
+.ny-jassub {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  // libass draws with full alpha; keep the canvas above the <video> but below
+  // any HUD element so timeline scrubs aren't blocked by subtitle glyphs.
+  z-index: 2;
+  // Smooth scaling when the rendered canvas dimensions differ from the
+  // display size (high-DPI displays, fullscreen transitions).
+  image-rendering: auto;
+}

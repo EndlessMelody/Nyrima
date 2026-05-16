@@ -132,4 +132,12 @@ export default defineConfig({
       },
     },
   },
+  // The JASSUB worker (Emscripten output bundled inside `jassub/dist/wasm/`)
+  // gets picked up by Vite's worker detection when we import its .js via
+  // `?url`. Vite defaults to `iife` for workers, which Rollup rejects under a
+  // code-splitting build. Force ES output so the worker can be emitted as a
+  // module-format chunk alongside the rest of the extension bundle.
+  worker: {
+    format: "es",
+  },
 });

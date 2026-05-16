@@ -19,8 +19,10 @@ export const STORAGE_KEYS = {
   USER_PROFILE: "dc.userProfile",
   PLAYBACK_STATE: "dc.playbackState",
   SETTINGS: "dc.settings",
-  METADATA_CACHE: "dc.metadataCache",
-  TMDB_KEY: "dc.tmdbKey",
+  // v2: filename-only resolver replaced with folder-aware resolver on
+  // 2026-05-16. Bumped to evict cache entries where episodic files like
+  // `[GS]01.mkv` resolved to the wrong series (Kikaider 01, Digimon 02, …).
+  METADATA_CACHE: "dc.metadataCache.v2",
   OAUTH_CLIENT_ID: "dc.oauthClientId",
   /** Per-file last-known playback mode (native vs mse-remux) for MKV files. */
   PLAYBACK_ENGINE_CACHE: "dc.playbackEngineCache",

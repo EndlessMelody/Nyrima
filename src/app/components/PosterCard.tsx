@@ -5,7 +5,7 @@
  *   - "poster"   → 2:3 portrait (library grid, suggestions).
  *   - "backdrop" → 16:9 landscape (continue-watching scroll row).
  *
- * Lazy-loads TMDB poster/backdrop via poster-resolver; falls back to Drive's
+ * Lazy-loads MAL/Jikan poster via poster-resolver; falls back to Drive's
  * thumbnailLink; final fallback is a gradient tile with the Nyrima mark.
  * Parent can short-circuit the per-card fetch by passing `meta` from a
  * page-level bulk resolve.
@@ -27,8 +27,12 @@ export type PosterCardVariant = "poster" | "backdrop";
 interface Props {
   file: DriveFile;
   folderId?: string;
+  /** Parent-folder name. Forwarded to the resolver so episodic filenames like
+   *  `[GS]01.mkv` resolve via the series name instead of the bare episode
+   *  number. */
+  folderName?: string;
   variant?: PosterCardVariant;
-  /** When provided, skips the per-card TMDB fetch. */
+  /** When provided, skips the per-card Jikan fetch. */
   meta?: MovieMetadata | null;
   playbackPosition?: {
     positionSeconds: number;
@@ -40,6 +44,7 @@ interface Props {
 export function PosterCard({
   file,
   folderId,
+  folderName,
   variant = "poster",
   meta: externalMeta,
   playbackPosition,
@@ -60,13 +65,13 @@ export function PosterCard({
     if (externalMeta) return;
     let mounted = true;
     void (async () => {
-      const m = await resolvePoster(file);
+      const m = await resolvePoster(file, folderName);
       if (mounted) setFetchedMeta(m);
     })();
     return () => {
       mounted = false;
     };
-  }, [file, externalMeta]);
+  }, [file, folderName, externalMeta]);
 
   const thumbUrl =
     variant === "backdrop"

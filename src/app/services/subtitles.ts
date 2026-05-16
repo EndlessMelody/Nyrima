@@ -202,10 +202,174 @@ function extractAssStyles(textField: string): SubStyles | undefined {
   if (/\\i1/.test(textField)) styles.italic = true;
   if (/\\b1/.test(textField)) styles.bold = true;
   if (/\\u1/.test(textField)) styles.underline = true;
-  if (/\\an[1-3]/.test(textField)) styles.align = "left";
-  if (/\\an[4-6]/.test(textField)) styles.align = "center";
-  if (/\\an[7-9]/.test(textField)) styles.align = "right";
+  // Intentionally drop ASS `\an` alignment from the parsed cue: the user
+  // wants dialogue centered regardless of what the script says, and the CSS
+  // overlay path can't honor positioned signs (`\pos`/`\move`) anyway — those
+  // go through JASSUB. Leaving `align` undefined here lets CueLine fall
+  // through to its `"center"` default in SubtitleOverlay.
   return Object.keys(styles).length > 0 ? styles : undefined;
+}
+
+// ---------------------------------------------------------------------------
+// ASS post-processing — force-center dialogue
+// ---------------------------------------------------------------------------
+
+/**
+ * Rewrite an ASS/SSA source so dialogue is forced to bottom-center alignment.
+ *
+ * Why: the user prefers all dialogue centered in the Nyrima player, even when
+ * fansub scripts pin lines to the left or right via `\an1` / `\an4` / `\an7`.
+ *
+ * What we touch:
+ *   - In `[V4 Styles]` / `[V4+ Styles]`: every dialogue-flavored Style row
+ *     (named `Default`, `Dialogue`, `Main`, `Alt`, `Sub`, …) has its
+ *     `Alignment` column forced to `2` (bottom-center).
+ *   - In `[Events]`: every Dialogue row whose Text DOES NOT contain `\pos(`
+ *     or `\move(` (i.e. flowing dialogue, not a positioned sign) has any
+ *     `\an{1,3,4,6,7,9}` rewritten to `\an{2,5,8}` — preserving the vertical
+ *     band (bottom / middle / top) while collapsing the horizontal anchor
+ *     to center.
+ *
+ * What we deliberately leave alone:
+ *   - Positioned signs (typeset titles, episode credits, on-screen labels).
+ *     Anything with `\pos`/`\move` relies on a specific alignment anchor and
+ *     would shift visually if we centered it.
+ *   - Non-dialogue Style rows (Sign, Title, Karaoke, …). These exist so the
+ *     typesetters can anchor signs precisely; rewriting them would move signs.
+ */
+export function forceCenterDialogueInAss(source: string): string {
+  const lines = source.replace(/\r\n/g, "\n").split("\n");
+  const out: string[] = new Array(lines.length);
+
+  let section: "styles" | "events" | "other" = "other";
+  let stylesFormat: string[] = [];
+  let stylesNameIdx = -1;
+  let stylesAlignIdx = -1;
+  let eventsFormat: string[] = [];
+  let eventsTextIdx = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (/^\[V4\+?\s*Styles\]$/i.test(trimmed)) {
+      section = "styles";
+      stylesFormat = [];
+      stylesNameIdx = -1;
+      stylesAlignIdx = -1;
+      out[i] = line;
+      continue;
+    }
+    if (/^\[Events\]$/i.test(trimmed)) {
+      section = "events";
+      eventsFormat = [];
+      eventsTextIdx = -1;
+      out[i] = line;
+      continue;
+    }
+    if (/^\[[^\]]+\]$/.test(trimmed)) {
+      section = "other";
+      out[i] = line;
+      continue;
+    }
+
+    if (section === "styles" && /^Format\s*:/i.test(trimmed)) {
+      stylesFormat = trimmed
+        .slice(trimmed.indexOf(":") + 1)
+        .split(",")
+        .map((s) => s.trim().toLowerCase());
+      stylesNameIdx = stylesFormat.indexOf("name");
+      stylesAlignIdx = stylesFormat.indexOf("alignment");
+      out[i] = line;
+      continue;
+    }
+    if (
+      section === "styles" &&
+      stylesAlignIdx >= 0 &&
+      /^Style\s*:/i.test(trimmed)
+    ) {
+      const colonAt = trimmed.indexOf(":");
+      const fields = trimmed.slice(colonAt + 1).split(",");
+      const name =
+        stylesNameIdx >= 0 && stylesNameIdx < fields.length
+          ? fields[stylesNameIdx].trim()
+          : "";
+      if (isDialogueStyleName(name) && stylesAlignIdx < fields.length) {
+        fields[stylesAlignIdx] = "2";
+      }
+      out[i] = `Style: ${fields.join(",")}`;
+      continue;
+    }
+
+    if (section === "events" && /^Format\s*:/i.test(trimmed)) {
+      eventsFormat = trimmed
+        .slice(trimmed.indexOf(":") + 1)
+        .split(",")
+        .map((s) => s.trim().toLowerCase());
+      eventsTextIdx = eventsFormat.indexOf("text");
+      out[i] = line;
+      continue;
+    }
+    if (
+      section === "events" &&
+      eventsTextIdx >= 0 &&
+      /^Dialogue\s*:/i.test(trimmed)
+    ) {
+      const colonAt = trimmed.indexOf(":");
+      const body = trimmed.slice(colonAt + 1);
+      const parts = body.split(",");
+      if (parts.length > eventsTextIdx) {
+        const head = parts.slice(0, eventsTextIdx);
+        const text = parts.slice(eventsTextIdx).join(",");
+        out[i] = `Dialogue: ${head.join(",")},${centerAnInDialogueText(text)}`;
+        continue;
+      }
+    }
+
+    out[i] = line;
+  }
+  return out.join("\n");
+}
+
+function isDialogueStyleName(name: string): boolean {
+  // Style names that fansubs use for flowing dialogue. Conservative on purpose:
+  // anything outside this list (Sign, Title, Karaoke, Credits, OP/ED, Note, …)
+  // is left untouched so positioned typesetting stays put.
+  if (!name) return true; // unnamed → assume dialogue
+  return /^(default|dialogue|dialog|main|alt|sub|line|talk|narration)\b/i.test(
+    name,
+  );
+}
+
+/**
+ * Rewrite `\an{1,3,4,6,7,9}` → `\an{2,5,8}` inside a Dialogue Text field,
+ * but only when the text doesn't pin its position via `\pos(` / `\move(`.
+ *
+ * Mapping preserves the vertical band:
+ *   bottom-left (1)  → bottom-center (2)
+ *   bottom-right (3) → bottom-center (2)
+ *   middle-left (4)  → middle-center (5)
+ *   middle-right (6) → middle-center (5)
+ *   top-left (7)     → top-center (8)
+ *   top-right (9)    → top-center (8)
+ */
+function centerAnInDialogueText(text: string): string {
+  if (/\\pos\s*\(/.test(text) || /\\move\s*\(/.test(text)) return text;
+  return text.replace(/\\an([1-9])/g, (_, n: string) => {
+    switch (n) {
+      case "1":
+      case "3":
+        return "\\an2";
+      case "4":
+      case "6":
+        return "\\an5";
+      case "7":
+      case "9":
+        return "\\an8";
+      default:
+        return `\\an${n}`;
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------

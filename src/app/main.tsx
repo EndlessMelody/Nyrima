@@ -20,12 +20,16 @@ import "@fontsource/zen-kaku-gothic-new/400.css";
 import "@fontsource/zen-kaku-gothic-new/500.css";
 // Comic Neue — FOSS Comic Sans clone for the SubtitleOverlay. Falls back to
 // system "Comic Sans MS" when present (Windows/macOS) and to Comic Neue on
-// Linux/cross-OS so the fansub-style subtitle look stays consistent. We
-// intentionally *don't* import Itim anymore: it was only ever a per-glyph
-// fallback for stacked Vietnamese diacritics, but its cursive character bled
-// into italic cues and made the look drift away from Comic Sans.
+// Linux/cross-OS so the fansub-style subtitle look stays consistent.
 import "@fontsource/comic-neue/700.css";
 import "@fontsource/comic-neue/700-italic.css";
+// Itim — Vietnamese-subset ONLY. Comic Neue and Comic Sans MS have no
+// Vietnamese glyph coverage (no `ế ữ ợ ầ ạ ẩ` etc.), so Vietnamese cues used
+// to fall back to the OS default and lose the brushy look. Importing
+// vietnamese-400 declares a unicode-range-scoped @font-face that the browser
+// only consults for Vietnamese code points, so Italic-bleed into Latin
+// (the original reason this was removed) can't happen.
+import "@fontsource/itim/vietnamese-400.css";
 
 import "./styles/global.scss";
 

@@ -13,7 +13,7 @@
  *
  * What we keep:
  *   - dc.settings              — subtitle/player preferences are personal
- *   - dc.apiKey / dc.tmdbKey   — the user just pasted them, don't wipe
+ *   - dc.apiKey                — the user just pasted it, don't wipe
  *   - dc.oauthClientId         — same as above
  *   - dc.userProfile           — re-derived from auth on next call
  */

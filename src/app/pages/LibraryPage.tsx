@@ -16,6 +16,7 @@ import { useRecentStore } from "../stores/recent-store";
 import { usePlaybackPositions } from "../hooks/usePlaybackPositions";
 import { LobbyHero } from "../components/LobbyHero";
 import { ContinueWatchingRow } from "../components/ContinueWatchingRow";
+import { LibrarySearchBar } from "../components/LibrarySearchBar";
 import { PosterCard } from "../components/PosterCard";
 import { PosterSkeleton } from "../components/PosterSkeleton";
 import { SuggestionList } from "../components/SuggestionList";
@@ -23,11 +24,26 @@ import { SetupAccessDialog } from "../components/SetupAccessDialog";
 import { NyrimaMark } from "../components/NyrimaMark";
 import { DriveStatusBanner } from "../components/DriveStatusBanner";
 import { resolvePoster } from "../services/poster-resolver";
+import { getFileMetadata } from "../services/drive/metadata-service";
 import { getManyCached } from "../services/metadata-cache";
-import { isWatched } from "../services/storage";
+import {
+  buildLibraryVideoItems,
+  filterLibraryItems,
+  groupLibraryItems,
+  sortLibraryItems,
+  type LibraryFilter,
+  type LibraryVideoGroup,
+  type LibraryVideoItem,
+} from "../services/library-view";
+import { useSettingsStore } from "../stores/settings-store";
 import { driveFolderUrl } from "@shared/drive-urls";
 import type { DriveAccessReason } from "../services/errors";
-import type { DriveFile, MovieMetadata } from "@shared/types";
+import type {
+  LibrarySortKey,
+  LibraryViewMode,
+  MovieMetadata,
+} from "@shared/types";
+import { formatBytes, formatRuntimeFromMillis } from "../services/formatters";
 import "./LibraryPage.scss";
 
 export function LibraryPage() {
@@ -45,26 +61,62 @@ export function LibraryPage() {
     refresh,
   } = useLibraryStore();
   const upsertRecent = useRecentStore((s) => s.upsert);
+  const settings = useSettingsStore((s) => s.settings);
+  const patchSettings = useSettingsStore((s) => s.patch);
   const [setupOpen, setSetupOpen] = useState(false);
   const [positions] = usePlaybackPositions(folderId);
   const [bulkMeta, setBulkMeta] = useState<Record<string, MovieMetadata>>({});
   const [featuredMeta, setFeaturedMeta] = useState<MovieMetadata | null>(null);
+  const [folderName, setFolderName] = useState("");
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<LibraryFilter>("all");
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
+    () => new Set(),
+  );
 
   useEffect(() => {
     if (folderId) void loadFolder(folderId);
   }, [folderId, loadFolder]);
 
   useEffect(() => {
+    if (!folderId) return;
+    let cancelled = false;
+    setFolderName("");
+    void getFileMetadata(folderId, { priority: "normal" })
+      .then((folder) => {
+        if (!cancelled) setFolderName(folder.name);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [folderId]);
+
+  useEffect(() => {
+    setQuery("");
+    setFilter("all");
+    setCollapsedGroups(new Set());
+  }, [folderId]);
+
+  useEffect(() => {
     if (!folderId || (videos.length === 0 && subfolders.length === 0)) return;
+    const displayName =
+      folderName ||
+      deriveFolderName(videos[0]?.video.name, subfolders[0]?.name) ||
+      "Drive folder";
     void upsertRecent({
       id: folderId,
-      name:
-        deriveFolderName(videos[0]?.video.name, subfolders[0]?.name) ??
-        "Drive folder",
+      name: displayName,
       lastOpenedAt: Date.now(),
       itemCount: videos.length + subfolders.length,
     });
-  }, [folderId, videos, subfolders, upsertRecent]);
+  }, [folderId, folderName, videos, subfolders, upsertRecent]);
+
+  const videoFiles = useMemo(() => videos.map((v) => v.video), [videos]);
+  const libraryTitle =
+    folderName ||
+    deriveFolderName(videoFiles[0]?.name, subfolders[0]?.name) ||
+    "Library";
 
   // Seed by folderId so revisiting the same library doesn't pick a new
   // featured every time (which would also trigger a poster-resolver call).
@@ -79,13 +131,13 @@ export function LibraryPage() {
     if (!featured) return;
     let cancelled = false;
     void (async () => {
-      const meta = await resolvePoster(featured);
+      const meta = await resolvePoster(featured, libraryTitle);
       if (!cancelled) setFeaturedMeta(meta);
     })();
     return () => {
       cancelled = true;
     };
-  }, [featured]);
+  }, [featured, libraryTitle]);
 
   // Bulk-load cached metadata in one chrome.storage read so every PosterCard
   // doesn't pay its own round-trip; misses still fall back to the per-card
@@ -104,6 +156,44 @@ export function LibraryPage() {
   }, [videos]);
 
   const shortFolderId = (folderId || "").slice(0, 10).toUpperCase();
+  const empty = videos.length === 0 && subfolders.length === 0;
+  const sortKey = settings.librarySort;
+  const viewMode = settings.libraryView;
+  const libraryItems = useMemo(
+    () =>
+      buildLibraryVideoItems(videoFiles, {
+        parentFolder: libraryTitle,
+        positions,
+      }),
+    [videoFiles, libraryTitle, positions],
+  );
+  const filteredItems = useMemo(
+    () => filterLibraryItems(libraryItems, query, filter),
+    [libraryItems, query, filter],
+  );
+  const sortedItems = useMemo(
+    () => sortLibraryItems(filteredItems, sortKey),
+    [filteredItems, sortKey],
+  );
+  const groupedItems = useMemo(
+    () => groupLibraryItems(sortedItems, sortKey),
+    [sortedItems, sortKey],
+  );
+
+  const setSortKey = (next: LibrarySortKey) => {
+    void patchSettings({ librarySort: next });
+  };
+  const setViewMode = (next: LibraryViewMode) => {
+    void patchSettings({ libraryView: next });
+  };
+  const toggleGroup = (id: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   if (loading) {
     return (
@@ -145,16 +235,10 @@ export function LibraryPage() {
     );
   }
 
-  const empty = videos.length === 0 && subfolders.length === 0;
-  const videoFiles = videos.map((v) => v.video);
-
   return (
     <div className="ny-library">
       <LibraryHeader
-        title={
-          deriveFolderName(videoFiles[0]?.name, subfolders[0]?.name) ??
-          "Library"
-        }
+        title={libraryTitle}
         shortFolderId={shortFolderId}
         onBack={() => navigate("/")}
       />
@@ -180,26 +264,71 @@ export function LibraryPage() {
 
       {videoFiles.length > 0 && (
         <section className="ny-library__section">
-          <h3 className="ny-library__section-heading">All Videos</h3>
-          <div className="ny-poster-grid">
-            {videoFiles.map((v) => (
-              <PosterCard
-                key={v.id}
-                file={v}
-                folderId={folderId}
-                meta={bulkMeta[v.id]}
-                playbackPosition={
-                  positions[v.id]
-                    ? {
-                        positionSeconds: positions[v.id].positionSeconds,
-                        durationSeconds: positions[v.id].durationSeconds,
-                      }
-                    : undefined
-                }
-                watched={isWatched(positions[v.id])}
-              />
-            ))}
+          <div className="ny-library__section-head">
+            <h3 className="ny-library__section-heading">Videos</h3>
+            <span className="ny-library__section-count">
+              {filteredItems.length} shown
+            </span>
           </div>
+
+          <LibrarySearchBar
+            query={query}
+            onQueryChange={setQuery}
+            filter={filter}
+            onFilterChange={setFilter}
+            sortKey={sortKey}
+            onSortChange={setSortKey}
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+            totalCount={videoFiles.length}
+            resultCount={filteredItems.length}
+          />
+
+          {filteredItems.length === 0 ? (
+            <div className="ny-library__no-results">
+              <span className="dc-tracker">NO MATCHES</span>
+              <p>No videos match the current search and filters.</p>
+            </div>
+          ) : viewMode === "grouped" ? (
+            <div className="ny-library__groups">
+              {groupedItems.map((group) => (
+                <LibraryGroupSection
+                  key={group.id}
+                  group={group}
+                  folderId={folderId}
+                  folderName={libraryTitle}
+                  bulkMeta={bulkMeta}
+                  collapsed={collapsedGroups.has(group.id)}
+                  onToggle={() => toggleGroup(group.id)}
+                />
+              ))}
+            </div>
+          ) : viewMode === "list" ? (
+            <div className="ny-video-list">
+              {sortedItems.map((item) => (
+                <LibraryVideoRow
+                  key={item.file.id}
+                  item={item}
+                  folderId={folderId}
+                  meta={bulkMeta[item.file.id]}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="ny-poster-grid">
+              {sortedItems.map((item) => (
+                <PosterCard
+                  key={item.file.id}
+                  file={item.file}
+                  folderId={folderId}
+                  folderName={libraryTitle}
+                  meta={bulkMeta[item.file.id]}
+                  playbackPosition={item.position}
+                  watched={item.watched}
+                />
+              ))}
+            </div>
+          )}
         </section>
       )}
 
@@ -285,10 +414,158 @@ function LibraryHeader({
   );
 }
 
+function LibraryGroupSection({
+  group,
+  folderId,
+  folderName,
+  bulkMeta,
+  collapsed,
+  onToggle,
+}: {
+  group: LibraryVideoGroup;
+  folderId: string;
+  folderName: string;
+  bulkMeta: Record<string, MovieMetadata>;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  const noun =
+    group.kind === "season"
+      ? group.count === 1
+        ? "ep"
+        : "eps"
+      : group.count === 1
+        ? "title"
+        : "titles";
+  const duration = formatRuntimeFromMillis(group.durationMs);
+
+  return (
+    <section className="ny-library-group">
+      <button
+        type="button"
+        className="ny-library-group__head"
+        onClick={onToggle}
+        aria-expanded={!collapsed}
+      >
+        <span className="ny-library-group__twisty" aria-hidden>
+          {collapsed ? "+" : "-"}
+        </span>
+        <span className="ny-library-group__title">{group.title}</span>
+        <span className="ny-library-group__meta">
+          {group.count} {noun}
+          {duration && <span>{duration}</span>}
+          {group.watchedCount > 0 && <span>{group.watchedCount} watched</span>}
+        </span>
+      </button>
+
+      {!collapsed && (
+        <div className="ny-poster-grid">
+          {group.items.map((item) => (
+            <PosterCard
+              key={item.file.id}
+              file={item.file}
+              folderId={folderId}
+              folderName={folderName}
+              meta={bulkMeta[item.file.id]}
+              playbackPosition={item.position}
+              watched={item.watched}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function LibraryVideoRow({
+  item,
+  folderId,
+  meta,
+}: {
+  item: LibraryVideoItem;
+  folderId: string;
+  meta?: MovieMetadata | null;
+}) {
+  const navigate = useNavigate();
+  // Prefer the parser-built `Series - EpNN` over `meta.title` so a series with
+  // 12 episodes shows 12 distinct row labels instead of "Gimai Seikatsu" × 12.
+  // `meta` is still the source of truth for the poster image.
+  const title = item.parsed.fullTitle || meta?.title || item.file.name;
+  const thumb = meta?.backdropUrl || meta?.posterUrl || item.file.thumbnailLink;
+  const duration = formatRuntimeFromMillis(item.durationMs);
+  const size = item.sizeBytes > 0 ? formatBytes(item.sizeBytes) : "";
+  const modified = formatModifiedDate(item.file.modifiedTime);
+
+  const play = () => {
+    navigate(
+      `/play/${encodeURIComponent(folderId)}/${encodeURIComponent(item.file.id)}`,
+    );
+  };
+
+  return (
+    <div
+      className="ny-video-row ny-focusable"
+      role="button"
+      tabIndex={0}
+      onClick={play}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          play();
+        }
+      }}
+      aria-label={`Play ${title}`}
+    >
+      <div className="ny-video-row__thumb">
+        {thumb ? (
+          <img src={thumb} alt="" loading="lazy" />
+        ) : (
+          <NyrimaMark size="header" />
+        )}
+      </div>
+      <div className="ny-video-row__body">
+        <span className="ny-video-row__title" title={title}>
+          {title}
+        </span>
+        <span className="ny-video-row__file" title={item.file.name}>
+          {item.file.name}
+        </span>
+        <div className="ny-video-row__meta">
+          <span>{item.parsed.shortLabel}</span>
+          {duration && <span>{duration}</span>}
+          {size && <span>{size}</span>}
+          {modified && <span>{modified}</span>}
+          {item.watched ? (
+            <span className="ny-video-row__status">Watched</span>
+          ) : item.inProgress ? (
+            <span className="ny-video-row__status">{item.progressPct}%</span>
+          ) : null}
+        </div>
+        {item.progressPct > 0 && !item.watched && (
+          <div className="ny-video-row__progress">
+            <div style={{ width: `${item.progressPct}%` }} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function deriveFolderName(
   ...candidates: (string | undefined)[]
 ): string | undefined {
   return candidates.find(Boolean);
+}
+
+function formatModifiedDate(value: string | undefined): string {
+  if (!value) return "";
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) return "";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(time);
 }
 
 /** Deterministic string → unsigned int hash; used to seed featured pick. */

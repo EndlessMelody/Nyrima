@@ -32,7 +32,7 @@ Update this file as we go. Keep one in-progress item; commit small.
 
 - [ ] `files.get(folderId)` to read the real folder name on load
 - [ ] Lazy / incremental file listing for huge libraries
-- [ ] TMDB integration to fetch posters + summaries by filename
+- [x] MAL/Jikan integration to fetch posters + summaries by filename
 - [ ] Search within a library; sort by date/size/duration
 - [ ] Multi-folder libraries (a library is a set of Drive folders)
 

@@ -43,6 +43,7 @@ import { SetupAccessDialog } from "../components/SetupAccessDialog";
 import { DrivePlayer, type SubtitleTrack } from "../components/DrivePlayer";
 import { DriveStatusBanner } from "../components/DriveStatusBanner";
 import { extractMkvSubtitles } from "../services/mkv-subtitles";
+import { forceCenterDialogueInAss } from "../services/subtitles";
 import { MkvMseController } from "../services/mkv-remux/mse-controller";
 import { normalizeMovieTitle } from "../services/title-normalizer";
 import { parseTitle, isSeasonFolderName } from "@shared/title-parser";
@@ -68,6 +69,7 @@ import {
 } from "../services/playback-strategy";
 import { PlayerLayout } from "../components/PlayerLayout";
 import { PlaylistSidebar } from "../components/PlaylistSidebar";
+import { getCached } from "../services/metadata-cache";
 import { NyrimaMark } from "../components/NyrimaMark";
 import {
   UNSUPPORTED_CONTAINERS,
@@ -327,13 +329,33 @@ export function PlayerPage() {
               },
               onProgress: (mkvSubs) => {
                 if (cancelled) return;
-                const mkvTracks: SubtitleTrack[] = mkvSubs.map((s) => ({
-                  id: s.id,
-                  lang: s.lang,
-                  label: s.label,
-                  cues: s.cues.slice(),
-                  imageBased: s.imageBased,
-                }));
+                const mkvTracks: SubtitleTrack[] = mkvSubs.map((s) => {
+                  // Route embedded ASS/SSA through libass (JASSUB) only once
+                  // the extractor flips `assSourceComplete` — i.e. all clusters
+                  // have been fed and the script is finalized. While streaming,
+                  // `assSource` rebuilds on every cluster; handing JASSUB the
+                  // WIP script would cause its setTrack effect to refire
+                  // constantly (perceptible blink) and would also leave libass
+                  // blank if the user seeks past the streamed window. The CSS
+                  // overlay handles the incremental period; libass takes over
+                  // in one clean transition once the script is complete.
+                  const useJassub =
+                    !!s.assSource &&
+                    !s.imageBased &&
+                    s.assSourceComplete === true;
+                  return {
+                    id: s.id,
+                    lang: s.lang,
+                    label: s.label,
+                    cues: s.cues.slice(),
+                    imageBased: s.imageBased,
+                    source: "embedded",
+                    format: subtitleFormatFromMkvCodec(s.codecId, s.imageBased),
+                    codecId: s.codecId,
+                    assSource: useJassub ? s.assSource : undefined,
+                    assRenderer: useJassub ? "jassub" : undefined,
+                  };
+                });
                 setSubtitleTracks((prev) => [
                   ...prev.filter((t) => !t.id.startsWith("mkv-")),
                   ...mkvTracks,
@@ -469,11 +491,23 @@ export function PlayerPage() {
                 signal: loadAbort.signal,
                 priority: "high",
               });
+              const ext = getExtension(s.name);
+              const isAss = ext === "ass" || ext === "ssa";
               return {
                 id: `ext-${s.id}`,
                 lang: entry.lang,
                 label: entry.label,
                 cues: entry.cues,
+                // Hand the raw ASS source to JASSUB. SRT/VTT keep using the
+                // plain-text overlay (which is faster and respects the
+                // user's typography settings). The script is rewritten to
+                // force dialogue → bottom-center; positioned signs stay put.
+                source: "external",
+                format: subtitleFormatFromExtension(ext),
+                assSource: isAss
+                  ? forceCenterDialogueInAss(entry.text)
+                  : undefined,
+                assRenderer: isAss ? "jassub" : undefined,
               } as SubtitleTrack;
             } catch {
               return null;
@@ -735,6 +769,60 @@ export function PlayerPage() {
       ? folderVideos[currentIndex + 1]
       : null;
 
+  // Look up cached MAL metadata for the next/prev episodes so the Next-up
+  // card can render a poster + the parsed "Series - EpNN" display title. We
+  // intentionally only read the cache (no network) — the resolver-fed cache
+  // is populated by the library page; if the user jumped straight into a
+  // player URL we just fall back to the filename.
+  const [nextPosterUrl, setNextPosterUrl] = useState<string | undefined>();
+  useEffect(() => {
+    let cancelled = false;
+    if (!nextVideo) {
+      setNextPosterUrl(undefined);
+      return;
+    }
+    void (async () => {
+      const meta = await getCached(nextVideo.id);
+      if (!cancelled) setNextPosterUrl(meta?.posterUrl);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [nextVideo]);
+
+  // Ambient glow source — the *current* file's cached MAL poster. Same cache
+  // pattern as nextPosterUrl; the DrivePlayer samples this to derive a per-
+  // episode bloom around the frame.
+  const [currentPosterUrl, setCurrentPosterUrl] = useState<string | undefined>();
+  useEffect(() => {
+    let cancelled = false;
+    if (!fileId) {
+      setCurrentPosterUrl(undefined);
+      return;
+    }
+    void (async () => {
+      const meta = await getCached(fileId);
+      if (!cancelled) setCurrentPosterUrl(meta?.posterUrl);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [fileId]);
+
+  const nextDisplayTitle = useMemo(() => {
+    if (!nextVideo) return undefined;
+    try {
+      const parsed = parseTitle({
+        filename: nextVideo.name,
+        parentFolder: folderName,
+        showFolder: showFolderName || undefined,
+      });
+      return parsed.fullTitle || nextVideo.name;
+    } catch {
+      return nextVideo.name;
+    }
+  }, [nextVideo, folderName, showFolderName]);
+
   // Stabilize the {fileId, title} adapter shapes so DrivePlayer doesn't see
   // a new object identity on every parent render.
   const prevAdapter = useMemo(
@@ -742,8 +830,16 @@ export function PlayerPage() {
     [prevVideo],
   );
   const nextAdapter = useMemo(
-    () => (nextVideo ? { fileId: nextVideo.id, title: nextVideo.name } : null),
-    [nextVideo],
+    () =>
+      nextVideo
+        ? {
+            fileId: nextVideo.id,
+            title: nextVideo.name,
+            displayTitle: nextDisplayTitle,
+            posterUrl: nextPosterUrl,
+          }
+        : null,
+    [nextVideo, nextDisplayTitle, nextPosterUrl],
   );
 
   const handleNext = useCallback(() => {
@@ -925,6 +1021,9 @@ export function PlayerPage() {
                 prevVideo={prevAdapter}
                 onNext={handleNext}
                 onPrev={handlePrev}
+                theatreMode={theater}
+                onToggleTheatre={() => setTheater((t) => !t)}
+                ambientSourceUrl={currentPosterUrl}
               />
             )}
 
@@ -997,13 +1096,6 @@ export function PlayerPage() {
                   <button
                     type="button"
                     className="ny-btn ny-btn--ghost"
-                    onClick={() => setTheater((t) => !t)}
-                  >
-                    {theater ? "Exit theater" : "Theater mode"}
-                  </button>
-                  <button
-                    type="button"
-                    className="ny-btn ny-btn--ghost"
                     onClick={handleMarkWatched}
                   >
                     Mark as watched
@@ -1018,6 +1110,8 @@ export function PlayerPage() {
             videos={folderVideos}
             currentFileId={fileId}
             folderId={folderId}
+            folderName={folderName}
+            showFolderName={showFolderName || undefined}
             positions={positions}
           />
         }
@@ -1105,6 +1199,25 @@ function PlayerErrorCard({
       </div>
     </div>
   );
+}
+
+function subtitleFormatFromMkvCodec(
+  codecId: string,
+  imageBased: boolean,
+): SubtitleTrack["format"] {
+  if (imageBased) return "image";
+  const normalized = codecId.toUpperCase();
+  if (normalized.includes("ASS")) return "ass";
+  if (normalized.includes("SSA")) return "ssa";
+  if (normalized.includes("UTF8") || normalized.includes("SRT")) return "srt";
+  return "text";
+}
+
+function subtitleFormatFromExtension(ext: string): SubtitleTrack["format"] {
+  if (ext === "ass" || ext === "ssa" || ext === "srt" || ext === "vtt") {
+    return ext;
+  }
+  return "text";
 }
 
 // ---------------------------------------------------------------------------

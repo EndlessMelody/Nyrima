@@ -11,8 +11,44 @@
   width: 100%;
 }
 
-.ny-player-page.is-theater .ny-player-main {
-  max-width: none;
+// ---------------------------------------------------------------------------
+// Theatre mode — dim the chrome around the player without going fullscreen.
+//
+// Hides the playlist sidebar and the info card below the video so the player
+// becomes the only thing in the room. The AppShell header stays visible so
+// the user can still navigate back; we just drop its opacity to keep focus
+// on the frame. The transition is timed slightly faster than fullscreen so
+// the toggle feels responsive without being abrupt.
+// ---------------------------------------------------------------------------
+.ny-player-page {
+  transition: background 240ms ease;
+
+  &.is-theater {
+    background: rgba(2, 4, 10, 0.72);
+
+    .ny-player-main {
+      max-width: none;
+    }
+
+    .ny-player-info,
+    .ny-player-layout__aside {
+      display: none;
+    }
+  }
+}
+
+// When theatre mode is on, the app-shell header (rendered outside this page)
+// can also be muted. We can't reach it from a descendant selector, so we
+// piggy-back on the body via :has() — supported in all evergreen browsers
+// and harmless in older ones (the rule simply doesn't fire).
+body:has(.ny-player-page.is-theater) .dc-shell__header {
+  opacity: 0.42;
+  transition: opacity 240ms ease;
+
+  &:hover,
+  &:focus-within {
+    opacity: 1;
+  }
 }
 
 .ny-player-main {

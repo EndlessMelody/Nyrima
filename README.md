@@ -30,7 +30,7 @@ Chrome Extension so that any folder on `drive.google.com` can be opened
 | Phase | Goal |
 | ----- | ---- |
 | **2** | MKV / HEVC support via FFmpeg.wasm or libmpv WASM + libass for ASS rendering |
-| **3** | Library metadata (TMDB), poster wall, smart sort, search |
+| **3** | Library metadata (MyAnimeList via Jikan), poster wall, smart sort, search |
 | **4** | Forum / sharing layer: shared index, per-user catalogs, comments-as-JSON |
 | **5** | Watch parties (WebRTC sync), encrypted private rooms |
 

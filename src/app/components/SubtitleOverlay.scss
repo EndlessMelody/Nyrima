@@ -130,12 +130,10 @@ $sub-base-fullscreen: clamp(22px, 3.4cqi, 64px);
   &[data-underline="true"] {
     text-decoration: underline;
   }
-  &[data-align="left"] {
-    text-align: left;
-  }
-  &[data-align="right"] {
-    text-align: right;
-  }
+  // text-align is locked to center for every cue; the previous data-align
+  // left/right overrides have been intentionally removed so fansub `\an1` /
+  // `\an4` / `\an7` overrides can't pull dialogue off-center. Positioned
+  // signs flow through JASSUB instead, which respects `\pos`/`\move`.
 }
 
 .dc-sub-overlay.is-fs .dc-sub-cue {

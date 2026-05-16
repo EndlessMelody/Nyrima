@@ -27,7 +27,11 @@ import {
   type EbmlElement,
   type MkvTrack,
 } from "./ebml";
-import { type SubCue, type SubStyles } from "./subtitles";
+import {
+  forceCenterDialogueInAss,
+  type SubCue,
+  type SubStyles,
+} from "./subtitles";
 import { fetchRange } from "./drive-api";
 
 export interface ExtractedMkvSub {
@@ -37,6 +41,19 @@ export interface ExtractedMkvSub {
   codecId: string;
   cues: SubCue[];
   imageBased: boolean;
+  /**
+   * Reconstituted ASS/SSA source for libass/JASSUB. Present for S_TEXT/ASS
+   * and S_TEXT/SSA tracks when CodecPrivate supplied the script header.
+   */
+  assSource?: string;
+  /**
+   * False while native-mode background extraction is still appending Dialogue
+   * rows. The player should keep using the CSS text overlay until this flips
+   * true, otherwise JASSUB gets mounted with a header-only/incomplete script.
+   */
+  assSourceComplete?: boolean;
+  /** Internal immutable header used while appending streamed Dialogue lines. */
+  assHeader?: string;
 }
 
 export interface MkvExtractOptions {
@@ -127,10 +144,22 @@ export async function extractMkvSubtitles(
 
   const timecodeScale = header.timecodeScale;
 
-  // 3. Initialise per-track results + per-track ASS style maps -------------
+  // 3. Initialise per-track results + per-track ASS metadata ---------------
+  const infoByTrack = new Map<number, AssTrackInfo>();
+  for (const t of subTracks) {
+    infoByTrack.set(t.number, parseAssTrackInfo(t.codecPrivate));
+  }
+  const assEventsByTrack = new Map<number, string[]>();
+
   const results: ExtractedMkvSub[] = subTracks.map((t) => {
     const normCodec = t.codecId.toUpperCase().replace(/\s/g, "");
     const imageBased = normCodec === "S_VOBSUB" || normCodec === "S_HDMV/PGS";
+    const assInfo = infoByTrack.get(t.number) ?? EMPTY_TRACK_INFO;
+    const assSource =
+      isAssCodec(t.codecId) && assInfo.sourceHeader
+        ? buildAssSource(assInfo.sourceHeader, [])
+        : undefined;
+    if (assSource) assEventsByTrack.set(t.number, []);
     return {
       id: `mkv-${t.number}-${t.language}`,
       lang: t.language,
@@ -138,13 +167,11 @@ export async function extractMkvSubtitles(
       codecId: t.codecId,
       cues: [],
       imageBased,
+      assSource,
+      assSourceComplete: assSource ? false : undefined,
+      assHeader: assInfo.sourceHeader ?? undefined,
     };
   });
-
-  const infoByTrack = new Map<number, AssTrackInfo>();
-  for (const t of subTracks) {
-    infoByTrack.set(t.number, parseAssTrackInfo(t.codecPrivate));
-  }
 
   // If every subtitle track is image-based we have nothing to extract.
   if (results.every((r) => r.imageBased)) {
@@ -164,6 +191,7 @@ export async function extractMkvSubtitles(
     subTracks,
     timecodeScale,
     infoByTrack,
+    assEventsByTrack,
     results,
   );
   // eslint-disable-next-line no-console
@@ -219,7 +247,13 @@ export async function extractMkvSubtitles(
       if (el.id === MKV_ID.Cluster) {
         clusterCount++;
         const added = parseClusterForCues(
-          buf, el, subTracks, timecodeScale, infoByTrack, results,
+          buf,
+          el,
+          subTracks,
+          timecodeScale,
+          infoByTrack,
+          assEventsByTrack,
+          results,
         );
         if (added) cuesAdded = true;
       }
@@ -241,7 +275,12 @@ export async function extractMkvSubtitles(
     if (finalized) return;
     finalized = true;
     leftover = null;
-    for (const r of results) finalizeCues(r.cues);
+    for (const r of results) {
+      finalizeCues(r.cues);
+      if (r.assSource) {
+        r.assSourceComplete = true;
+      }
+    }
     // eslint-disable-next-line no-console
     console.info(
       `[subs] finalize: chunks=${totalChunks} clusters=${clusterCount} ` +
@@ -280,6 +319,7 @@ function parseRegionForCues(
   subTracks: MkvTrack[],
   timecodeScale: number,
   infoByTrack: Map<number, AssTrackInfo>,
+  assEventsByTrack: Map<number, string[]>,
   results: ExtractedMkvSub[],
 ): number {
   let offset = start;
@@ -308,6 +348,7 @@ function parseRegionForCues(
         subTracks,
         timecodeScale,
         infoByTrack,
+        assEventsByTrack,
         results,
       );
     }
@@ -327,6 +368,7 @@ function parseClusterForCues(
   subTracks: MkvTrack[],
   timecodeScale: number,
   infoByTrack: Map<number, AssTrackInfo>,
+  assEventsByTrack: Map<number, string[]>,
   results: ExtractedMkvSub[],
 ): boolean {
   let clusterTimeTicks = 0;
@@ -345,15 +387,16 @@ function parseClusterForCues(
       const block = parseSimpleBlock(buf, child.dataOffset, child.dataLength);
       const track = findTrack(subTracks, block.trackNumber);
       if (!track) continue;
-      const cue = blockToCue(
+      const decoded = blockToCue(
         block.data,
         track.codecId,
         clusterTimeTicks + block.timecode,
         timecodeScale,
+        null,
         infoByTrack.get(track.number) ?? EMPTY_TRACK_INFO,
       );
-      if (cue) {
-        appendCue(results, track.number, cue);
+      if (decoded) {
+        appendCue(results, track.number, decoded, assEventsByTrack);
         added = true;
       }
       continue;
@@ -383,18 +426,20 @@ function parseClusterForCues(
       );
       const track = findTrack(subTracks, block.trackNumber);
       if (!track) continue;
-      const cue = blockToCue(
+      const durationSec =
+        blockDurationTicks !== null
+          ? ticksToSec(blockDurationTicks, timecodeScale)
+          : null;
+      const decoded = blockToCue(
         block.data,
         track.codecId,
         clusterTimeTicks + block.timecode,
         timecodeScale,
+        durationSec,
         infoByTrack.get(track.number) ?? EMPTY_TRACK_INFO,
       );
-      if (cue) {
-        if (blockDurationTicks !== null) {
-          cue.end = cue.start + ticksToSec(blockDurationTicks, timecodeScale);
-        }
-        appendCue(results, track.number, cue);
+      if (decoded) {
+        appendCue(results, track.number, decoded, assEventsByTrack);
         added = true;
       }
     }
@@ -416,12 +461,20 @@ function findTrack(
 function appendCue(
   results: ExtractedMkvSub[],
   trackNumber: number,
-  cue: SubCue,
+  decoded: DecodedCue,
+  assEventsByTrack: Map<number, string[]>,
 ): void {
   for (const r of results) {
     // Track number is encoded into the id: `mkv-${number}-${lang}`
     if (r.id.startsWith(`mkv-${trackNumber}-`)) {
-      r.cues.push(cue);
+      r.cues.push(decoded.cue);
+      if (decoded.assDialogue && r.assSource) {
+        const events = assEventsByTrack.get(trackNumber);
+        if (events) {
+          events.push(decoded.assDialogue);
+          r.assSource = buildAssSource(r.assHeader ?? r.assSource, events);
+        }
+      }
       return;
     }
   }
@@ -447,6 +500,14 @@ function trackLabelFromCodec(codecId: string, lang: string): string {
   return `${langUpper} · ${base}`;
 }
 
+function isAssCodec(codecId: string): boolean {
+  // Lenient match: some muxers emit non-canonical CodecID strings (`S_ASS`,
+  // `ASS`, `S_TEXT/SSA-something`). All of those still carry ASS/SSA bytes,
+  // so we accept anything that contains the substring after normalisation.
+  const normCodec = codecId.toUpperCase().replace(/\s/g, "");
+  return normCodec.includes("ASS") || normCodec.includes("SSA");
+}
+
 // ---------------------------------------------------------------------------
 // ASS CodecPrivate parsing
 // ---------------------------------------------------------------------------
@@ -466,28 +527,98 @@ interface AssStyleMap {
  *    fall back to a heuristic.
  */
 interface AssTrackInfo {
+  /** Complete ASS/SSA script header from CodecPrivate, without dialogue rows. */
+  sourceHeader: string | null;
   styles: AssStyleMap;
   eventTextIndex: number | null;
 }
 
 const EMPTY_TRACK_INFO: AssTrackInfo = {
+  sourceHeader: null,
   styles: {},
   eventTextIndex: null,
 };
 
 function parseAssTrackInfo(codecPrivate?: Uint8Array): AssTrackInfo {
-  if (!codecPrivate || codecPrivate.length === 0) return EMPTY_TRACK_INFO;
+  if (!codecPrivate || codecPrivate.length === 0) {
+    // Some MKVs ship ASS subs without a CodecPrivate (header-only encoders,
+    // re-muxes that drop it). Fabricate a minimal v4+ header so JASSUB still
+    // gets a parseable script — without this fallback, the player would silently
+    // route the track through the CSS overlay even though libass could render
+    // the dialogue lines we decode from clusters.
+    return {
+      sourceHeader: synthesizeMinimalAssHeader(),
+      styles: {},
+      eventTextIndex: 8,
+    };
+  }
   const text = new TextDecoder().decode(codecPrivate);
-
   return {
+    sourceHeader: stripAssDialogueRows(text) || synthesizeMinimalAssHeader(),
     styles: parseAssStylesSection(text),
-    eventTextIndex: parseAssEventsTextIndex(text),
+    // Default to the standard 8-column MKV-form layout when the events
+    // Format line is missing or unparseable: that matches what every modern
+    // fansub muxer emits, so the heuristic almost never has to kick in.
+    eventTextIndex: parseAssEventsTextIndex(text) ?? 8,
   };
+}
+
+/**
+ * Minimal but valid ASS v4+ script header. Used when CodecPrivate is missing
+ * or empty so the JASSUB renderer always has a parseable script. Style values
+ * are conservative defaults; per-cue overrides from the script still apply,
+ * and forceCenterDialogueInAss will fix Alignment to 2 at build time.
+ */
+function synthesizeMinimalAssHeader(): string {
+  return [
+    "[Script Info]",
+    "ScriptType: v4.00+",
+    "WrapStyle: 0",
+    "ScaledBorderAndShadow: yes",
+    "PlayResX: 1920",
+    "PlayResY: 1080",
+    "",
+    "[V4+ Styles]",
+    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+    "Style: Default,Arial,52,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,2.4,1.6,2,40,40,40,1",
+    "",
+    "[Events]",
+    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+  ].join("\n");
+}
+
+function stripAssDialogueRows(source: string): string {
+  return source
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .filter((line) => !/^\s*(Dialogue|Comment):/i.test(line))
+    .join("\n")
+    .trim();
+}
+
+function buildAssSource(header: string, dialogueLines: string[]): string {
+  const normalized = header.replace(/\r\n/g, "\n").trim();
+  const hasEvents = /\[Events\]/i.test(normalized);
+  const withEvents = hasEvents
+    ? normalized
+    : `${normalized}\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`;
+  const joined =
+    dialogueLines.length === 0
+      ? `${withEvents}\n`
+      : `${withEvents}\n${dialogueLines.join("\n")}\n`;
+  // Force every dialogue line + Default-style row to bottom-center before
+  // handing the script to libass. Positioned signs (anything with \pos / \move)
+  // are intentionally left alone.
+  return forceCenterDialogueInAss(joined);
 }
 
 function parseAssStylesSection(text: string): AssStyleMap {
   const styles: AssStyleMap = {};
-  const sectionMatch = text.match(/\[V4\+?\s*Styles\](.+?)(?=\[|$)/is);
+  // Accept all common section spellings: `[V4 Styles]`, `[V4+ Styles]`,
+  // `[V4Styles]` with arbitrary surrounding whitespace.
+  const sectionMatch = text.match(
+    /\[\s*V4\+?\s*Styles\s*\]([\s\S]+?)(?=\n\s*\[|$)/i,
+  );
   if (!sectionMatch) return styles;
 
   const lines = sectionMatch[1].split(/\r?\n/);
@@ -518,12 +649,9 @@ function parseAssStylesSection(text: string): AssStyleMap {
         const c = parseAssColor(val);
         if (c) style.color = c;
       }
-      if (col === "alignment") {
-        const align = parseInt(val, 10);
-        if (align >= 1 && align <= 3) style.align = "left";
-        if (align >= 4 && align <= 6) style.align = "center";
-        if (align >= 7 && align <= 9) style.align = "right";
-      }
+      // Alignment intentionally dropped: dialogue is forced to bottom-center
+      // by the player, and positioned signs go through JASSUB (which honors
+      // \pos / \move directly). See forceCenterDialogueInAss in subtitles.ts.
     }
     if (name) styles[name] = style;
   }
@@ -539,7 +667,11 @@ function parseAssStylesSection(text: string): AssStyleMap {
  *   originalIdx − (start before? 1 : 0) − (end before? 1 : 0) + 1
  */
 function parseAssEventsTextIndex(text: string): number | null {
-  const sectionMatch = text.match(/\[V4\+?\s*Events\](.+?)(?=\[|$)/is);
+  // ASS section header is just `[Events]` — accept whitespace variants and the
+  // rare `[V4 Events]` / `[V4+ Events]` form some legacy SSA muxers emit.
+  const sectionMatch = text.match(
+    /\[\s*(?:V4\+?\s*)?Events\s*\]([\s\S]+?)(?=\n\s*\[|$)/i,
+  );
   if (!sectionMatch) return null;
   const lines = sectionMatch[1].split(/\r?\n/);
   for (const raw of lines) {
@@ -587,14 +719,21 @@ function parseAssColor(val: string): string | null {
 // Block payload → SubCue
 // ---------------------------------------------------------------------------
 
+interface DecodedCue {
+  cue: SubCue;
+  assDialogue?: string;
+}
+
 function blockToCue(
   data: Uint8Array,
   codecId: string,
   timeTicks: number,
   timecodeScale: number,
+  durationSec: number | null,
   info: AssTrackInfo,
-): SubCue | null {
+): DecodedCue | null {
   const startSec = ticksToSec(timeTicks, timecodeScale);
+  const endSec = startSec + (durationSec ?? 3);
   const decoded = decodeBlockText(data, codecId, info.eventTextIndex);
   if (!decoded) return null;
   const { text, styleName } = decoded;
@@ -603,11 +742,14 @@ function blockToCue(
     styleName && info.styles[styleName] ? info.styles[styleName] : undefined;
 
   return {
-    id: `${startSec.toFixed(3)}-${text.slice(0, 20)}`,
-    start: startSec,
-    end: startSec + 3, // overridden by BlockDuration when present
-    text,
-    styles,
+    cue: {
+      id: `${startSec.toFixed(3)}-${text.slice(0, 20)}`,
+      start: startSec,
+      end: endSec,
+      text,
+      styles,
+    },
+    assDialogue: buildAssDialogue(data, codecId, startSec, endSec),
   };
 }
 
@@ -622,12 +764,6 @@ function decodeBlockText(
   codecId: string,
   eventTextIndex: number | null,
 ): DecodedBlock | null {
-  // Trim trailing nulls
-  let end = data.length;
-  while (end > 0 && data[end - 1] === 0) end--;
-  const trimmed = data.subarray(0, end);
-  if (trimmed.length === 0) return null;
-
   const normCodec = codecId.toUpperCase().replace(/\s/g, "");
 
   // Image-based — can't extract text
@@ -635,17 +771,11 @@ function decodeBlockText(
     return null;
   }
 
-  let text = new TextDecoder().decode(trimmed);
+  const payload = decodeTrimmedBlockText(data);
+  if (!payload) return null;
+  let text = payload;
 
   if (normCodec === "S_TEXT/ASS" || normCodec === "S_TEXT/SSA") {
-    // Matroska ASS blocks may start with a 2-byte ReadOrder prefix
-    // (uint16 LE). If the first byte is non-printable, skip the first 2.
-    if (trimmed.length > 2 && trimmed[0] < 0x20) {
-      text = new TextDecoder().decode(trimmed.subarray(2)).trim();
-    } else {
-      text = text.trim();
-    }
-
     // Full-line `Dialogue:` form: appears in external .ass files, rarely
     // in MKV blocks. Strip the prefix and let the field-index logic below
     // extract the Text column.
@@ -713,12 +843,84 @@ function decodeBlockText(
   };
 }
 
+function decodeTrimmedBlockText(data: Uint8Array): string | null {
+  // Trim trailing nulls.
+  let end = data.length;
+  while (end > 0 && data[end - 1] === 0) end--;
+  const trimmed = data.subarray(0, end);
+  if (trimmed.length === 0) return null;
+
+  // Matroska ASS blocks may start with a 2-byte binary ReadOrder prefix
+  // (uint16 LE). If the first byte is non-printable, skip those bytes.
+  const text =
+    trimmed.length > 2 && trimmed[0] < 0x20
+      ? new TextDecoder().decode(trimmed.subarray(2))
+      : new TextDecoder().decode(trimmed);
+  return text.trim();
+}
+
+function buildAssDialogue(
+  data: Uint8Array,
+  codecId: string,
+  startSec: number,
+  endSec: number,
+): string | undefined {
+  if (!isAssCodec(codecId)) return undefined;
+  const payload = decodeTrimmedBlockText(data);
+  if (!payload) return undefined;
+
+  const start = secToAssTime(startSec);
+  const end = secToAssTime(endSec);
+
+  if (/^Dialogue:/i.test(payload)) {
+    const fields = payload.replace(/^Dialogue:\s*/i, "").split(",");
+    if (fields.length < 3) return undefined;
+    fields[1] = start;
+    fields[2] = end;
+    return `Dialogue: ${fields.join(",")}`;
+  }
+
+  const fields = payload.split(",");
+  // Matroska stores ASS events without Start/End and with ReadOrder
+  // prepended: ReadOrder, Layer, Style, Name, MarginL, MarginR, MarginV,
+  // Effect, Text. Reinsert Start/End after Layer so libass receives a
+  // normal ASS Dialogue row.
+  if (fields.length < 9) return undefined;
+  const layer = fields[1]?.trim() || "0";
+  const rest = fields.slice(2);
+  return `Dialogue: ${[layer, start, end, ...rest].join(",")}`;
+}
+
+function secToAssTime(sec: number): string {
+  const safe = Math.max(0, sec);
+  const totalCentiseconds = Math.round(safe * 100);
+  const cs = totalCentiseconds % 100;
+  const totalSeconds = Math.floor(totalCentiseconds / 100);
+  const s = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const m = totalMinutes % 60;
+  const h = Math.floor(totalMinutes / 60);
+  return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(cs).padStart(2, "0")}`;
+}
+
 function stripAssTags(text: string): string {
-  return text
-    .replace(/\{[^}]*\}/g, "")
+  let out = text;
+  // Strip well-formed { ... } override blocks first.
+  out = out.replace(/\{[^{}]*\}/g, "");
+  // Defensive: if we sliced the Text field mid-override (e.g. commas inside
+  // `\pos(x,y)` or `\fade(...,400)` mis-aligned the field split), we'll see a
+  // leading orphan fragment that ends with `}` but never opened with `{`.
+  // Match `<garbage that contains \ overrides>}` and drop everything up to
+  // and including that `}`.
+  out = out.replace(/^[^{}]*?\\[a-zA-Z][^{}]*\}/, "");
+  // Equivalent guard for a trailing `{...` with no closing brace.
+  out = out.replace(/\{[^{}]*$/, "");
+  // Drawing commands (`\p1 m 0 0 ...\p0`) leave vector path data behind once
+  // the brace strip is gone; collapse those to nothing as well.
+  out = out.replace(/\\p\d+[^\\]*?(?=\\p\d|$)/g, "");
+  return out
     .replace(/\\N/g, "\n")
     .replace(/\\n/g, "\n")
     .replace(/\\h/g, " ")
     .trim();
 }
-

@@ -13,7 +13,7 @@
  *
  * What's NOT cached here:
  *   - Media bytes (Phase 3 / segment cache, separate)
- *   - TMDB poster lookups (existing metadata-cache.ts, separate concern)
+ *   - MAL/Jikan poster lookups (existing metadata-cache.ts, separate concern)
  *   - Playback positions (chrome.storage.local, never stale)
  */
 
