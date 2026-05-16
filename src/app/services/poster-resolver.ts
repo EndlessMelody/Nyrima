@@ -22,7 +22,7 @@
  */
 
 import type { DriveFile, MovieMetadata } from "@shared/types";
-import { isEpisodicFilename, normalizeMovieTitle } from "./title-normalizer";
+import { isEpisodicFilename, normalizeMovieTitle } from "@shared/title-parser";
 import { getCached, setCached } from "./metadata-cache";
 
 const JIKAN_API = "https://api.jikan.moe/v4";

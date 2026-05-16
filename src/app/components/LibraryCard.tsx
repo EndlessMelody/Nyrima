@@ -57,6 +57,35 @@ export function LibraryCard({ folder, positions }: Props) {
 
   const initials = useMemo(() => folderInitials(folder.name), [folder.name]);
 
+  // Library stats — written by LibraryPage when the user opens a folder.
+  // First visit shows the basic "N items" fallback; subsequent visits show
+  // the richer "12 ep · 4h 36m" pair.
+  const countLabel = useMemo(() => {
+    if (folder.videoCount != null) {
+      const n = folder.videoCount;
+      return n === 1 ? "1 ep" : `${n} eps`;
+    }
+    if (folder.itemCount != null) return `${folder.itemCount} items`;
+    return "—";
+  }, [folder.videoCount, folder.itemCount]);
+
+  const runtimeLabel = useMemo(
+    () => (folder.runtimeMs ? formatRuntimeShortMs(folder.runtimeMs) : null),
+    [folder.runtimeMs],
+  );
+
+  const watchedRatio = useMemo(() => {
+    const total = folder.videoCount ?? 0;
+    const watched = folder.watchedCount ?? 0;
+    if (total === 0 || watched === 0) return null;
+    return {
+      watched,
+      total,
+      label: `${watched}/${total}`,
+      complete: watched >= total,
+    };
+  }, [folder.videoCount, folder.watchedCount]);
+
   const onOpen = () => navigate(`/library/${encodeURIComponent(folder.id)}`);
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -81,11 +110,25 @@ export function LibraryCard({ folder, positions }: Props) {
       aria-label={`Open ${folder.name}`}
       title={`Drive ID · ${folder.id.slice(0, 8).toUpperCase()}`}
     >
-      <div className="ny-library-card__poster">
-        <div className="ny-library-card__poster-art" aria-hidden>
-          <span className="ny-library-card__initials">{initials}</span>
-          <NyrimaMark size="header" className="ny-library-card__mark" />
-        </div>
+      <div
+        className={cn("ny-library-card__poster", {
+          "has-cover": !!folder.coverPosterUrl,
+        })}
+      >
+        {folder.coverPosterUrl ? (
+          <img
+            className="ny-library-card__cover"
+            src={folder.coverPosterUrl}
+            alt=""
+            loading="lazy"
+            decoding="async"
+          />
+        ) : (
+          <div className="ny-library-card__poster-art" aria-hidden>
+            <span className="ny-library-card__initials">{initials}</span>
+            <NyrimaMark size="header" className="ny-library-card__mark" />
+          </div>
+        )}
 
         {folder.pinned && (
           <span
@@ -101,6 +144,17 @@ export function LibraryCard({ folder, positions }: Props) {
           </span>
         )}
 
+        {watchedRatio && (
+          <span
+            className={cn("ny-library-card__progress-pill", {
+              "is-complete": watchedRatio.complete,
+            })}
+            title={`${watchedRatio.watched} of ${watchedRatio.total} watched`}
+          >
+            {watchedRatio.label}
+          </span>
+        )}
+
         <div className="ny-library-card__hover" aria-hidden>
           <span className="ny-library-card__open-cta">
             <PlayIcon /> Open
@@ -113,11 +167,13 @@ export function LibraryCard({ folder, positions }: Props) {
           {folder.name}
         </span>
         <span className="ny-library-card__meta">
-          <span>
-            {folder.itemCount != null
-              ? `${folder.itemCount} items`
-              : "—"}
-          </span>
+          <span>{countLabel}</span>
+          {runtimeLabel && (
+            <>
+              <span className="ny-library-card__dot" aria-hidden />
+              <span>{runtimeLabel}</span>
+            </>
+          )}
           <span className="ny-library-card__dot" aria-hidden />
           <span>{formatRelative(folder.lastOpenedAt)}</span>
         </span>
@@ -148,6 +204,15 @@ function folderInitials(name: string): string {
   if (words.length === 0) return "Nm";
   if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
   return (words[0][0] + words[1][0]).toUpperCase();
+}
+
+function formatRuntimeShortMs(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return "";
+  const totalMin = Math.round(ms / 60_000);
+  if (totalMin < 60) return `${totalMin}m`;
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
 }
 
 function formatRelative(epoch: number): string {

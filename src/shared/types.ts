@@ -23,8 +23,19 @@ export interface RecentFolder {
   name: string;
   lastOpenedAt: number; // epoch ms
   pinned?: boolean;
+  /** Total entries (videos + subfolders) — kept for backwards compatibility. */
   itemCount?: number;
-  coverFileId?: string; // optional thumbnail to display on the card
+  /** Just the video count, written when the library page populates. */
+  videoCount?: number;
+  /** Sum of all known video durations in this library, in ms. */
+  runtimeMs?: number;
+  /** Count of videos with playback past the watched threshold. */
+  watchedCount?: number;
+  /** Best-known cover image (typically a MAL/Jikan poster) so library cards
+   *  on the lobby can render a backdrop instead of the initials fallback. */
+  coverPosterUrl?: string;
+  /** Optional Drive thumbnail file id (older field, retained for legacy data). */
+  coverFileId?: string;
 }
 
 /** The single Nyrima root folder. Persisted once at onboarding; re-validated

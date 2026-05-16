@@ -45,8 +45,11 @@ import { DriveStatusBanner } from "../components/DriveStatusBanner";
 import { extractMkvSubtitles } from "../services/mkv-subtitles";
 import { forceCenterDialogueInAss } from "../services/subtitles";
 import { MkvMseController } from "../services/mkv-remux/mse-controller";
-import { normalizeMovieTitle } from "../services/title-normalizer";
-import { parseTitle, isSeasonFolderName } from "@shared/title-parser";
+import {
+  normalizeMovieTitle,
+  parseTitle,
+  isSeasonFolderName,
+} from "@shared/title-parser";
 import {
   formatBytes,
   formatRuntime,

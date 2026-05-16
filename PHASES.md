@@ -74,19 +74,32 @@ Ships extra to Phase 2 to make the player feel less like a debug surface.
 - [→] Unified Tracks panel (Subtitles + Audio tabs) — _deferred_ (rolls in
       with F.9 audio-track work, tracked as F.12)
 
-## Phase 3 — Library polish · **not started**
+## Phase 3 — Library polish · **shipped**
 _Last touched: 2026-05-16_
 
 - [x] **P3.1** In-library search + sort (name / modified / size / duration)
   - Added search, watch-state filters, persisted sort, and view mode controls.
 - [x] **P3.2** Season / episode grouping using the existing title parser
   - Added grouped library sections and a grouped player episode sidebar.
-- [x] **P3.3** MAL/Jikan integration for posters + series   metadata
+- [x] **P3.3** MAL/Jikan integration for posters + series metadata
   - Replaced TMDB on 2026-05-16. No API key required; cached 30 d / miss 7 d.
-- [ ] **P3.4** Virtualised library grid for huge libraries
-- [ ] **P3.5** Library-card upgrades (counts, total runtime, watched badge,
-      best-matched poster as cover)
-- [ ] **P3.6** Multi-folder libraries — _deferred_ (data-model rewrite)
+  - Folder-aware resolver: episodic filenames like `[GS]01.mkv` query the
+    folder name instead of `"01"`, so a series of 12 episodes resolves to one
+    shared MAL hit.
+- [x] **P3.4** Virtualised library grid via `content-visibility: auto`
+  - Browser-native virtualisation on `.ny-poster-card`, `.ny-video-row`, and
+    `.ny-library-card`. Off-screen items skip layout + paint while
+    `contain-intrinsic-size` reserves a placeholder so the scrollbar stays
+    steady. Cheaper than react-virtual at this scale and dep-free.
+- [x] **P3.5** Library-card upgrades
+  - Persisted library stats on `RecentFolder` (videoCount / runtimeMs /
+    watchedCount / coverPosterUrl) written by `LibraryPage` on visit. Lobby
+    cards render the MAL cover as a backdrop, watched-ratio pill, and a
+    `"12 eps · 4h 36m"` meta line. Empty stats fall back to the legacy
+    `"N items"` until the user first visits the library.
+  - Lobby gets a thin instrument-tape stats strip aggregating libraries /
+    episodes / total runtime / watched count across the collection.
+- [→] **P3.6** Multi-folder libraries — _deferred_ (data-model rewrite)
 
 ## Phase 4 — Sharing layer · **not started**
 _Last touched: never_
@@ -112,11 +125,17 @@ _Last touched: 2026-05-16_
 - [ ] **F.1** Lazy route splitting (`React.lazy` for Library + Player pages)
 - [ ] **F.2** Replace `scripts/zip.mjs` tar.gz fallback with `adm-zip`
 - [ ] **F.3** Generate real PNG icons from `NyrimaMark` SVG in `make-icons.mjs`
-- [ ] **F.4** Vitest setup + parser unit tests
-  - `title-normalizer`, `@shared/title-parser`, `@shared/parse-folder-url`
-  - SRT/VTT/ASS converters
-- [ ] **F.5** De-duplicate the two title parsers (`title-normalizer` vs
-      `@shared/title-parser`)
+- [x] **F.4** Vitest setup + parser unit tests
+  - 26 tests covering `parseTitle`, `normalizeMovieTitle`, `isEpisodicFilename`,
+    `isSeasonFolderName`, SRT / VTT / ASS converters, `forceCenterDialogueInAss`.
+  - Surfaced a real bug: years inside `(parens)` were stripped before the
+    year regex ran. Fixed.
+  - Scripts: `npm test` (single run) / `npm run test:watch`.
+- [x] **F.5** De-duplicate the two title parsers
+  - Removed `src/app/services/title-normalizer.ts`. `normalizeMovieTitle`
+    and `isEpisodicFilename` now live alongside `parseTitle` in
+    `@shared/title-parser`. All call sites updated; `buildDisplayTitle`
+    callers switched to `parseTitle`.
 - [ ] **F.6** Replace ad-hoc inline styles with Once UI tokens
 - [ ] **F.7** Swap the `AppProviders` shim for `<Providers>` from
       `@once-ui-system/core` once verified to work under Vite

@@ -173,6 +173,132 @@ function stripExtension(name: string): string {
   return name.replace(/\.[^.]+$/, "");
 }
 
+// ---------------------------------------------------------------------------
+// Filename-only normalization
+//
+// Used by the poster resolver to build a Jikan query string and by lobby /
+// player surfaces that just need a clean display label. `parseTitle` above
+// handles the folder-aware case; this one is for the cold-start /
+// movie / suggestion-card path where only a filename is in hand.
+//
+// This block was originally a separate `services/title-normalizer.ts` module
+// that drifted out of sync with the parser's regex set. It now lives next
+// to `parseTitle` so there's one source of truth for both.
+// ---------------------------------------------------------------------------
+
+export interface NormalizedTitle {
+  title: string;
+  year: number | null;
+  quality: string | null;
+}
+
+// Scene tags worth stripping for the *movie* normalizer — the wider set
+// (REMUX, IMAX, edition flags, etc.) that `parseTitle`'s NOISE_TOKEN_PATTERNS
+// doesn't bother with because the parser already extracts a structured
+// episode number and doesn't need to clean cosmetic tags.
+const MOVIE_SCENE_TAGS = [
+  "1080p", "720p", "480p", "2160p", "4k", "4K",
+  "x265", "x264", "xvid", "XviD", "XVID",
+  "hevc", "HEVC", "avc", "AVC", "h264", "H264", "H.264",
+  "aac", "AAC", "ac3", "AC3", "dts", "DTS", "dd5.1", "DD5.1",
+  "atmos", "Atmos", "ATMOS",
+  "bluray", "BluRay", "BLURAY", "bdrip", "BDRip", "BDRIP",
+  "web-dl", "WEB-DL", "webdl", "WEBDL",
+  "webrip", "WEBRip", "WEBRIP",
+  "hdrip", "HDRip", "HDRIP",
+  "dvdrip", "DVDRip", "DVDRIP",
+  "remux", "Remux", "REMUX",
+  "extended", "EXTENDED", "unrated", "UNRATED",
+  "directors cut", "director's cut", " Directors Cut",
+  "imax", "IMAX",
+  "proper", "Proper", "PROPER",
+  "repack", "Repack", "REPACK",
+  "readnfo", "READNFO",
+  "subbed", "SUBBED", "dubbed", "DUBBED",
+  "multi", "MULTI",
+  "hdr", "HDR", "dv", "DV", "dolby vision", "Dolby Vision",
+];
+
+const MOVIE_TAG_RE = new RegExp(
+  "(?:\\b|\\[|\\(|\\.|_)" +
+    MOVIE_SCENE_TAGS.map((t) =>
+      t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+    ).join("|") +
+    "(?:\\b|\\]|\\)|\\.|_)",
+  "gi",
+);
+
+const TITLE_CASE_SMALL = [
+  "a", "an", "the", "and", "but", "or", "for", "nor",
+  "on", "at", "to", "from", "by", "in", "of", "with",
+];
+
+function toTitleCase(str: string): string {
+  const parts = str.split(" ");
+  return parts
+    .map((w, i) => {
+      if (!w) return w;
+      const lower = w.toLowerCase();
+      if (i > 0 && TITLE_CASE_SMALL.includes(lower)) return lower;
+      return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+    })
+    .join(" ");
+}
+
+/**
+ * Normalize a raw video filename into a clean movie title + extracted year
+ * and quality flag. Used as the Jikan query string for non-episodic files
+ * and as the display label on lobby surfaces that don't have folder context.
+ */
+export function normalizeMovieTitle(filename: string): NormalizedTitle {
+  let raw = stripExtension(filename);
+
+  // Extract the year BEFORE stripping parens, so `Tenki no Ko (2019).mkv`
+  // keeps the year intact. We pull from the raw stem (after extension)
+  // because the year is the most reliable signal Jikan keys against, and
+  // a parenthesised year is the common fansub style for movies.
+  const now = new Date().getFullYear();
+  const yearMatch = raw.match(/\b(19\d{2}|20\d{2})\b/);
+  let year: number | null = null;
+  if (yearMatch) {
+    const y = Number(yearMatch[1]);
+    if (y >= 1900 && y <= now + 1) {
+      year = y;
+    }
+  }
+
+  raw = raw.replace(/\[[^\]]+\]/g, "").replace(/\([^)]{3,}\)/g, "");
+  raw = raw.replace(MOVIE_TAG_RE, " ");
+  raw = raw.replace(/[._]/g, " ").replace(/\s+/g, " ").trim();
+  // Strip any bare year that survived (e.g. `Inception 2010` with no parens).
+  if (year != null) {
+    raw = raw.replace(new RegExp(`\\b${year}\\b`), "").trim();
+  }
+
+  let quality: string | null = null;
+  const lower = filename.toLowerCase();
+  if (lower.includes("2160p") || lower.includes("4k")) quality = "4K";
+  else if (lower.includes("1080p")) quality = "1080p";
+  else if (lower.includes("720p")) quality = "720p";
+  else if (lower.includes("480p")) quality = "480p";
+
+  return { title: toTitleCase(raw), year, quality };
+}
+
+/**
+ * True when the filename, on its own, doesn't contain enough title to query
+ * a metadata API (`[GS]01.mkv` → `"01"`). Callers should fall back to the
+ * parent folder name as the query string in these cases.
+ */
+export function isEpisodicFilename(rawFileName: string): boolean {
+  const normalized = normalizeMovieTitle(rawFileName).title.trim();
+  if (!normalized) return true;
+  if (/^\d{1,3}$/.test(normalized)) return true;
+  if (/\bS\d{1,2}E\d{1,3}\b/i.test(rawFileName)) return true;
+  if (/\b(?:episode|ep|epi)[\s._-]*\d{1,3}\b/i.test(rawFileName)) return true;
+  return false;
+}
+
 function cleanFileName(rawFileName: string): string {
   let s = stripExtension(rawFileName);
   for (const re of NOISE_TOKEN_PATTERNS) s = s.replace(re, " ");

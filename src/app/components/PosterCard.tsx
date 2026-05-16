@@ -16,7 +16,7 @@ import { useNavigate } from "react-router-dom";
 import cn from "classnames";
 import type { DriveFile, MovieMetadata } from "@shared/types";
 import { resolvePoster } from "../services/poster-resolver";
-import { normalizeMovieTitle } from "../services/title-normalizer";
+import { normalizeMovieTitle } from "@shared/title-parser";
 import { playbackProgressPct } from "../services/storage";
 import { WATCHED_THRESHOLD_PCT } from "@shared/constants";
 import { NyrimaMark } from "./NyrimaMark";

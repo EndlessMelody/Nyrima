@@ -11,7 +11,7 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import type { DriveFile, MovieMetadata } from "@shared/types";
-import { normalizeMovieTitle } from "../services/title-normalizer";
+import { normalizeMovieTitle } from "@shared/title-parser";
 import { formatRuntimeFromMillis } from "../services/formatters";
 import { HeroSkeleton } from "./HeroSkeleton";
 import "./LobbyHero.scss";

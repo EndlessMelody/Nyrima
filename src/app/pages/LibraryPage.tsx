@@ -98,19 +98,10 @@ export function LibraryPage() {
     setCollapsedGroups(new Set());
   }, [folderId]);
 
-  useEffect(() => {
-    if (!folderId || (videos.length === 0 && subfolders.length === 0)) return;
-    const displayName =
-      folderName ||
-      deriveFolderName(videos[0]?.video.name, subfolders[0]?.name) ||
-      "Drive folder";
-    void upsertRecent({
-      id: folderId,
-      name: displayName,
-      lastOpenedAt: Date.now(),
-      itemCount: videos.length + subfolders.length,
-    });
-  }, [folderId, folderName, videos, subfolders, upsertRecent]);
+  // Note: an enriched upsertRecent runs further down once `libraryItems` and
+  // `bulkMeta` are derived. That writes videoCount / runtimeMs / watchedCount
+  // / coverPosterUrl so the lobby's LibraryCard can render real stats and a
+  // cover backdrop without refetching the folder.
 
   const videoFiles = useMemo(() => videos.map((v) => v.video), [videos]);
   const libraryTitle =
@@ -179,6 +170,51 @@ export function LibraryPage() {
     () => groupLibraryItems(sortedItems, sortKey),
     [sortedItems, sortKey],
   );
+
+  // Persisted library stats on the RecentFolder entry. The lobby's
+  // LibraryCard renders these without refetching the folder, so the user
+  // gets episode counts + total runtime + a cover backdrop the moment they
+  // open the lobby. Cover prefers the *first non-miss* MAL poster; with the
+  // folder-aware resolver, every episode in a series resolves to the same
+  // poster, so the first hit is the series cover.
+  useEffect(() => {
+    if (!folderId || (videos.length === 0 && subfolders.length === 0)) return;
+    const displayName =
+      folderName ||
+      deriveFolderName(videos[0]?.video.name, subfolders[0]?.name) ||
+      "Drive folder";
+    let runtimeMs = 0;
+    let watchedCount = 0;
+    let coverPosterUrl: string | undefined;
+    for (const item of libraryItems) {
+      runtimeMs += item.durationMs;
+      if (item.watched) watchedCount += 1;
+      if (!coverPosterUrl) {
+        const meta = bulkMeta[item.file.id];
+        if (meta?.status === "ok" && meta.posterUrl) {
+          coverPosterUrl = meta.posterUrl;
+        }
+      }
+    }
+    void upsertRecent({
+      id: folderId,
+      name: displayName,
+      lastOpenedAt: Date.now(),
+      itemCount: videos.length + subfolders.length,
+      videoCount: videos.length,
+      runtimeMs: runtimeMs > 0 ? runtimeMs : undefined,
+      watchedCount,
+      coverPosterUrl,
+    });
+  }, [
+    folderId,
+    folderName,
+    videos,
+    subfolders,
+    libraryItems,
+    bulkMeta,
+    upsertRecent,
+  ]);
 
   const setSortKey = (next: LibrarySortKey) => {
     void patchSettings({ librarySort: next });

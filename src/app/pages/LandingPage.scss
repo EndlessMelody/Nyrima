@@ -211,3 +211,77 @@
   margin: 0;
   line-height: 1.55;
 }
+
+// ---------------------------------------------------------------------------
+// Lobby stats strip — thin instrument-tape that summarises the collection.
+// Hidden by the parent when no library has been enriched yet (zero state).
+// ---------------------------------------------------------------------------
+.ny-lobby-stats {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  padding: 14px 18px;
+  border: 1px solid var(--neutral-border-weak);
+  border-radius: var(--ny-radius-md);
+  background:
+    linear-gradient(
+      90deg,
+      var(--brand-alpha-weak) 0%,
+      transparent 40%,
+      var(--accent-alpha-weak) 100%
+    ),
+    var(--surface-background);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.02) inset;
+  overflow-x: auto;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.ny-lobby-stats__kana {
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--brand-on-background-strong);
+  flex-shrink: 0;
+  padding-right: 18px;
+  border-right: 1px solid var(--neutral-border-weak);
+}
+
+.ny-lobby-stats__cells {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 28px;
+}
+
+.ny-lobby-stats__cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.ny-lobby-stats__value {
+  font-family: var(--dc-font-display);
+  font-size: 1.125rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--neutral-on-background-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.ny-lobby-stats__label {
+  font-family: var(--dc-font-mono);
+  font-size: 0.625rem;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--neutral-on-background-weak);
+}

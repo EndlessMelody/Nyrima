@@ -187,6 +187,11 @@
   border-radius: var(--ny-radius-sm);
   background: var(--surface-background);
   cursor: pointer;
+  // Browser-native virtualisation for the list view too — see PosterCard.scss
+  // for the rationale. Intrinsic size keeps the scrollbar steady before rows
+  // hit the viewport and mount their thumbnails.
+  content-visibility: auto;
+  contain-intrinsic-size: 100% 86px;
   transition:
     background 160ms ease,
     border-color 160ms ease,

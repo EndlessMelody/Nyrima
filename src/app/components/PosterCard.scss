@@ -3,6 +3,14 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /* Browser-native virtualisation: off-screen cards skip layout + paint, so
+     a 500-episode library doesn't pay rendering cost for items the user
+     can't see. `contain-intrinsic-size` reserves a placeholder box so the
+     scroll thumb doesn't drift while cards mount. The chosen size matches
+     the typical 2:3 poster + body footprint at the default grid width. */
+  content-visibility: auto;
+  contain-intrinsic-size: 280px 460px;
+
   /* Reset the focus ring to draw around the frame, not the whole flex column,
      so the title text isn't included in the outline rectangle. */
   &:focus-visible {
@@ -13,6 +21,14 @@
     outline: 2px solid var(--brand-border-strong);
     outline-offset: 2px;
   }
+}
+
+/* Backdrop variants are horizontally laid out and short — disable
+   content-visibility here so off-screen items in horizontal scrolls don't
+   collapse to the intrinsic size (which would break the row's flex sizing). */
+.ny-poster-card--backdrop {
+  content-visibility: visible;
+  contain-intrinsic-size: auto;
 }
 
 /* Backdrop variant — used in horizontal-scroll rows (Continue Watching). */

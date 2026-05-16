@@ -14,7 +14,7 @@
  *   - Otherwise → cinematic dashboard with hero, search/filter, shelves.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Column,
   Row,
@@ -42,7 +42,8 @@ import {
   listFolder as cachedListFolder,
 } from "../services/drive/metadata-service";
 import { resolvePoster } from "../services/poster-resolver";
-import { isInProgress } from "../services/storage";
+import { getCached } from "../services/metadata-cache";
+import { isInProgress, isWatched } from "../services/storage";
 import { shuffle } from "../utils/shuffle";
 import type {
   DriveFile,
@@ -60,7 +61,8 @@ export function LandingPage() {
   const loadRoot = useNyrimaRootStore((s) => s.load);
   const refreshRoot = useNyrimaRootStore((s) => s.refresh);
 
-  const { folders: recentFolders, load: loadRecents } = useRecentStore();
+  const { folders: recentFolders, load: loadRecents, upsert: upsertRecent } =
+    useRecentStore();
   const [setupOpen, setSetupOpen] = useState(() => {
     if (typeof window !== "undefined") {
       return new URLSearchParams(window.location.search).get("setup") === "1";
@@ -127,6 +129,93 @@ export function LandingPage() {
       };
     });
   }, [libraries, recentFolders, root]);
+
+  // --- Background bulk-enrichment ------------------------------------------
+  //
+  // The library-card stats (videoCount / runtimeMs / watchedCount / cover)
+  // are normally written by `LibraryPage` when the user opens a folder. On a
+  // fresh install or a never-visited library, the card falls back to
+  // "N items" and the lobby stats strip stays hidden. We close that gap by
+  // walking unenriched libraries in the background and writing the stats
+  // ourselves: one `cachedListFolder` per library + an optional Jikan lookup
+  // for the cover. Throttled by the existing request queue + Jikan's 1 req/s
+  // gap so a large root doesn't burst.
+  //
+  // `enrichingRef` keeps a per-session set of folder ids that are in-flight
+  // or done so a positions update (which re-renders adaptedFolders identity)
+  // doesn't re-fire the work.
+  const enrichingRef = useRef(new Set<string>());
+  const positionsRef = useRef(positions);
+  positionsRef.current = positions;
+  useEffect(() => {
+    const todo = adaptedFolders.filter(
+      (f) => f.videoCount == null && !enrichingRef.current.has(f.id),
+    );
+    if (todo.length === 0) return;
+    let cancelled = false;
+    const ctrl = new AbortController();
+    void (async () => {
+      for (const folder of todo) {
+        if (cancelled) return;
+        enrichingRef.current.add(folder.id);
+        try {
+          const result = await cachedListFolder(folder.id, {
+            signal: ctrl.signal,
+            priority: "low",
+          });
+          if (cancelled) return;
+          const videos = result.files.filter(isVideoFile);
+          const livePositions = positionsRef.current;
+          let runtimeMs = 0;
+          let watchedCount = 0;
+          for (const v of videos) {
+            const durStr = v.videoMediaMetadata?.durationMillis;
+            const dur = durStr ? Number(durStr) : 0;
+            if (Number.isFinite(dur) && dur > 0) runtimeMs += dur;
+            if (isWatched(livePositions[v.id])) watchedCount++;
+          }
+          // Cover lookup. Prefer the cache to avoid spamming Jikan; only fall
+          // through to a fresh resolve when we have a probe video and no hit.
+          let coverPosterUrl: string | undefined;
+          if (videos.length > 0) {
+            const cached = await getCached(videos[0].id);
+            if (cached?.status === "ok" && cached.posterUrl) {
+              coverPosterUrl = cached.posterUrl;
+            } else {
+              try {
+                const meta = await resolvePoster(videos[0], folder.name);
+                if (meta.status === "ok") coverPosterUrl = meta.posterUrl;
+              } catch {
+                // ignore — leave coverPosterUrl undefined
+              }
+            }
+          }
+          if (cancelled) return;
+          await upsertRecent({
+            id: folder.id,
+            name: folder.name,
+            lastOpenedAt: folder.lastOpenedAt,
+            itemCount: result.files.length,
+            videoCount: videos.length,
+            runtimeMs: runtimeMs > 0 ? runtimeMs : undefined,
+            watchedCount,
+            coverPosterUrl,
+            pinned: folder.pinned,
+          });
+        } catch {
+          // Network blip or abort — release the slot so a later session retries.
+          enrichingRef.current.delete(folder.id);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+      ctrl.abort();
+    };
+    // `positions` deliberately omitted — read via ref to avoid re-enriching on
+    // every timeupdate. `upsertRecent` is store-bound and stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adaptedFolders, upsertRecent]);
 
   // --- Continue / Featured -------------------------------------------------
   const mostRecentInProgress = useMemo<PlaybackPosition | null>(() => {
@@ -239,6 +328,33 @@ export function LandingPage() {
   const pinned = filteredFolders.filter((f) => f.pinned);
   const others = filteredFolders.filter((f) => !f.pinned);
 
+  // Aggregate stats for the lobby tape. Only counted from libraries that the
+  // user has actually visited at least once (since the stats are persisted
+  // by LibraryPage on visit). `enrichedCount` is the gate — when zero, we
+  // suppress the strip entirely so the user doesn't see "0 episodes" on a
+  // brand-new install.
+  const lobbyStats = useMemo(() => {
+    let videos = 0;
+    let runtimeMs = 0;
+    let watched = 0;
+    let enrichedCount = 0;
+    for (const f of adaptedFolders) {
+      if (f.videoCount != null) {
+        videos += f.videoCount;
+        enrichedCount++;
+      }
+      if (f.runtimeMs) runtimeMs += f.runtimeMs;
+      if (f.watchedCount) watched += f.watchedCount;
+    }
+    return {
+      libraryCount: adaptedFolders.length,
+      videos,
+      runtimeMs,
+      watched,
+      enrichedCount,
+    };
+  }, [adaptedFolders]);
+
   const randomPicks = useMemo(() => {
     if (others.length <= 4) return [] as RecentFolder[];
     return shuffle(others).slice(0, 4);
@@ -329,6 +445,15 @@ export function LandingPage() {
           folderId={featuredFolderId}
         />
       ) : null}
+
+      {lobbyStats.enrichedCount > 0 && (
+        <LobbyStatsStrip
+          libraryCount={lobbyStats.libraryCount}
+          videos={lobbyStats.videos}
+          runtimeMs={lobbyStats.runtimeMs}
+          watched={lobbyStats.watched}
+        />
+      )}
 
       <SearchFilterBar
         query={query}
@@ -544,4 +669,81 @@ function DashboardDialogs({
       />
     </>
   );
+}
+
+// ---------------------------------------------------------------------------
+// LobbyStatsStrip
+//
+// A thin mono tape that summarizes the user's collection in aggregate. Reads
+// from the persisted library stats (videoCount / runtimeMs / watchedCount on
+// the RecentFolder entry), so values are only present after the user has
+// actually opened those libraries. The strip is suppressed by the caller
+// when nothing has been enriched yet, so a brand-new install doesn't see
+// "0 episodes".
+// ---------------------------------------------------------------------------
+
+function LobbyStatsStrip({
+  libraryCount,
+  videos,
+  runtimeMs,
+  watched,
+}: {
+  libraryCount: number;
+  videos: number;
+  runtimeMs: number;
+  watched: number;
+}) {
+  const cells: Array<{ label: string; value: string }> = [
+    {
+      label: "Libraries",
+      value: String(libraryCount),
+    },
+  ];
+  if (videos > 0) {
+    cells.push({
+      label: "Episodes",
+      value: videos.toLocaleString(),
+    });
+  }
+  if (runtimeMs > 0) {
+    cells.push({
+      label: "Total runtime",
+      value: formatTotalRuntime(runtimeMs),
+    });
+  }
+  if (watched > 0) {
+    cells.push({
+      label: "Watched",
+      value: watched.toLocaleString(),
+    });
+  }
+  return (
+    <section
+      className="ny-lobby-stats"
+      role="region"
+      aria-label="Library statistics"
+    >
+      <span className="ny-lobby-stats__kana">あなたのコレクション · COLLECTION</span>
+      <ul className="ny-lobby-stats__cells">
+        {cells.map((cell) => (
+          <li key={cell.label} className="ny-lobby-stats__cell">
+            <span className="ny-lobby-stats__value">{cell.value}</span>
+            <span className="ny-lobby-stats__label">{cell.label}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function formatTotalRuntime(ms: number): string {
+  if (ms <= 0) return "0m";
+  const totalMin = Math.round(ms / 60_000);
+  if (totalMin < 60) return `${totalMin}m`;
+  const totalHr = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (totalHr < 24) return m === 0 ? `${totalHr}h` : `${totalHr}h ${m}m`;
+  const d = Math.floor(totalHr / 24);
+  const h = totalHr % 24;
+  return h === 0 ? `${d}d` : `${d}d ${h}h`;
 }

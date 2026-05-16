@@ -18,7 +18,7 @@ import type {
   PlaybackPosition,
   RecentFolder,
 } from "@shared/types";
-import { buildDisplayTitle } from "../services/title-normalizer";
+import { parseTitle } from "@shared/title-parser";
 import { formatTimecode, formatRuntime } from "../services/formatters";
 import { NyrimaMark } from "./NyrimaMark";
 import "./ContinueHero.scss";
@@ -39,7 +39,7 @@ export function ContinueHero({ position, folder, file }: Props) {
   const folderName = folder?.name ?? "";
 
   const parsed = useMemo(
-    () => buildDisplayTitle(folderName, rawName),
+    () => parseTitle({ filename: rawName, parentFolder: folderName }),
     [folderName, rawName],
   );
 
@@ -94,8 +94,8 @@ export function ContinueHero({ position, folder, file }: Props) {
           続きから · CONTINUE WATCHING
         </span>
 
-        <h2 className="ny-continue-hero__title" title={parsed.displayTitle}>
-          {parsed.displayTitle}
+        <h2 className="ny-continue-hero__title" title={parsed.fullTitle}>
+          {parsed.fullTitle}
         </h2>
 
         {folderName && (
