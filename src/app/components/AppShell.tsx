@@ -18,6 +18,7 @@ import { type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTheme } from "../providers/AppProviders";
 import { NyrimaMark } from "./NyrimaMark";
+import { UserChip } from "./UserChip";
 import "./AppShell.scss";
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -45,23 +46,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <FolderIcon />
             <span>Libraries</span>
           </button>
-          <button
-            type="button"
-            className="dc-shell__nav-btn dc-shell__nav-btn--icon"
-            onClick={() => setMode(resolved === "dark" ? "light" : "dark")}
-            aria-label={
-              resolved === "dark"
-                ? "Switch to light mode"
-                : "Switch to dark mode"
-            }
-            title={
-              resolved === "dark"
-                ? "Switch to light mode"
-                : "Switch to dark mode"
-            }
-          >
-            {resolved === "dark" ? <SunIcon /> : <MoonIcon />}
-          </button>
+          <UserChip />
         </nav>
       </header>
 

@@ -1,23 +1,25 @@
 /**
  * Frontend auth helper.
  *
- * Nyrima supports two auth modes, transparently:
+ * Nyrima supports two auth modes, layered:
  *
- *   1. API key (default) — for folders shared as "Anyone with the link".
- *      Stored via api-key.ts in chrome.storage.local. No OAuth client
- *      required. Setup is 1 minute in Google Cloud Console.
+ *   1. OAuth (preferred when configured) — for users who provided their own
+ *      Google Cloud OAuth Client ID via the User Center. Requests are billed
+ *      against the user's personal quota, so Drive doesn't throttle them as
+ *      "video-hosting" abuse.
  *
- *   2. OAuth (optional upgrade) — for the user's own private folders.
- *      Only available if the manifest declares an oauth2.client_id; in
- *      a fresh build that's commented out, so getAccessToken() will fail
- *      gracefully and we stay in API-key mode.
+ *   2. API key (fallback) — for "Anyone with the link" folders or when the
+ *      OAuth flow fails. Stored via api-key.ts in chrome.storage.local.
+ *      Subject to Drive's strict public quota.
  *
- * authedFetch tries API key first, then OAuth, and surfaces a typed
- * DriveAccessError if both fail.
+ * authedFetch tries OAuth first when a token is available, then falls back
+ * to the API key on auth failure. If neither path works it throws a typed
+ * DriveAccessError so the UI can show "Setup access" or "Connect Drive".
  */
 
 import type { DcResponse } from "@shared/messages";
 import { getApiKey, appendApiKey } from "./api-key";
+import { getOAuthClientId } from "./oauth-key";
 import { classifyDriveError, DriveAccessError } from "./errors";
 import { driveQueue } from "./drive/request-queue";
 import { trackRequest } from "./drive/dev-mode";
@@ -110,57 +112,83 @@ export async function authedFetchRaw(
   url: string,
   init: RequestInit = {},
 ): Promise<Response> {
+  // Strategy: OAuth first when a token is available (personal quota is far
+  // more generous than the public-API-key quota Google has been throttling
+  // as "video-hosting" abuse). Fall back to API key on auth failure, or
+  // when no token is available at all.
+  const token = await tryGetAccessToken(false);
   const apiKey = await getApiKey();
 
-  // Attempt 1: API key only.
-  if (apiKey) {
-    const res = await fetch(appendApiKey(url, apiKey), init);
-    if (res.ok || res.status === 206) return res;
-
-    if (res.status !== 401 && res.status !== 403 && res.status !== 404) {
-      // Surface non-auth failures immediately (5xx, 429, etc.).
-      throw await classifyDriveError(res);
-    }
-
-    // Try OAuth fallback if it's available.
-    const token = await tryGetAccessToken(false);
-    if (!token) {
-      throw await classifyDriveError(res);
-    }
-    const res2 = await fetchWithBearer(url, init, token);
-    if (res2.ok || res2.status === 206) return res2;
-    if (res2.status === 401) {
-      cachedToken = null;
-      const fresh = await tryGetAccessToken(true);
-      if (fresh) {
-        const res3 = await fetchWithBearer(url, init, fresh);
-        if (res3.ok || res3.status === 206) return res3;
-        throw await classifyDriveError(res3);
-      }
-    }
-    throw await classifyDriveError(res2);
-  }
-
-  // No API key. Try OAuth if configured.
-  const token = await tryGetAccessToken(false);
   if (token) {
     const res = await fetchWithBearer(url, init, token);
     if (res.ok || res.status === 206) return res;
+
+    // 401 → token may be stale. Force-refresh once and retry before falling
+    // back to API key, so the user doesn't get bumped to a throttled key for
+    // a benign token expiry.
     if (res.status === 401) {
       cachedToken = null;
       const fresh = await tryGetAccessToken(true);
       if (fresh) {
         const res2 = await fetchWithBearer(url, init, fresh);
         if (res2.ok || res2.status === 206) return res2;
+        // Fall through to the API-key path if OAuth still doesn't work.
       }
     }
+
+    // For non-auth failures (5xx, 429, 404, network), API key won't help —
+    // surface immediately so the queue can apply backoff / surface the error.
+    if (res.status !== 401 && res.status !== 403) {
+      // For 4xx other than 401/403, prefer the typed error from this response.
+      if (!apiKey) throw await classifyDriveError(res);
+    }
+
+    if (apiKey) {
+      const resKey = await fetch(appendApiKey(url, apiKey), init);
+      if (resKey.ok || resKey.status === 206) return resKey;
+      // Both paths failed — surface whichever response was more informative.
+      throw await classifyDriveError(resKey.status >= 500 ? res : resKey);
+    }
+
     throw await classifyDriveError(res);
+  }
+
+  // No OAuth token. Use API key directly.
+  if (apiKey) {
+    const res = await fetch(appendApiKey(url, apiKey), init);
+    if (res.ok || res.status === 206) return res;
+    const err = await classifyDriveError(res);
+    // If the API key got refused (403 / quota throttle) AND the user has an
+    // OAuth Client ID configured but no live token, this is the
+    // "I need to click Connect Drive" state, not a "file is private" state.
+    // Re-tag the error so the UI can offer the right action.
+    if (
+      (err.reason === "private-folder" || err.reason === "rate-limited") &&
+      (await getOAuthClientId())
+    ) {
+      throw new DriveAccessError(
+        "needs-oauth",
+        "Drive rejected the public API key (likely quota-throttled). Click Connect Drive to authenticate with your personal Drive quota.",
+        err.status,
+        err.driveMessage,
+      );
+    }
+    throw err;
+  }
+
+  // No API key but OAuth client ID is configured — user just hasn't
+  // completed the consent flow yet.
+  if (await getOAuthClientId()) {
+    throw new DriveAccessError(
+      "needs-oauth",
+      "Click Connect Drive in the User Center to authenticate with your Google account.",
+    );
   }
 
   // Nothing configured.
   throw new DriveAccessError(
     "no-api-key",
-    "Drive access isn't set up yet. Open the Setup guide on the home screen and paste a Google API key.",
+    "Drive access isn't set up yet. Open the Setup guide on the home screen and paste a Google API key, or connect your Drive account via the User Center.",
   );
 }
 

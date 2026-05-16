@@ -28,8 +28,7 @@ import {
   type MkvTrack,
 } from "./ebml";
 import { type SubCue, type SubStyles } from "./subtitles";
-import { buildMediaUrl, fetchRange } from "./drive-api";
-import { authedFetch } from "./auth";
+import { fetchRange } from "./drive-api";
 
 export interface ExtractedMkvSub {
   id: string;
@@ -71,6 +70,15 @@ export async function extractMkvSubtitles(
   subs: ExtractedMkvSub[];
   headerBuf: Uint8Array;
   fileSize: number;
+  /**
+   * Feed raw MKV bytes from an external stream (e.g. the MSE controller)
+   * to progressively extract subtitle cues without a separate API call.
+   * Returns true if new cues were added. Call `finalize()` when the stream
+   * is complete to sort + de-overlap all tracks.
+   */
+  feedChunk: ((data: Uint8Array) => boolean) | null;
+  /** Sort + de-overlap after all chunks have been fed. */
+  finalize: (() => void) | null;
 }> {
   const signal = opts.signal;
 
@@ -85,7 +93,7 @@ export async function extractMkvSubtitles(
     headerBuf = new Uint8Array(await blob.arrayBuffer());
     fileSize = total;
   }
-  if (signal?.aborted) return { subs: [], headerBuf, fileSize };
+  if (signal?.aborted) return { subs: [], headerBuf, fileSize, feedChunk: null, finalize: null };
   opts.onHeader?.({ buf: headerBuf, fileSize });
 
   // 2. Parse header ---------------------------------------------------------
@@ -93,13 +101,18 @@ export async function extractMkvSubtitles(
   try {
     header = parseMkvHeader(headerBuf);
   } catch {
-    return { subs: [], headerBuf, fileSize };
+    return { subs: [], headerBuf, fileSize, feedChunk: null, finalize: null };
   }
-  if (!header.tracks) return { subs: [], headerBuf, fileSize };
+  if (!header.tracks) return { subs: [], headerBuf, fileSize, feedChunk: null, finalize: null };
 
   const subTracks = header.tracks.filter((t) => t.type === TRACK_TYPE_SUBTITLE);
+  // eslint-disable-next-line no-console
+  console.info(
+    `[subs] header parsed: fileSize=${fileSize} subTracks=${subTracks.length} ` +
+    `tracks=${subTracks.map((t) => `#${t.number}:${t.codecId}/${t.language}`).join(",")}`,
+  );
   if (subTracks.length === 0) {
-    return { subs: [], headerBuf, fileSize };
+    return { subs: [], headerBuf, fileSize, feedChunk: null, finalize: null };
   }
 
   const timecodeScale = header.timecodeScale;
@@ -126,7 +139,7 @@ export async function extractMkvSubtitles(
   // If every subtitle track is image-based we have nothing to extract.
   if (results.every((r) => r.imageBased)) {
     opts.onProgress?.(results);
-    return { subs: results, headerBuf, fileSize };
+    return { subs: results, headerBuf, fileSize, feedChunk: null, finalize: null };
   }
 
   // 4. Parse clusters present in the header buffer --------------------------
@@ -134,7 +147,7 @@ export async function extractMkvSubtitles(
     headerBuf.length,
     header.segmentOffset + header.segmentLength,
   );
-  const streamStart = parseRegionForCues(
+  parseRegionForCues(
     headerBuf,
     header.segmentOffset,
     segEndInHeader,
@@ -143,206 +156,101 @@ export async function extractMkvSubtitles(
     infoByTrack,
     results,
   );
-  opts.onProgress?.(results);
-
-  // 5. Stream the rest of the file ------------------------------------------
-  // streamStart is the byte right after the last complete top-level element
-  // in the header buffer. Streaming from there avoids: (a) re-parsing
-  // already-processed clusters (which would yield duplicate cues), and
-  // (b) starting mid-cluster, which would misinterpret payload bytes as
-  // top-level elements.
-  if (streamStart < fileSize && !signal?.aborted) {
-    try {
-      await streamRemainder(
-        fileId,
-        streamStart,
-        subTracks,
-        timecodeScale,
-        infoByTrack,
-        results,
-        opts,
-      );
-    } catch (e) {
-      if (!signal?.aborted) {
-        // eslint-disable-next-line no-console
-        console.warn("[MKV subs] stream walk failed:", e);
-      }
-    }
-  }
-
-  // 6. Final pass: sort + de-overlap each track ----------------------------
-  for (const r of results) finalizeCues(r.cues);
-  opts.onProgress?.(results);
-
-  return { subs: results, headerBuf, fileSize };
-}
-
-// ---------------------------------------------------------------------------
-// Streaming walk
-// ---------------------------------------------------------------------------
-
-/**
- * Opens a single open-ended Range request and walks the response stream,
- * parsing Clusters as they arrive. Mirrors the MSE controller's strategy:
- * one network request, ReadableStream reader, with a leftover buffer for
- * elements that span chunk boundaries.
- */
-async function streamRemainder(
-  fileId: string,
-  startOffset: number,
-  subTracks: MkvTrack[],
-  timecodeScale: number,
-  infoByTrack: Map<number, AssTrackInfo>,
-  results: ExtractedMkvSub[],
-  opts: MkvExtractOptions,
-): Promise<void> {
-  const signal = opts.signal;
-  // Subtitle stream runs in PARALLEL with the MSE media stream — both pull
-  // bytes of the same MKV. Delay the start so the MSE controller's media
-  // stream can establish its connection first, avoiding Drive concurrent
-  // connection throttling that surfaces as "TypeError: network error".
-  if (!signal?.aborted) {
-    await new Promise<void>((r) => {
-      const t = setTimeout(r, 5000);
-      signal?.addEventListener("abort", () => { clearTimeout(t); r(); }, { once: true });
-    });
-  }
-  if (signal?.aborted) return;
-  const res = await authedFetch(
-    buildMediaUrl(fileId),
-    {
-      headers: { Range: `bytes=${startOffset}-` },
-      signal,
-    },
-    { kind: "subtitle", priority: "low", signal },
+  // eslint-disable-next-line no-console
+  console.info(
+    `[subs] header-region cues: ${results
+      .map((r) => `${r.id}=${r.cues.length}`)
+      .join(", ")}`,
   );
+  opts.onProgress?.(results);
 
-  const reader = res.body?.getReader();
-  if (!reader) {
-    // Browser without ReadableStream support — read the whole tail at once.
-    const ab = await res.arrayBuffer();
-    if (signal?.aborted) return;
-    const buf = new Uint8Array(ab);
-    parseRegionForCues(
-      buf,
-      0,
-      buf.length,
-      subTracks,
-      timecodeScale,
-      infoByTrack,
-      results,
-    );
-    opts.onProgress?.(results);
-    return;
-  }
-
+  // 5. Build a chunk feeder usable from any byte source ---------------------
+  //
+  // Two callers feed this:
+  //   - MSE controller's processChunk (piggyback on the same stream used for
+  //     playback — zero extra API calls for MKV→MSE files)
+  //   - The native-mode background sub stream in PlayerPage (a separate
+  //     low-priority fetch that runs for natively-played MKVs, since
+  //     <video> swallows the raw bytes and we can't piggyback)
+  //
+  // The feeder maintains its OWN leftover buffer so callers don't have to
+  // align chunks to EBML element boundaries — a 64 KB stream read mid-cluster
+  // is fine. Partial elements at the tail are stashed and concatenated with
+  // the next chunk.
   let leftover: Uint8Array | null = null;
-  const PROCESS_THRESHOLD = 2 * 1024 * 1024;
+  let finalized = false;
+  let totalChunks = 0;
+  let clusterCount = 0;
 
-  try {
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      if (signal?.aborted) {
-        await reader.cancel().catch(() => {});
+  const feedChunk = (data: Uint8Array): boolean => {
+    if (finalized) return false;
+    totalChunks++;
+    const buf = leftover ? concatU8(leftover, data) : data;
+    leftover = null;
+    let cuesAdded = false;
+    let offset = 0;
+
+    while (offset < buf.length) {
+      if (buf[offset] === 0x00) { offset++; continue; }
+
+      const el = readElement(buf, offset);
+      if (!el) {
+        leftover = buf.slice(offset);
         break;
       }
-      const { done, value } = await reader.read();
-      if (done) break;
 
-      leftover = leftover ? concatBuffers(leftover, value) : value;
-
-      // Only process when we've accumulated enough — most clusters are
-      // 1–5 MB; trying to parse on every 16 KB chunk wastes CPU.
-      if (leftover.length >= PROCESS_THRESHOLD) {
-        const { newLeftover, cuesAdded } = parseChunk(
-          leftover,
-          subTracks,
-          timecodeScale,
-          infoByTrack,
-          results,
-        );
-        leftover = newLeftover;
-        if (cuesAdded) opts.onProgress?.(results);
+      const rawEnd =
+        el.dataLengthRaw === -1 ? Infinity : el.dataOffset + el.dataLengthRaw;
+      if (rawEnd > buf.length) {
+        leftover = buf.slice(offset);
+        break;
       }
-    }
-  } finally {
-    try {
-      reader.releaseLock();
-    } catch {
-      // ignore
-    }
-  }
 
-  // Drain remaining bytes after EOF
-  if (leftover && leftover.length > 0 && !signal?.aborted) {
-    parseRegionForCues(
-      leftover,
-      0,
-      leftover.length,
-      subTracks,
-      timecodeScale,
-      infoByTrack,
-      results,
+      if (el.id === MKV_ID.Cluster) {
+        clusterCount++;
+        const added = parseClusterForCues(
+          buf, el, subTracks, timecodeScale, infoByTrack, results,
+        );
+        if (added) cuesAdded = true;
+      }
+      offset = rawEnd;
+    }
+    // Log first time we see clusters + every 100 clusters.
+    if (cuesAdded && (clusterCount <= 3 || clusterCount % 100 === 0)) {
+      // eslint-disable-next-line no-console
+      console.info(
+        `[subs] feedChunk: chunks=${totalChunks} clusters=${clusterCount} ` +
+        `totals=${results.map((r) => `${r.id}=${r.cues.length}`).join(",")}`,
+      );
+    }
+    if (cuesAdded) opts.onProgress?.(results);
+    return cuesAdded;
+  };
+
+  const finalize = () => {
+    if (finalized) return;
+    finalized = true;
+    leftover = null;
+    for (const r of results) finalizeCues(r.cues);
+    // eslint-disable-next-line no-console
+    console.info(
+      `[subs] finalize: chunks=${totalChunks} clusters=${clusterCount} ` +
+      `final=${results.map((r) => `${r.id}=${r.cues.length}`).join(",")}`,
     );
     opts.onProgress?.(results);
-  }
+  };
+
+  return { subs: results, headerBuf, fileSize, feedChunk, finalize };
 }
 
-/**
- * Parse complete top-level elements out of a streaming chunk. When we hit
- * an element whose data extends past the chunk, we save it (from its element
- * start) as leftover for the next pass.
- */
-function parseChunk(
-  buf: Uint8Array,
-  subTracks: MkvTrack[],
-  timecodeScale: number,
-  infoByTrack: Map<number, AssTrackInfo>,
-  results: ExtractedMkvSub[],
-): { newLeftover: Uint8Array | null; cuesAdded: boolean } {
-  let cuesAdded = false;
-  let offset = 0;
-  while (offset < buf.length) {
-    // Skip zero-padding between elements.
-    if (buf[offset] === 0x00) {
-      offset++;
-      continue;
-    }
-
-    const el = readElement(buf, offset);
-    if (!el) {
-      // Can't read element header (partial VINT at end of chunk).
-      return { newLeftover: buf.slice(offset), cuesAdded };
-    }
-
-    // dataLengthRaw is the unclamped declared size from the EBML header;
-    // dataLength is clamped to what's actually in the buffer. We compare
-    // against the raw size to detect partials reliably.
-    const rawEnd =
-      el.dataLengthRaw === -1 ? Infinity : el.dataOffset + el.dataLengthRaw;
-    if (rawEnd > buf.length) {
-      return { newLeftover: buf.slice(el.elementOffset), cuesAdded };
-    }
-
-    if (el.id === MKV_ID.Cluster) {
-      const added = parseClusterForCues(
-        buf,
-        el,
-        subTracks,
-        timecodeScale,
-        infoByTrack,
-        results,
-      );
-      if (added) cuesAdded = true;
-    }
-    // Non-Cluster top-level elements (Cues, Tags, SeekHead, Attachments,
-    // late Tracks, etc.) are skipped — we already have what we need from
-    // the header.
-
-    offset = rawEnd;
-  }
-  return { newLeftover: null, cuesAdded };
+function concatU8(a: Uint8Array, b: Uint8Array): Uint8Array {
+  const out = new Uint8Array(a.length + b.length);
+  out.set(a, 0);
+  out.set(b, a.length);
+  return out;
 }
+
+
 
 // ---------------------------------------------------------------------------
 // Cluster → cues
@@ -804,13 +712,3 @@ function stripAssTags(text: string): string {
     .trim();
 }
 
-// ---------------------------------------------------------------------------
-// Misc
-// ---------------------------------------------------------------------------
-
-function concatBuffers(a: Uint8Array, b: Uint8Array): Uint8Array {
-  const out = new Uint8Array(a.length + b.length);
-  out.set(a, 0);
-  out.set(b, a.length);
-  return out;
-}

@@ -30,7 +30,9 @@ import {
   listFolder as cachedListFolder,
   getSubtitleText,
 } from "../services/drive/metadata-service";
-import { authedFetch } from "../services/auth";
+import { authedFetch, tryGetAccessToken } from "../services/auth";
+import { getOAuthClientId } from "../services/oauth-key";
+import { getUserProfile } from "../services/user-profile";
 import { DriveAccessError, type DriveAccessReason } from "../services/errors";
 import {
   savePlaybackPosition,
@@ -62,6 +64,7 @@ import {
   decideInitialMode,
   getRememberedMode,
   rememberMode,
+  forgetMode,
   type PlaybackMode,
   type PlaybackStrategy,
 } from "../services/playback-strategy";
@@ -80,9 +83,17 @@ import "./PlayerPage.scss";
 // onTimeUpdate. Going lower than this would flood chrome.storage writes.
 const POSITION_SAVE_MS = 4000;
 
-// MKV playback strategy. Hard-coded today; the user-facing settings dropdown
-// will read this from the settings store in a later pass.
-const ACTIVE_STRATEGY: PlaybackStrategy = "auto";
+// MKV playback strategy.
+//
+// `force-native` matches the project's chosen direction: play every file like
+// an MP4 via the browser's native <video> element, and overlay subtitles
+// from the embedded-MKV parser. The MSE→fMP4 remux pipeline is intentionally
+// out of the hot path — it's expensive, buggy for HEVC+FLAC, and the
+// browser can already decode the codecs we care about (H.264, HEVC w/ the
+// HEVC extension on Windows, VP9, AV1 where supported). When the browser
+// genuinely can't play a container/codec, we surface a clear error instead
+// of attempting an expensive remux that often fails anyway.
+const ACTIVE_STRATEGY: PlaybackStrategy = "force-native";
 
 export function PlayerPage() {
   const { folderId = "", fileId = "" } = useParams();
@@ -116,6 +127,11 @@ export function PlayerPage() {
     null,
   );
   const mkvExtractAbortRef = useRef<AbortController | null>(null);
+  const mkvSubStreamAbortRef = useRef<AbortController | null>(null);
+  const mkvSubFeederRef = useRef<{
+    feedChunk: (data: Uint8Array) => boolean;
+    finalize: () => void;
+  } | null>(null);
   // Native-attempt watchdog. Armed when we start a native MKV stream; cleared
   // once `canplay` fires or fallback is triggered.
   const nativeWatchdogRef = useRef<number | null>(null);
@@ -178,6 +194,10 @@ export function PlayerPage() {
     if (mkvExtractAbortRef.current) {
       mkvExtractAbortRef.current.abort();
       mkvExtractAbortRef.current = null;
+    }
+    if (mkvSubStreamAbortRef.current) {
+      mkvSubStreamAbortRef.current.abort();
+      mkvSubStreamAbortRef.current = null;
     }
     if (nativeWatchdogRef.current !== null) {
       window.clearTimeout(nativeWatchdogRef.current);
@@ -267,6 +287,48 @@ export function PlayerPage() {
             `[playback] mode=${decision.mode} reason=${decision.reason} file=${video.name}`,
           );
 
+          // Run MKV subtitle extraction BEFORE setting isMkvMse so the
+          // feeder ref is populated when React creates the MSE controller.
+          // This is fast — just a 4 MB header fetch + parse, no streaming.
+          const ac = new AbortController();
+          mkvExtractAbortRef.current = ac;
+          try {
+            const extracted = await extractMkvSubtitles(fileId, {
+              signal: ac.signal,
+              onHeader: ({ buf, fileSize: mkvFileSize }) => {
+                if (!cancelled) {
+                  mkvHeaderRef.current = { buf, fileSize: mkvFileSize };
+                }
+              },
+              onProgress: (mkvSubs) => {
+                if (cancelled) return;
+                const mkvTracks: SubtitleTrack[] = mkvSubs.map((s) => ({
+                  id: s.id,
+                  lang: s.lang,
+                  label: s.label,
+                  cues: s.cues.slice(),
+                  imageBased: s.imageBased,
+                }));
+                setSubtitleTracks((prev) => [
+                  ...prev.filter((t) => !t.id.startsWith("mkv-")),
+                  ...mkvTracks,
+                ]);
+              },
+            });
+            if (extracted.feedChunk && extracted.finalize && !cancelled) {
+              mkvSubFeederRef.current = {
+                feedChunk: extracted.feedChunk,
+                finalize: extracted.finalize,
+              };
+            }
+          } catch (e) {
+            if (!cancelled && !ac.signal.aborted) {
+              // eslint-disable-next-line no-console
+              console.error("MKV subtitle extraction failed:", e);
+            }
+          }
+          if (cancelled) return;
+
           if (decision.mode === "mse-remux") {
             setIsMkvMse(true);
           } else {
@@ -284,6 +346,34 @@ export function PlayerPage() {
             } else {
               setIsMkvNative(true);
               setStreamUrl(directUrl);
+              // Native mode: <video> handles its own byte fetching, so the
+              // MSE controller's piggyback path is unavailable. Without a
+              // separate sub-only stream the feeder would only see cues from
+              // the 4 MB header, leaving the rest of the file with no
+              // embedded subtitles. Kick off a low-priority background fetch
+              // that feeds Cluster bytes into the feeder until EOF.
+              const header = mkvHeaderRef.current;
+              const feeder = mkvSubFeederRef.current;
+              // eslint-disable-next-line no-console
+              console.info(
+                `[subs] native-mode setup: header=${header ? `${header.buf.length}/${header.fileSize}` : "null"} ` +
+                `feeder=${feeder ? "ready" : "null"}`,
+              );
+              if (header && feeder && header.buf.length < header.fileSize) {
+                const subAbort = new AbortController();
+                mkvSubStreamAbortRef.current = subAbort;
+                // eslint-disable-next-line no-console
+                console.info(
+                  `[subs] starting background stream offset=${header.buf.length} eof=${header.fileSize}`,
+                );
+                void streamMkvSubsForNative(
+                  fileId,
+                  header.buf.length,
+                  feeder.feedChunk,
+                  feeder.finalize,
+                  subAbort.signal,
+                );
+              }
               // Arm the watchdog. If `canplay` lands first, `handleCanPlay`
               // clears it and remembers `native`. If decode error lands
               // first, `handleMediaError` calls `fallbackToMse`.
@@ -311,6 +401,9 @@ export function PlayerPage() {
             if (cancelled) return;
             setStreamUrl(directUrl);
           } else {
+            // No API key — fall back to fetching the entire file as a blob
+            // via OAuth. This is bandwidth-heavy but is the only path for
+            // non-MKV files without a configured API key.
             setBufferingBlob(true);
             markPlayback("media:first-range:start");
             const res = await authedFetch(buildMediaUrl(fileId));
@@ -351,42 +444,11 @@ export function PlayerPage() {
           (t): t is SubtitleTrack => t !== null,
         );
 
-        // Commit external subs immediately. MKV embedded subs stream in
-        // progressively below and merge with this initial set.
-        if (!cancelled) setSubtitleTracks(tracks);
-
-        // MKV embedded subtitle extraction — progressive: emits cues as
-        // clusters are streamed in, so the active track populates while
-        // the rest of the file is still downloading.
-        if (isMkv) {
-          const ac = new AbortController();
-          mkvExtractAbortRef.current = ac;
-          void extractMkvSubtitles(fileId, {
-            signal: ac.signal,
-            onHeader: ({ buf, fileSize: mkvFileSize }) => {
-              if (!cancelled) {
-                mkvHeaderRef.current = { buf, fileSize: mkvFileSize };
-              }
-            },
-            onProgress: (mkvSubs) => {
-              if (cancelled) return;
-              const mkvTracks: SubtitleTrack[] = mkvSubs.map((s) => ({
-                id: s.id,
-                lang: s.lang,
-                label: s.label,
-                cues: s.cues.slice(),
-                imageBased: s.imageBased,
-              }));
-              setSubtitleTracks((prev) => [
-                ...prev.filter((t) => !t.id.startsWith("mkv-")),
-                ...mkvTracks,
-              ]);
-            },
-          }).catch((e) => {
-            if (!cancelled && !ac.signal.aborted) {
-              // eslint-disable-next-line no-console
-              console.error("MKV subtitle extraction failed:", e);
-            }
+        // Merge external subs with any MKV embedded subs already present.
+        if (!cancelled) {
+          setSubtitleTracks((prev) => {
+            const mkvTracks = prev.filter((t) => t.id.startsWith("mkv-"));
+            return [...tracks, ...mkvTracks];
           });
         }
 
@@ -410,6 +472,9 @@ export function PlayerPage() {
       cancelled = true;
       loadAbort.abort();
       mkvExtractAbortRef.current?.abort();
+      mkvSubStreamAbortRef.current?.abort();
+      mkvSubStreamAbortRef.current = null;
+      mkvSubFeederRef.current = null;
       if (nativeWatchdogRef.current !== null) {
         window.clearTimeout(nativeWatchdogRef.current);
         nativeWatchdogRef.current = null;
@@ -451,6 +516,12 @@ export function PlayerPage() {
         console.error("MKV MSE error:", err);
         reportError(err);
       };
+      // Piggyback subtitle extraction on the same data stream.
+      const feeder = mkvSubFeederRef.current;
+      if (feeder) {
+        ctrl.onRawChunk = (data) => feeder.feedChunk(data);
+        ctrl.onStreamComplete = () => feeder.finalize();
+      }
 
       void ctrl.start(fileId, videoEl, mkvHeaderRef.current ?? undefined);
     },
@@ -473,8 +544,12 @@ export function PlayerPage() {
       nativeWatchdogRef.current = null;
     }
     markPlayback("playback:fallback-to-mse");
-    const ctx = playbackContextRef.current;
-    if (ctx.fileId) void rememberMode(ctx.fileId, "mse-remux");
+    // Note: do NOT call rememberMode here. The native attempt may have
+    // failed for non-codec reasons (auth 403, transient network, quota).
+    // Persisting "mse-remux" on every fallback would permanently lock the
+    // file into the remux pipeline even after the auth issue is fixed.
+    // `handleCanPlay` is the authoritative point to remember the mode —
+    // it only fires after MSE has actually started playing.
     setIsMkvNative(false);
     setPlaybackMode("mse-remux");
     setStreamUrl(null);
@@ -514,95 +589,79 @@ export function PlayerPage() {
     [file],
   );
 
-  // When the <video> emits an error, classify via authedFetch probe.
-  // For MKV native playback: if the browser can't decode the container/codec,
-  // automatically fall back to the MSE remux pipeline.
+  // When the <video> emits an error, the most common cause is that the
+  // API-key URL returned 403/404 (private file or quota throttle). The
+  // browser sees an HTTP error body instead of video bytes and fires
+  // MEDIA_ERR_SRC_NOT_SUPPORTED. The recovery: re-buffer the file via
+  // `authedFetch` (which prefers OAuth) as a blob URL, then assign that
+  // blob: URL back to <video src>. The browser plays it natively from
+  // memory — works for any codec the OS can decode, no remux needed.
+  //
+  // This matches the project's "play like MP4 + subtitle overlay" strategy:
+  // we never touch the container with JS; the browser handles decode.
   const handleMediaError = useCallback(
     async (err: MediaError | null) => {
       const code = err?.code ?? 0;
       // eslint-disable-next-line no-console
       console.error("handleMediaError code:", code, "message:", err?.message);
 
-      // When MSE is active, the MSE controller's own onError already handles
-      // failures (network, decode, etc.) and calls reportError. The <video>
-      // element may still fire its own error event (e.g. because the
-      // MediaSource was never fed valid data), but responding to it here
-      // would duplicate error handling and trigger wasteful probe fetches
-      // that cascade into rate-limit storms. Ignore it.
-      if (isMkvMse) {
-        // eslint-disable-next-line no-console
-        console.info("[handleMediaError] ignoring — MSE controller owns errors");
-        return;
-      }
-
-      // MKV native → MSE fallback: if the browser can't play the MKV
-      // natively (unsupported codec like HEVC, or container issue), switch
-      // to the MSE remux pipeline transparently. `fallbackToMse` also
-      // remembers the outcome so we skip the wasted native attempt next time.
-      // Under `force-native` the user explicitly opted out of fallback —
-      // surface the error instead of silently swapping engines.
-      if (
-        isMkvNative &&
-        !isMkvMse &&
-        allowsFallback(ACTIVE_STRATEGY) &&
-        (code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED ||
-          code === MediaError.MEDIA_ERR_DECODE)
-      ) {
-        // eslint-disable-next-line no-console
-        console.warn("MKV native playback failed, falling back to MSE remux");
-        fallbackToMse();
-        return;
-      }
-
-      if (code === MediaError.MEDIA_ERR_DECODE) {
+      // MSE owns its own error handling.
+      if (isMkvMse) return;
+      // Avoid re-entering the blob fallback if we're already serving a blob:
+      // URL — that means a previous fallback succeeded and this is a fresh,
+      // unrelated decode error.
+      if (blobUrlRef.current && streamUrl === blobUrlRef.current) {
         setError(
-          "The browser couldn't decode this stream. The codec may not be supported.",
+          `Your browser couldn't decode this file even after re-buffering. The codec may not be supported by your OS.`,
         );
         setErrorReason("unknown");
         return;
       }
 
-      // SRC_NOT_SUPPORTED on a direct-URL stream usually means Drive returned
-      // 403 to the bare key request (e.g. a private file the user owns but
-      // hasn't shared "Anyone with the link"). authedFetch can still reach it
-      // via OAuth/cookies, so re-buffer the bytes as a blob URL before giving
-      // up. If that also fails, surface the typed DriveAccessError.
-      if (
-        code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED &&
-        !isMkvMse &&
-        !isMkvNative
-      ) {
+      // Blob recovery: fetch via authedFetch (OAuth-first) → set as <video src>.
+      try {
+        setBufferingBlob(true);
+        const res = await authedFetch(buildMediaUrl(fileId));
+        const blob = await res.blob();
+        const u = URL.createObjectURL(blob);
+        if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
+        blobUrlRef.current = u;
+        setStreamUrl(u);
+        setBufferingBlob(false);
+        return;
+      } catch (e) {
+        setBufferingBlob(false);
+        // authedFetch threw a typed DriveAccessError. Probe the bare
+        // API-key URL to give the user a clearer reason than the generic
+        // MEDIA_ELEMENT_ERROR they'd otherwise see.
+        let probeStatus = 0;
         try {
-          setBufferingBlob(true);
-          const res = await authedFetch(buildMediaUrl(fileId));
-          const blob = await res.blob();
-          const u = URL.createObjectURL(blob);
-          if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
-          blobUrlRef.current = u;
-          setStreamUrl(u);
-          setBufferingBlob(false);
-          return;
-        } catch (e) {
-          setBufferingBlob(false);
-          reportError(e);
+          const apiKeyUrl = await buildPublicStreamUrl(fileId);
+          if (apiKeyUrl) {
+            const probe = await fetch(apiKeyUrl, {
+              headers: { Range: "bytes=0-1" },
+            });
+            probeStatus = probe.status;
+          }
+        } catch {
+          // Network — treat as transient below.
+        }
+        if (probeStatus === 404 || probeStatus === 403) {
+          // Both OAuth and API key failed for this file.
+          const oauthConfigured = !!(await getOAuthClientId());
+          setError(
+            oauthConfigured
+              ? "This file isn't accessible by your Drive account or the public API key. Make sure it's shared with you or shared as 'Anyone with the link'."
+              : "This file isn't accessible. Share it as 'Anyone with the link' in Drive, or set up OAuth in the User Center.",
+          );
+          setErrorReason(probeStatus === 404 ? "not-found" : "private-folder");
           return;
         }
-      }
-
-      try {
-        const res = await authedFetch(buildMediaUrl(fileId), {
-          headers: { Range: "bytes=0-0" },
-        });
-        void res.blob().catch(() => undefined);
-        setError(
-          "Playback was interrupted. Check your network and click Try again.",
-        );
-        setErrorReason("unknown");
-      } catch (e) {
+        // Some other failure — surface the typed error from authedFetch.
         reportError(e);
       }
     },
-    [fileId, reportError, isMkvNative, isMkvMse, fallbackToMse],
+    [fileId, isMkvMse, streamUrl, reportError],
   );
 
   const loading =
@@ -698,11 +757,13 @@ export function PlayerPage() {
           title={
             errorReason === "no-api-key"
               ? "Drive access isn't set up yet"
-              : errorReason === "private-folder" || errorReason === "not-found"
-                ? "This video isn't shared publicly"
-                : errorReason === "rate-limited"
-                  ? "Drive is rate-limiting us"
-                  : "Playback failed"
+              : errorReason === "needs-oauth"
+                ? "Connect your Drive account to play this file"
+                : errorReason === "private-folder" || errorReason === "not-found"
+                  ? "This video isn't shared publicly"
+                  : errorReason === "rate-limited"
+                    ? "Drive is rate-limiting us"
+                    : "Playback failed"
           }
           body={error}
           reason={errorReason}
@@ -710,6 +771,33 @@ export function PlayerPage() {
           onRetry={() => navigate(0)}
           onOpenSetup={
             errorReason === "no-api-key" ? () => setSetupOpen(true) : undefined
+          }
+          onConnectDrive={
+            errorReason === "needs-oauth"
+              ? async () => {
+                  try {
+                    const token = await tryGetAccessToken(true);
+                    if (token) {
+                      // Warm the profile cache so the UserChip updates too.
+                      await getUserProfile().catch(() => undefined);
+                      navigate(0);
+                    }
+                  } catch {
+                    // User cancelled or flow failed — leave them on the error page.
+                  }
+                }
+              : undefined
+          }
+          onResetEngine={
+            // Offer "Try native again" whenever the MSE remux path failed for
+            // an MKV. The mode might have been wrongly remembered as MSE
+            // because of a past auth error.
+            playbackMode === "mse-remux" && getExtension(file?.name ?? "") === "mkv"
+              ? async () => {
+                  await forgetMode(fileId).catch(() => undefined);
+                  navigate(0);
+                }
+              : undefined
           }
         />
         <SetupAccessDialog
@@ -906,6 +994,8 @@ function PlayerErrorCard({
   onBack,
   onRetry,
   onOpenSetup,
+  onConnectDrive,
+  onResetEngine,
 }: {
   title: string;
   kana?: string;
@@ -914,6 +1004,8 @@ function PlayerErrorCard({
   onBack: () => void;
   onRetry?: () => void;
   onOpenSetup?: () => void;
+  onConnectDrive?: () => void | Promise<void>;
+  onResetEngine?: () => void | Promise<void>;
 }) {
   return (
     <div className="ny-player-error">
@@ -927,6 +1019,24 @@ function PlayerErrorCard({
         </div>
       </div>
       <div className="ny-player-error__actions">
+        {onConnectDrive && (
+          <button
+            type="button"
+            className="ny-btn ny-btn--primary"
+            onClick={() => void onConnectDrive()}
+          >
+            Connect Drive
+          </button>
+        )}
+        {onResetEngine && (
+          <button
+            type="button"
+            className="ny-btn ny-btn--ghost"
+            onClick={() => void onResetEngine()}
+          >
+            Try native again
+          </button>
+        )}
         {onOpenSetup && (
           <button
             type="button"
@@ -951,4 +1061,71 @@ function PlayerErrorCard({
       </div>
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Background subtitle stream for natively-played MKVs.
+// ---------------------------------------------------------------------------
+
+/**
+ * When an MKV plays natively, the browser's <video> element handles its own
+ * byte fetching for playback and we never see those bytes in JS. To still
+ * extract embedded subtitle cues for the full file we open a SEPARATE
+ * streaming Range request from the end of the header to EOF, parsing each
+ * chunk through the feeder.
+ *
+ * Cost: a second Drive stream connection. We mitigate by:
+ *   - routing through the queue at low priority (kind: "subtitle"), so
+ *     metadata/playback requests get scheduled first
+ *   - aborting on navigation
+ *   - the OAuth path means the bandwidth is billed against the user's own
+ *     account, not the throttled public-key quota
+ */
+async function streamMkvSubsForNative(
+  fileId: string,
+  startOffset: number,
+  feedChunk: (data: Uint8Array) => boolean,
+  finalize: () => void,
+  signal: AbortSignal,
+): Promise<void> {
+  try {
+    const res = await authedFetch(
+      buildMediaUrl(fileId),
+      {
+        headers: { Range: `bytes=${startOffset}-` },
+        signal,
+      },
+      { kind: "subtitle", priority: "low", signal },
+    );
+    // eslint-disable-next-line no-console
+    console.info(
+      `[subs] stream response: status=${res.status} contentRange=${res.headers.get("content-range")}`,
+    );
+    const reader = res.body?.getReader();
+    if (!reader) {
+      const ab = await res.arrayBuffer();
+      if (signal.aborted) return;
+      feedChunk(new Uint8Array(ab));
+      finalize();
+      return;
+    }
+    let totalBytes = 0;
+    while (!signal.aborted) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value && value.length > 0) {
+        totalBytes += value.length;
+        feedChunk(value);
+      }
+    }
+    // eslint-disable-next-line no-console
+    console.info(
+      `[subs] stream finished: totalBytes=${totalBytes} aborted=${signal.aborted}`,
+    );
+    if (!signal.aborted) finalize();
+  } catch (e) {
+    if (signal.aborted) return;
+    // eslint-disable-next-line no-console
+    console.warn("[subs] native-mode background stream failed:", e);
+  }
 }

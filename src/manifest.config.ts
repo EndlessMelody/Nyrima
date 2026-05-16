@@ -63,16 +63,15 @@ export default defineManifest({
   // (see src/app/services/api-key.ts). To enable OAuth for PRIVATE folders,
   // create a Chrome Extension OAuth client at
   //   https://console.cloud.google.com/apis/credentials
-  // and uncomment the block below with your client_id:
-  //
-  // oauth2: {
-  //   client_id: "1234567890-xxxx.apps.googleusercontent.com",
-  //   scopes: [
-  //     "https://www.googleapis.com/auth/drive.readonly",
-  //     "https://www.googleapis.com/auth/userinfo.email",
-  //     "https://www.googleapis.com/auth/userinfo.profile",
-  //   ],
-  // },
+  // and uncomment the block below with your client_id:\
+   oauth2: {
+     client_id: "1234567890-xxxx.apps.googleusercontent.com",
+     scopes: [
+       "https://www.googleapis.com/auth/drive.readonly",
+       "https://www.googleapis.com/auth/userinfo.email",
+       "https://www.googleapis.com/auth/userinfo.profile",
+     ],
+  },
 
   icons: {
     "16": "icons/icon-16.png",

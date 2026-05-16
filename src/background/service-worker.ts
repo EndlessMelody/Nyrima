@@ -123,7 +123,96 @@ async function handleMessage(msg: DcMessage): Promise<DcResponse> {
 // OAuth helpers
 // ---------------------------------------------------------------------------
 
-function getAuthToken(interactive: boolean): Promise<string> {
+// In-memory token cache — fastest path. Survives only while the MV3 service
+// worker is alive (~30s idle timeout), so we also persist to session storage.
+let customTokenCache: { token: string; expiresAt: number } | null = null;
+
+// Session-storage key. chrome.storage.session is wiped on browser restart but
+// survives service-worker idle unloads, which is exactly the cache lifetime
+// we want for a 1-hour OAuth token.
+const TOKEN_SESSION_KEY = "dc.oauthAccessToken";
+
+async function readPersistedToken(): Promise<{ token: string; expiresAt: number } | null> {
+  try {
+    const obj = await chrome.storage.session.get(TOKEN_SESSION_KEY);
+    const entry = obj[TOKEN_SESSION_KEY] as { token: string; expiresAt: number } | undefined;
+    if (!entry) return null;
+    if (Date.now() >= entry.expiresAt) return null;
+    return entry;
+  } catch {
+    return null;
+  }
+}
+
+async function writePersistedToken(entry: { token: string; expiresAt: number } | null): Promise<void> {
+  try {
+    if (entry) {
+      await chrome.storage.session.set({ [TOKEN_SESSION_KEY]: entry });
+    } else {
+      await chrome.storage.session.remove(TOKEN_SESSION_KEY);
+    }
+  } catch {
+    // ignore — in-memory cache still works for the current SW lifetime
+  }
+}
+
+async function getAuthToken(interactive: boolean): Promise<string> {
+  const obj = await chrome.storage.local.get(STORAGE_KEYS.OAUTH_CLIENT_ID);
+  const customClientId = obj[STORAGE_KEYS.OAUTH_CLIENT_ID] as string | undefined;
+
+  if (customClientId) {
+    // Try in-memory first, then session storage. This is the hot path on
+    // every Drive call — keep it cheap.
+    if (customTokenCache && Date.now() < customTokenCache.expiresAt) {
+      return customTokenCache.token;
+    }
+    const persisted = await readPersistedToken();
+    if (persisted) {
+      customTokenCache = persisted;
+      return persisted.token;
+    }
+
+    return new Promise((resolve, reject) => {
+      const redirectUri = chrome.identity.getRedirectURL();
+      const scopes = encodeURIComponent(
+        "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile"
+      );
+      // For non-interactive, add prompt=none so it fails fast or succeeds silently.
+      const promptParam = interactive ? "" : "&prompt=none";
+      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${customClientId}&response_type=token&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes}${promptParam}`;
+
+      chrome.identity.launchWebAuthFlow({ url: authUrl, interactive }, (redirectUrl) => {
+        if (chrome.runtime.lastError || !redirectUrl) {
+          reject(new Error(chrome.runtime.lastError?.message || "OAuth flow failed or cancelled."));
+          return;
+        }
+
+        try {
+          const hash = new URL(redirectUrl).hash.substring(1);
+          const params = new URLSearchParams(hash);
+          const token = params.get("access_token");
+          const expiresIn = parseInt(params.get("expires_in") || "3599", 10);
+
+          if (token) {
+            // Cache token with a 5-minute safety margin in BOTH layers so a
+            // service-worker idle restart doesn't force a re-auth.
+            const entry = {
+              token,
+              expiresAt: Date.now() + (expiresIn - 300) * 1000,
+            };
+            customTokenCache = entry;
+            void writePersistedToken(entry);
+            resolve(token);
+          } else {
+            reject(new Error("No access_token found in redirect URI."));
+          }
+        } catch (err) {
+          reject(new Error("Failed to parse redirect URI."));
+        }
+      });
+    });
+  }
+
   return new Promise((resolve, reject) => {
     // Newer chrome.identity types declare getAuthToken with a GetAuthTokenResult
     // object response. Older Chrome builds still call back with a bare string.
@@ -152,6 +241,8 @@ function getAuthToken(interactive: boolean): Promise<string> {
 }
 
 async function revokeAllTokens(): Promise<void> {
+  customTokenCache = null;
+  await writePersistedToken(null);
   // Best-effort: clear cached tokens. Real revocation requires hitting Google's
   // revoke endpoint with the access token; we do that opportunistically.
   return new Promise((resolve) => {

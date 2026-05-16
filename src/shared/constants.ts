@@ -18,6 +18,7 @@ export const STORAGE_KEYS = {
   SETTINGS: "dc.settings",
   METADATA_CACHE: "dc.metadataCache",
   TMDB_KEY: "dc.tmdbKey",
+  OAUTH_CLIENT_ID: "dc.oauthClientId",
   /** Per-file last-known playback mode (native vs mse-remux) for MKV files. */
   PLAYBACK_ENGINE_CACHE: "dc.playbackEngineCache",
 } as const;

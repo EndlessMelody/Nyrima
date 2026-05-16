@@ -10,6 +10,7 @@ export type DriveAccessReason =
   | "not-found" // the id doesn't exist or is in trash
   | "rate-limited" // 429 from Drive
   | "auth-required" // 401 — token expired or missing
+  | "needs-oauth" // API key 403'd; OAuth client configured but no token cached
   | "unknown";
 
 export class DriveAccessError extends Error {

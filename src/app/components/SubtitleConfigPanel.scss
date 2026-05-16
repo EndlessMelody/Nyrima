@@ -1,0 +1,201 @@
+/**
+ * Shared subtitle configuration panel styles.
+ * Agnostic to where it is mounted (UserCenter vs Player popup).
+ */
+
+.dc-sub-cfg {
+  display: flex;
+  flex-direction: column;
+}
+
+.dc-sub-cfg__section {
+  padding: 10px 12px;
+}
+
+.dc-sub-cfg__divider {
+  height: 1px;
+  background: var(--neutral-alpha-weak);
+  margin: 2px 12px;
+}
+
+.dc-sub-cfg__label {
+  font-family: var(--dc-font-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--neutral-on-background-weak);
+  margin-bottom: 8px;
+}
+
+.dc-sub-cfg__row-between {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.dc-sub-cfg__row-between .dc-sub-cfg__label {
+  margin-bottom: 0;
+}
+
+.dc-sub-cfg__value {
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  color: var(--brand-on-background-medium);
+}
+
+.dc-sub-cfg__pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dc-sub-cfg__pill {
+  appearance: none;
+  border: var(--dc-hairline);
+  background: transparent;
+  color: var(--neutral-on-background-medium);
+  font-family: var(--dc-font-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.04em;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 140ms ease;
+  flex: 1 1 calc(50% - 3px);
+  text-align: center;
+}
+
+.dc-sub-cfg__pill:hover {
+  color: var(--neutral-on-background-strong);
+  border-color: var(--neutral-border-strong);
+  background: var(--neutral-alpha-weak);
+}
+
+.dc-sub-cfg__pill.is-active {
+  color: var(--brand-on-background-strong);
+  border-color: var(--brand-on-background-medium);
+  background: color-mix(in srgb, var(--brand-on-background-weak) 14%, transparent);
+}
+
+/* Preview */
+.dc-sub-cfg__preview {
+  margin: 12px 0;
+  padding: 12px;
+  background: repeating-conic-gradient(
+      var(--neutral-alpha-weak) 0% 25%,
+      transparent 0% 50%
+    )
+    50% / 16px 16px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+  border: var(--dc-hairline);
+}
+
+.dc-sub-cfg__preview-text {
+  font-size: 1.125rem;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.dc-sub-cfg__row {
+  display: flex;
+  gap: 8px;
+}
+
+.dc-sub-cfg__btn {
+  appearance: none;
+  border: var(--dc-hairline);
+  background: var(--neutral-alpha-weak);
+  color: var(--neutral-on-background-medium);
+  font-family: var(--dc-font-mono);
+  font-size: 0.625rem;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  flex: 1;
+  transition: all 140ms ease;
+}
+
+.dc-sub-cfg__btn:hover {
+  background: var(--neutral-alpha-medium);
+  color: var(--neutral-on-background-strong);
+}
+
+/* Range inputs */
+.dc-sub-cfg__range {
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  background: linear-gradient(
+    90deg,
+    var(--brand-on-background-medium) var(--pct, 0%),
+    var(--neutral-alpha-strong) var(--pct, 0%)
+  );
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.dc-sub-cfg__range::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--neutral-on-background-strong);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  transition: transform 140ms ease;
+}
+
+.dc-sub-cfg__range::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+/* Colors */
+.dc-sub-cfg__colors {
+  display: flex;
+  gap: 8px;
+}
+
+.dc-sub-cfg__color-chip {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 6px;
+  border: var(--dc-hairline);
+  background: var(--neutral-alpha-weak);
+  cursor: pointer;
+  font-family: var(--dc-font-mono);
+  font-size: 0.625rem;
+  color: var(--neutral-on-background-strong);
+  transition: border-color 140ms ease;
+}
+
+.dc-sub-cfg__color-chip:hover {
+  border-color: var(--neutral-border-strong);
+}
+
+.dc-sub-cfg__color-chip input[type="color"] {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.dc-sub-cfg__color-chip input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.dc-sub-cfg__color-chip input[type="color"]::-webkit-color-swatch {
+  border: none;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
+}

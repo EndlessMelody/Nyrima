@@ -1,0 +1,408 @@
+/**
+ * UserCenter — glassmorphic dropdown panel.
+ *
+ * Matches the Obsidian Atelier aesthetic: blurred backdrop, hairline
+ * borders, monospace tracker labels, subtle slide-down entrance.
+ */
+
+.dc-uc {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 100;
+  width: 340px;
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+
+  background: color-mix(in srgb, var(--page-background) 92%, transparent);
+  backdrop-filter: blur(32px) saturate(140%);
+  -webkit-backdrop-filter: blur(32px) saturate(140%);
+  border: var(--dc-hairline);
+  border-radius: 14px;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.25),
+    0 2px 8px rgba(0, 0, 0, 0.12);
+  padding: 6px;
+
+  /* Slide-down entrance */
+  animation: dc-uc-enter 200ms ease-out both;
+}
+
+@keyframes dc-uc-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Scrollbar styling */
+.dc-uc::-webkit-scrollbar {
+  width: 4px;
+}
+.dc-uc::-webkit-scrollbar-track {
+  background: transparent;
+}
+.dc-uc::-webkit-scrollbar-thumb {
+  background: var(--neutral-alpha-weak);
+  border-radius: 2px;
+}
+
+/* ── Identity ──────────────────────────────────────────────────── */
+.dc-uc__identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 12px;
+  border-radius: 10px;
+}
+
+.dc-uc__avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 2px solid var(--neutral-alpha-weak);
+}
+
+.dc-uc__avatar--mono {
+  display: grid;
+  place-items: center;
+  background: linear-gradient(
+    135deg,
+    var(--brand-on-background-weak) 0%,
+    var(--neutral-alpha-weak) 100%
+  );
+  color: var(--neutral-on-background-strong);
+  font-family: var(--dc-font-display);
+  font-size: 1rem;
+  font-weight: 600;
+  border: none;
+}
+
+.dc-uc__identity-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dc-uc__name {
+  font-family: var(--dc-font-display);
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--neutral-on-background-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dc-uc__email {
+  font-family: var(--dc-font-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.04em;
+  color: var(--neutral-on-background-weak);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dc-uc__sign-out {
+  appearance: none;
+  border: var(--dc-hairline);
+  background: transparent;
+  color: var(--neutral-on-background-weak);
+  font-family: var(--dc-font-mono);
+  font-size: 0.5625rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    color 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.dc-uc__sign-out:hover {
+  color: var(--neutral-on-background-strong);
+  border-color: var(--neutral-border-strong);
+  background: var(--neutral-alpha-weak);
+}
+
+/* ── Nav Header (Sub-pages) ────────────────────────────────────── */
+.dc-uc__nav-header {
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+}
+
+.dc-uc__nav-back {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--neutral-on-background-medium);
+  font-family: var(--dc-font-mono);
+  font-size: 0.625rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 140ms ease;
+  margin-left: -6px;
+}
+
+.dc-uc__nav-back svg {
+  width: 14px;
+  height: 14px;
+}
+
+.dc-uc__nav-back:hover {
+  color: var(--neutral-on-background-strong);
+  background: var(--neutral-alpha-weak);
+}
+
+/* ── Divider ───────────────────────────────────────────────────── */
+.dc-uc__divider {
+  height: 1px;
+  background: var(--neutral-alpha-weak);
+  margin: 2px 12px;
+}
+
+/* ── Sections ──────────────────────────────────────────────────── */
+.dc-uc__section {
+  padding: 10px 12px;
+}
+
+.dc-uc__section-label {
+  font-family: var(--dc-font-mono);
+  font-size: 0.5625rem;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--neutral-on-background-weak);
+  margin-bottom: 10px;
+}
+
+/* ── Pill buttons ──────────────────────────────────────────────── */
+.dc-uc__pills {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.dc-uc__pill {
+  appearance: none;
+  border: var(--dc-hairline);
+  background: transparent;
+  color: var(--neutral-on-background-medium);
+  font-family: var(--dc-font-mono);
+  font-size: 0.625rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition:
+    color 140ms ease,
+    border-color 140ms ease,
+    background 140ms ease;
+}
+
+.dc-uc__pill svg {
+  width: 13px;
+  height: 13px;
+}
+
+.dc-uc__pill:hover {
+  color: var(--neutral-on-background-strong);
+  border-color: var(--neutral-border-strong);
+  background: var(--neutral-alpha-weak);
+}
+
+.dc-uc__pill.is-active {
+  color: var(--brand-on-background-strong);
+  border-color: var(--brand-on-background-medium);
+  background: color-mix(in srgb, var(--brand-on-background-weak) 14%, transparent);
+}
+
+/* ── Row items (label + control) ───────────────────────────────── */
+.dc-uc__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+}
+
+.dc-uc__row-label {
+  font-size: 0.75rem;
+  color: var(--neutral-on-background-medium);
+  white-space: nowrap;
+}
+
+/* Toggle switch */
+.dc-uc__toggle {
+  appearance: none;
+  width: 36px;
+  height: 20px;
+  border-radius: 10px;
+  border: none;
+  cursor: pointer;
+  position: relative;
+  background: var(--neutral-alpha-medium);
+  transition: background 180ms ease;
+  flex-shrink: 0;
+}
+
+.dc-uc__toggle.is-on {
+  background: var(--brand-on-background-medium);
+}
+
+.dc-uc__toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: transform 180ms ease;
+}
+
+.dc-uc__toggle.is-on .dc-uc__toggle-knob {
+  transform: translateX(16px);
+}
+
+/* Mini-pill group */
+.dc-uc__mini-pills {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.dc-uc__mini-pill {
+  appearance: none;
+  border: var(--dc-hairline);
+  background: transparent;
+  color: var(--neutral-on-background-weak);
+  font-family: var(--dc-font-mono);
+  font-size: 0.5625rem;
+  letter-spacing: 0.06em;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition:
+    color 140ms ease,
+    border-color 140ms ease,
+    background 140ms ease;
+}
+
+.dc-uc__mini-pill:hover {
+  color: var(--neutral-on-background-strong);
+  border-color: var(--neutral-border-strong);
+}
+
+.dc-uc__mini-pill.is-active {
+  color: var(--brand-on-background-strong);
+  border-color: var(--brand-on-background-medium);
+  background: color-mix(in srgb, var(--brand-on-background-weak) 14%, transparent);
+}
+
+/* ── Actions ───────────────────────────────────────────────────── */
+.dc-uc__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dc-uc__action {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--neutral-on-background-medium);
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  padding: 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  transition:
+    color 140ms ease,
+    background 140ms ease;
+  text-align: left;
+}
+
+.dc-uc__action svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.dc-uc__action:hover {
+  color: var(--neutral-on-background-strong);
+  background: var(--neutral-alpha-weak);
+}
+
+.dc-uc__action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── About ─────────────────────────────────────────────────────── */
+.dc-uc__section--about {
+  padding-bottom: 8px;
+}
+
+.dc-uc__about-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px 0;
+}
+
+.dc-uc__about-label {
+  font-family: var(--dc-font-mono);
+  font-size: 0.5625rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--neutral-on-background-weak);
+}
+
+.dc-uc__about-value {
+  font-family: var(--dc-font-mono);
+  font-size: 0.5625rem;
+  letter-spacing: 0.06em;
+  color: var(--neutral-on-background-medium);
+}
+
+.dc-uc__about-value--status {
+  color: var(--brand-on-background-medium);
+}
+
+/* ── Responsive ────────────────────────────────────────────────── */
+@media (max-width: 420px) {
+  .dc-uc {
+    width: calc(100vw - 24px);
+    right: -12px;
+  }
+}

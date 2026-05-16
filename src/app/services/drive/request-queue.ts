@@ -62,11 +62,11 @@ interface KindLimits {
 }
 
 const DEFAULT_LIMITS: Record<RequestKind, KindLimits> = {
-  metadata: { concurrency: 3 },
-  "media-range": { concurrency: 2 },
-  "media-stream": { concurrency: 2 },
-  subtitle: { concurrency: 2 },
-  thumbnail: { concurrency: 2 },
+  metadata: { concurrency: 2 },
+  "media-range": { concurrency: 1 },
+  "media-stream": { concurrency: 1 },
+  subtitle: { concurrency: 1 },
+  thumbnail: { concurrency: 1 },
   auth: { concurrency: 4 },
 };
 

@@ -1,0 +1,98 @@
+/**
+ * UserChip — avatar chip + dropdown anchor in the AppShell header.
+ */
+
+.dc-user-chip-wrap {
+  position: relative;
+}
+
+.dc-user-chip {
+  appearance: none;
+  border: var(--dc-hairline);
+  background: transparent;
+  color: var(--neutral-on-background-medium);
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  padding: 4px 10px 4px 4px;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition:
+    border-color 160ms ease,
+    color 160ms ease,
+    background 160ms ease,
+    box-shadow 200ms ease;
+  white-space: nowrap;
+  max-width: 180px;
+}
+
+.dc-user-chip:hover {
+  color: var(--neutral-on-background-strong);
+  border-color: var(--neutral-border-strong);
+  background: var(--neutral-alpha-weak);
+}
+
+.dc-user-chip.is-open {
+  border-color: var(--brand-on-background-medium);
+  box-shadow: 0 0 0 1px var(--brand-on-background-weak);
+}
+
+/* Avatar circle */
+.dc-user-chip__avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 1px solid var(--neutral-alpha-weak);
+}
+
+/* Monogram fallback */
+.dc-user-chip__monogram {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  background: var(--neutral-alpha-weak);
+  color: var(--neutral-on-background-strong);
+  font-family: var(--dc-font-display);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.dc-user-chip__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100px;
+}
+
+.dc-user-chip__chevron {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  transition: transform 200ms ease;
+}
+
+.dc-user-chip__chevron.is-open {
+  transform: rotate(180deg);
+}
+
+@media (max-width: 720px) {
+  .dc-user-chip__name {
+    display: none;
+  }
+  .dc-user-chip {
+    padding: 4px;
+    border-radius: 50%;
+  }
+  .dc-user-chip__chevron {
+    display: none;
+  }
+}

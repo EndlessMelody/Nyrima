@@ -27,6 +27,12 @@ import type { MkvMediaInfo } from "./types";
 
 const HEADER_FETCH_SIZE = 4 * 1024 * 1024; // 4 MB — enough for header + several clusters
 const STREAM_PROCESS_SIZE = 2 * 1024 * 1024; // accumulate 2 MB from stream before processing
+// Hard ceiling on the accumulated streaming buffer. HEVC files routinely
+// produce clusters that don't terminate cleanly inside a 2 MB window; without
+// this cap, accumulation can balloon until V8 refuses the next ArrayBuffer
+// allocation ("Array buffer allocation failed"). When we cross the cap we
+// abort the controller cleanly rather than OOM the tab.
+const STREAM_MAX_ACCUMULATED = 64 * 1024 * 1024; // 64 MB
 const BUFFER_AHEAD_SEC = 30;                // how far ahead to keep buffered
 const BUFFER_BEHIND_SEC = 60;               // how far behind to keep
 
@@ -63,9 +69,46 @@ export class MkvMseController {
   /** Cleanup functions registered while running; called from destroy(). */
   private cleanups: Array<() => void> = [];
 
+  /** Set the first time onError fires; suppresses subsequent error fan-out. */
+  private errored = false;
+
   // Callbacks for the UI
   onReady?: (url: string, durationMs: number) => void;
-  onError?: (err: Error) => void;
+  /**
+   * Wraps the user-supplied error callback to: (a) fire at most once per
+   * controller lifecycle, (b) auto-destroy the controller so the broken
+   * SourceBuffer can't keep emitting `updateend`/`error` cascades into a
+   * caller that's already shown the error UI.
+   */
+  private _onError?: (err: Error) => void;
+  get onError(): ((err: Error) => void) | undefined {
+    return this._onError;
+  }
+  set onError(fn: ((err: Error) => void) | undefined) {
+    this._onError = fn;
+  }
+  private fireError(err: Error): void {
+    if (this.errored || this.destroyed) return;
+    this.errored = true;
+    try {
+      this._onError?.(err);
+    } finally {
+      // Tear down the controller so any queued updateend / drainQueue work
+      // turns into a no-op instead of throwing into a closed MediaSource.
+      try {
+        this.destroy();
+      } catch {
+        // ignore
+      }
+    }
+  }
+  /**
+   * Called with every raw MKV chunk before remuxing. Used by the subtitle
+   * extractor to piggyback on the same stream — zero extra API calls.
+   */
+  onRawChunk?: (data: Uint8Array) => void;
+  /** Called once when the stream has been fully received and processed. */
+  onStreamComplete?: () => void;
 
   /**
    * @param preloaded Optional pre-fetched header buffer to avoid a redundant
@@ -142,7 +185,7 @@ export class MkvMseController {
           if (!MediaSource.isTypeSupported(mimeType)) {
             // eslint-disable-next-line no-console
             console.error(`[mse] codec UNSUPPORTED: ${codecString}`);
-            this.onError?.(
+            this.fireError(
               new Error(
                 `This file's codec (${codecString}) isn't supported by your browser. ` +
                 `Common causes: 10-bit H.264 (Hi10P), HEVC/H.265, or AV1. ` +
@@ -159,7 +202,7 @@ export class MkvMseController {
           });
 
           this.sourceBuffer.addEventListener("error", () => {
-            this.onError?.(new Error("SourceBuffer error"));
+            this.fireError(new Error("SourceBuffer error"));
           });
 
           // Append init segment
@@ -175,14 +218,14 @@ export class MkvMseController {
           // Continue with a single streaming fetch for the rest of the file.
           this.progressiveStream();
         } catch (e) {
-          this.onError?.(e instanceof Error ? e : new Error(String(e)));
+          this.fireError(e instanceof Error ? e : new Error(String(e)));
         }
       });
 
       videoElement.src = this.objectUrl;
       this.onReady?.(this.objectUrl, this.info.durationMs);
     } catch (e) {
-      this.onError?.(e instanceof Error ? e : new Error(String(e)));
+      this.fireError(e instanceof Error ? e : new Error(String(e)));
     }
   }
 
@@ -378,9 +421,37 @@ export class MkvMseController {
             // Track bytes received so we can resume from here on reconnect.
             this.fetchOffset += value.length;
 
-            accumulated = accumulated
-              ? concatBuffers(accumulated, value)
-              : value;
+            // Safety: hard-cap accumulated buffer so a single broken cluster
+            // (common with HEVC + FLAC where extractClusterSamples can't make
+            // progress) doesn't run the tab out of memory. Abort cleanly
+            // instead of OOM-ing.
+            const nextLen = (accumulated?.length ?? 0) + value.length;
+            if (nextLen > STREAM_MAX_ACCUMULATED) {
+              this.fireError(
+                new Error(
+                  `MSE remux buffer overflow (${(nextLen / 1024 / 1024).toFixed(1)} MB). ` +
+                  `This usually means the file's codec combo (often HEVC + FLAC) ` +
+                  `produces clusters our remuxer can't parse. Try a different file ` +
+                  `or, if your browser supports the codec, force native playback.`,
+                ),
+              );
+              break;
+            }
+
+            try {
+              accumulated = accumulated
+                ? concatBuffers(accumulated, value)
+                : value;
+            } catch (e) {
+              // Defensive: even with the soft cap, V8 can refuse smaller
+              // allocations under memory pressure. Surface a clean error.
+              this.fireError(
+                e instanceof Error
+                  ? new Error(`Out of memory while buffering stream: ${e.message}`)
+                  : new Error("Out of memory while buffering stream"),
+              );
+              break;
+            }
 
             if (accumulated.length >= STREAM_PROCESS_SIZE) {
               // Throttle if we're far enough ahead — keeps SourceBuffer small.
@@ -432,7 +503,7 @@ export class MkvMseController {
 
         streamAttempt++;
         if (!retryable || streamAttempt > MAX_STREAM_RETRIES) {
-          this.onError?.(e instanceof Error ? e : new Error(String(e)));
+          this.fireError(e instanceof Error ? e : new Error(String(e)));
           break;
         }
 
@@ -472,6 +543,7 @@ export class MkvMseController {
   }
 
   private finalizeStream(): void {
+    this.onStreamComplete?.();
     if (
       !this.destroyed &&
       this.mediaSource?.readyState === "open"
@@ -487,6 +559,10 @@ export class MkvMseController {
 
   private processChunk(data: Uint8Array): void {
     if (!this.info) return;
+
+    // Let the subtitle extractor parse this chunk for cues — same data,
+    // zero extra API calls.
+    this.onRawChunk?.(data);
 
     let offset = 0;
     while (offset < data.length) {
@@ -550,8 +626,16 @@ export class MkvMseController {
   }
 
   private drainQueue(): void {
+    // Bail out cleanly when the controller has already been torn down or has
+    // fired its terminal error. Without this guard, a SourceBuffer.error →
+    // fireError → destroy chain could still see this method invoked from a
+    // queued `updateend` event, which would throw `SourceBuffer has been
+    // removed from the parent media source` and re-fire onError.
     if (
+      this.destroyed ||
+      this.errored ||
       !this.sourceBuffer ||
+      this.mediaSource?.readyState !== "open" ||
       this.sourceBuffer.updating ||
       this.appendQueue.length === 0
     ) {
@@ -567,7 +651,7 @@ export class MkvMseController {
         this.appendQueue.unshift(next);
         setTimeout(() => this.drainQueue(), 500);
       } else {
-        this.onError?.(e instanceof Error ? e : new Error(String(e)));
+        this.fireError(e instanceof Error ? e : new Error(String(e)));
       }
     }
   }

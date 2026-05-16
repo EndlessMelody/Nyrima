@@ -184,21 +184,33 @@ export function buildMediaUrl(fileId: string): string {
 /**
  * Build a directly-streamable URL that can be assigned to <video src>.
  *
- * Returns null when no API key is configured (we can't put a Bearer token
- * in a URL, so OAuth-only callers must fall back to fetch+blob).
+ * Returns null when no API key is configured. We deliberately do NOT use
+ * the OAuth `access_token` URL parameter here even when a token is
+ * available: Drive's media endpoint rejects access_token in the URL for
+ * many file/account combinations (returns 403), and there's no way to
+ * recover from that without tearing down the video element. The reliable
+ * path for OAuth-only access is fetch+blob or the MSE remux pipeline,
+ * both of which use the `Authorization: Bearer` header via authedFetch.
  *
  * Why this matters for playback:
  *   The previous Phase 1 path fetched the *entire* file as a Blob before
  *   assigning to <video>. For multi-GB movies that blocks playback for
  *   minutes and bloats RAM. With a stream URL, the browser's native HTTP
  *   stack issues Range requests on-demand and starts playing in seconds.
+ *   The trade-off: this fast path is only available when an API key is
+ *   configured (i.e. "Anyone with the link" folders).
  */
 export async function buildPublicStreamUrl(
   fileId: string,
 ): Promise<string | null> {
+  // tryGetAccessToken is intentionally NOT consulted here — see the
+  // function comment for why access_token URL params are unreliable.
+  // OAuth users without an API key fall back to MSE (MKV) or blob (other).
   const key = await getApiKey();
-  if (!key) return null;
-  return appendApiKey(buildMediaUrl(fileId), key);
+  if (key) {
+    return appendApiKey(buildMediaUrl(fileId), key);
+  }
+  return null;
 }
 
 /**
