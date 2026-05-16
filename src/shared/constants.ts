@@ -12,6 +12,9 @@ export const APP_PAGE = "src/app/index.html";
 
 /** Storage keys used in chrome.storage.local. */
 export const STORAGE_KEYS = {
+  /** The user's verified Nyrima root folder. Single source of truth for what
+   *  the library shelf is allowed to show. */
+  NYRIMA_ROOT: "dc.nyrimaRoot",
   RECENT_FOLDERS: "dc.recentFolders",
   USER_PROFILE: "dc.userProfile",
   PLAYBACK_STATE: "dc.playbackState",

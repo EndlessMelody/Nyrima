@@ -164,11 +164,13 @@ async function getAuthToken(interactive: boolean): Promise<string> {
     // Try in-memory first, then session storage. This is the hot path on
     // every Drive call — keep it cheap.
     if (customTokenCache && Date.now() < customTokenCache.expiresAt) {
+      await setDnrAuthRule(customTokenCache.token);
       return customTokenCache.token;
     }
     const persisted = await readPersistedToken();
     if (persisted) {
       customTokenCache = persisted;
+      await setDnrAuthRule(persisted.token);
       return persisted.token;
     }
 
@@ -202,6 +204,7 @@ async function getAuthToken(interactive: boolean): Promise<string> {
             };
             customTokenCache = entry;
             void writePersistedToken(entry);
+            void setDnrAuthRule(token);
             resolve(token);
           } else {
             reject(new Error("No access_token found in redirect URI."));
@@ -224,14 +227,18 @@ async function getAuthToken(interactive: boolean): Promise<string> {
         );
         return;
       }
+      const finish = (t: string) => {
+        void setDnrAuthRule(t);
+        resolve(t);
+      };
       if (typeof result === "string") {
-        resolve(result);
+        finish(result);
         return;
       }
       if (typeof result === "object" && result && "token" in result) {
         const t = (result as { token?: string }).token;
         if (t) {
-          resolve(t);
+          finish(t);
           return;
         }
       }
@@ -243,11 +250,75 @@ async function getAuthToken(interactive: boolean): Promise<string> {
 async function revokeAllTokens(): Promise<void> {
   customTokenCache = null;
   await writePersistedToken(null);
+  await clearDnrAuthRule();
   // Best-effort: clear cached tokens. Real revocation requires hitting Google's
   // revoke endpoint with the access token; we do that opportunistically.
   return new Promise((resolve) => {
     chrome.identity.clearAllCachedAuthTokens(() => resolve());
   });
+}
+
+// ---------------------------------------------------------------------------
+// DNR auth-header injection for <video> Range streams.
+// ---------------------------------------------------------------------------
+//
+// `<video src>` can't carry an Authorization header from JS, so an OAuth-only
+// user previously had to pay a full-file blob prefetch before playback could
+// start. With a single dynamic DNR rule we stamp `Authorization: Bearer` onto
+// every extension-initiated request to Drive's media endpoints, which lets the
+// browser issue native Range requests against the bare media URL and start
+// playback in a couple of seconds.
+//
+// The rule is kept in sync with the current cached OAuth token: refreshed
+// whenever a new token is minted, cleared on sign-out. Dynamic rules persist
+// across SW restarts, so as long as the session-storage token is still valid,
+// the rule survives idle unloads without re-installation.
+
+const DNR_AUTH_RULE_ID = 1;
+let lastInstalledDnrToken: string | null = null;
+
+async function setDnrAuthRule(token: string): Promise<void> {
+  if (lastInstalledDnrToken === token) return; // idempotent
+  try {
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds: [DNR_AUTH_RULE_ID],
+      addRules: [
+        {
+          id: DNR_AUTH_RULE_ID,
+          priority: 1,
+          action: {
+            type: "modifyHeaders",
+            requestHeaders: [
+              {
+                header: "Authorization",
+                operation: "set",
+                value: `Bearer ${token}`,
+              },
+            ],
+          } as chrome.declarativeNetRequest.RuleAction,
+          condition: {
+            urlFilter: "||www.googleapis.com/drive/v3/files/",
+            initiatorDomains: [chrome.runtime.id],
+            resourceTypes: ["media", "xmlhttprequest"],
+          } as chrome.declarativeNetRequest.RuleCondition,
+        },
+      ],
+    });
+    lastInstalledDnrToken = token;
+  } catch (e) {
+    console.warn("[Nyrima] DNR auth rule install failed:", e);
+  }
+}
+
+async function clearDnrAuthRule(): Promise<void> {
+  lastInstalledDnrToken = null;
+  try {
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds: [DNR_AUTH_RULE_ID],
+    });
+  } catch {
+    // ignore — rule may not exist
+  }
 }
 
 // ---------------------------------------------------------------------------

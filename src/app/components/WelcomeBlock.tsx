@@ -1,12 +1,13 @@
 /**
  * WelcomeBlock — pro landing surface introducing Nyrima.
  *
- * Sits at the top of the landing page for everyone (first-run users get a
- * full marketing pitch; returning users get a brand strip + quick CTA).
- * Renders three sections:
+ * Sits at the top of the landing page until both API key and Nyrima root
+ * are paired. Renders three sections:
  *   - Hero            — mark, tagline, primary/secondary CTAs
  *   - FeatureGrid     — four value-prop cards
  *   - HowItWorks      — three-step setup walkthrough
+ *
+ * Primary CTA adapts to whichever onboarding step is still missing.
  */
 
 import { NyrimaMark } from "./NyrimaMark";
@@ -15,25 +16,37 @@ import "./WelcomeBlock.scss";
 interface Props {
   /** True once the user has paired a Drive API key. */
   keyConfigured: boolean | null;
-  /** Opens the folder-URL dialog. */
-  onOpenFolder: () => void;
-  /** Opens the setup access dialog. */
+  /** True once the user has paired their Nyrima root folder. */
+  rootPaired: boolean;
+  /** Verified root folder name (for the status pill). */
+  rootName: string | null;
+  /** Opens the Nyrima root picker dialog. */
+  onPickRoot: () => void;
+  /** Opens the API key setup dialog. */
   onOpenSetup: () => void;
 }
 
 export function WelcomeBlock({
   keyConfigured,
-  onOpenFolder,
+  rootPaired,
+  rootName,
+  onPickRoot,
   onOpenSetup,
 }: Props) {
-  // Primary CTA flips depending on setup state: brand-new users should go to
-  // setup first; users with a key skip to the folder picker.
-  const primary = keyConfigured
-    ? { label: "Open a folder", onClick: onOpenFolder }
-    : { label: "Setup access", onClick: onOpenSetup };
-  const secondary = keyConfigured
+  // Drive CTA priority by the missing step:
+  //   1. No API key  → primary is "Setup access"
+  //   2. Key OK, no root → primary is "Pair Nyrima folder"
+  //   3. Both paired → primary is "Pair Nyrima folder" (lets the user swap)
+  const needsKey = !keyConfigured;
+  const primary = needsKey
     ? { label: "Setup access", onClick: onOpenSetup }
-    : { label: "Open a folder", onClick: onOpenFolder };
+    : {
+        label: rootPaired ? "Change Nyrima folder" : "Pair Nyrima folder",
+        onClick: onPickRoot,
+      };
+  const secondary = needsKey
+    ? { label: "Pair Nyrima folder", onClick: onPickRoot }
+    : { label: "Manage access", onClick: onOpenSetup };
 
   return (
     <section className="ny-welcome">
@@ -47,9 +60,10 @@ export function WelcomeBlock({
             Your Drive, made&nbsp;cinematic.
           </h1>
           <p className="ny-welcome__lede">
-            Turn any Google Drive folder into a private cinema. Nothing
-            uploads, nothing mirrors — your files stay where they live, you
-            just get a player that treats them like the movies they are.
+            Turn one Google Drive folder named <strong>“Nyrima”</strong> into a
+            private cinema. Nothing uploads, nothing mirrors — your files stay
+            where they live, you just get a player that treats them like the
+            movies they are.
           </p>
           <div className="ny-welcome__cta">
             <button
@@ -70,6 +84,12 @@ export function WelcomeBlock({
               <span className="ny-welcome__status">
                 <span className="dc-status-dot dc-status-dot--ok" />
                 <span>API key paired</span>
+              </span>
+            )}
+            {rootPaired && rootName && (
+              <span className="ny-welcome__status">
+                <span className="dc-status-dot dc-status-dot--ok" />
+                <span>Folder: {rootName}</span>
               </span>
             )}
           </div>
@@ -105,8 +125,10 @@ export function WelcomeBlock({
           title="Create your Nyrima folder"
           body={
             <>
-              Make a folder named <strong>“Nyrima”</strong> in Google Drive and
-              drop your videos into it (subfolders welcome).
+              Make a folder named exactly <strong>“Nyrima”</strong> in Google
+              Drive and drop your videos into it. One subfolder per show
+              (Gimai Seikatsu, Yahari Ore…) — Nyrima only scans this one
+              folder.
             </>
           }
         />

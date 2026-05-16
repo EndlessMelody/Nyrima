@@ -71,6 +71,15 @@ export async function extractMkvSubtitles(
   headerBuf: Uint8Array;
   fileSize: number;
   /**
+   * Byte offset in `headerBuf` right after the last fully-parsed EBML element.
+   * Native-mode streamers that start their stream at `headerBuf.length` MUST
+   * pre-feed `headerBuf.slice(headerParsedTo)` to the feeder so the parser
+   * resumes at a known element boundary instead of misaligning mid-payload.
+   * (MSE callers pre-feed from `firstClusterOffset` instead; they don't use
+   * this field.)
+   */
+  headerParsedTo: number;
+  /**
    * Feed raw MKV bytes from an external stream (e.g. the MSE controller)
    * to progressively extract subtitle cues without a separate API call.
    * Returns true if new cues were added. Call `finalize()` when the stream
@@ -93,7 +102,7 @@ export async function extractMkvSubtitles(
     headerBuf = new Uint8Array(await blob.arrayBuffer());
     fileSize = total;
   }
-  if (signal?.aborted) return { subs: [], headerBuf, fileSize, feedChunk: null, finalize: null };
+  if (signal?.aborted) return { subs: [], headerBuf, fileSize, headerParsedTo: 0, feedChunk: null, finalize: null };
   opts.onHeader?.({ buf: headerBuf, fileSize });
 
   // 2. Parse header ---------------------------------------------------------
@@ -101,9 +110,10 @@ export async function extractMkvSubtitles(
   try {
     header = parseMkvHeader(headerBuf);
   } catch {
-    return { subs: [], headerBuf, fileSize, feedChunk: null, finalize: null };
+    return { subs: [], headerBuf, fileSize, headerParsedTo: 0, feedChunk: null, finalize: null };
   }
-  if (!header.tracks) return { subs: [], headerBuf, fileSize, feedChunk: null, finalize: null };
+  if (!header.tracks) return { subs: [], headerBuf, fileSize, headerParsedTo: 0, feedChunk: null, finalize: null };
+
 
   const subTracks = header.tracks.filter((t) => t.type === TRACK_TYPE_SUBTITLE);
   // eslint-disable-next-line no-console
@@ -112,7 +122,7 @@ export async function extractMkvSubtitles(
     `tracks=${subTracks.map((t) => `#${t.number}:${t.codecId}/${t.language}`).join(",")}`,
   );
   if (subTracks.length === 0) {
-    return { subs: [], headerBuf, fileSize, feedChunk: null, finalize: null };
+    return { subs: [], headerBuf, fileSize, headerParsedTo: 0, feedChunk: null, finalize: null };
   }
 
   const timecodeScale = header.timecodeScale;
@@ -139,7 +149,7 @@ export async function extractMkvSubtitles(
   // If every subtitle track is image-based we have nothing to extract.
   if (results.every((r) => r.imageBased)) {
     opts.onProgress?.(results);
-    return { subs: results, headerBuf, fileSize, feedChunk: null, finalize: null };
+    return { subs: results, headerBuf, fileSize, headerParsedTo: 0, feedChunk: null, finalize: null };
   }
 
   // 4. Parse clusters present in the header buffer --------------------------
@@ -147,7 +157,7 @@ export async function extractMkvSubtitles(
     headerBuf.length,
     header.segmentOffset + header.segmentLength,
   );
-  parseRegionForCues(
+  const headerParsedTo = parseRegionForCues(
     headerBuf,
     header.segmentOffset,
     segEndInHeader,
@@ -160,7 +170,7 @@ export async function extractMkvSubtitles(
   console.info(
     `[subs] header-region cues: ${results
       .map((r) => `${r.id}=${r.cues.length}`)
-      .join(", ")}`,
+      .join(", ")} parsedTo=${headerParsedTo}/${headerBuf.length}`,
   );
   opts.onProgress?.(results);
 
@@ -240,7 +250,7 @@ export async function extractMkvSubtitles(
     opts.onProgress?.(results);
   };
 
-  return { subs: results, headerBuf, fileSize, feedChunk, finalize };
+  return { subs: results, headerBuf, fileSize, headerParsedTo, feedChunk, finalize };
 }
 
 function concatU8(a: Uint8Array, b: Uint8Array): Uint8Array {

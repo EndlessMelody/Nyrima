@@ -11,7 +11,7 @@ import { useNavigate } from "react-router-dom";
 import cn from "classnames";
 import type { DriveFile, PlaybackPosition } from "@shared/types";
 import { WATCHED_THRESHOLD_PCT } from "@shared/constants";
-import { normalizeMovieTitle } from "../services/title-normalizer";
+import { parseTitle } from "@shared/title-parser";
 import { buildPublicStreamUrl } from "../services/drive-api";
 import { formatRuntimeFromMillis } from "../services/formatters";
 import { playbackProgressPct } from "../services/storage";
@@ -158,7 +158,13 @@ function PlaylistItem({
   const [isPreviewLoaded, setIsPreviewLoaded] = useState(false);
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const cleaned = useMemo(() => normalizeMovieTitle(file.name), [file.name]);
+  // `shortLabel` reads "Episode 3" / "OVA" / cleaned filename — folder
+  // context is already on the player page so we deliberately strip it here.
+  const labelInfo = useMemo(
+    () => parseTitle({ filename: file.name, parentFolder: "" }),
+    [file.name],
+  );
+  const displayLabel = labelInfo.shortLabel;
   const duration = formatRuntimeFromMillis(
     file.videoMediaMetadata?.durationMillis,
   );
@@ -194,7 +200,7 @@ function PlaylistItem({
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       aria-label={
-        isCurrent ? `Now playing ${cleaned.title}` : `Play ${cleaned.title}`
+        isCurrent ? `Now playing ${displayLabel}` : `Play ${displayLabel}`
       }
     >
       <div className="ny-playlist__thumb">
@@ -226,8 +232,8 @@ function PlaylistItem({
       </div>
 
       <div className="ny-playlist__body">
-        <span className="ny-playlist__title" title={cleaned.title}>
-          {cleaned.title}
+        <span className="ny-playlist__title" title={displayLabel}>
+          {displayLabel}
         </span>
         <span className="ny-playlist__meta">
           {duration && <span>{duration}</span>}

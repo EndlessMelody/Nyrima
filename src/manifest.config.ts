@@ -47,7 +47,16 @@ export default defineManifest({
     },
   ],
 
-  permissions: ["identity", "storage", "contextMenus", "tabs"],
+  permissions: [
+    "identity",
+    "storage",
+    "contextMenus",
+    "tabs",
+    // Lets the SW stamp `Authorization: Bearer` onto <video> Range requests
+    // to googleapis.com so OAuth users get native streaming instead of the
+    // multi-GB blob prefetch. Scoped to existing host_permissions.
+    "declarativeNetRequestWithHostAccess",
+  ],
 
   host_permissions: [
     "https://drive.google.com/*",

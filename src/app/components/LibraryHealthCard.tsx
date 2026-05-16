@@ -15,16 +15,19 @@ interface Props {
   folders: RecentFolder[];
   positions: Record<string, PlaybackPosition>;
   apiKeyConfigured: boolean | null;
+  /** Verified Nyrima root folder name, if paired. */
+  rootName: string | null;
   onOpenSetup: () => void;
-  onOpenFolder: () => void;
+  onPickRoot: () => void;
 }
 
 export function LibraryHealthCard({
   folders,
   positions,
   apiKeyConfigured,
+  rootName,
   onOpenSetup,
-  onOpenFolder,
+  onPickRoot,
 }: Props) {
   const stats = useMemo(() => {
     const allPositions = Object.values(positions);
@@ -68,6 +71,13 @@ export function LibraryHealthCard({
       </div>
 
       <div className="ny-health__row">
+        <span className="ny-health__row-label">Nyrima folder</span>
+        <span className="ny-health__row-value" title={rootName ?? undefined}>
+          {rootName ?? "—"}
+        </span>
+      </div>
+
+      <div className="ny-health__row">
         <span className="ny-health__row-label">Last opened</span>
         <span className="ny-health__row-value">
           {stats.lastScan ? formatRelative(stats.lastScan) : "—"}
@@ -78,9 +88,9 @@ export function LibraryHealthCard({
         <button
           type="button"
           className="ny-btn ny-btn--primary ny-health__cta"
-          onClick={onOpenFolder}
+          onClick={onPickRoot}
         >
-          Open a folder
+          {rootName ? "Change Nyrima folder" : "Pair Nyrima folder"}
         </button>
         <button
           type="button"

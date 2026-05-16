@@ -11,13 +11,15 @@ import "./OnboardingStrip.scss";
 
 interface Props {
   keyConfigured: boolean | null;
-  onOpenFolder: () => void;
+  rootPaired: boolean;
+  onPickRoot: () => void;
   onOpenSetup: () => void;
 }
 
 export function OnboardingStrip({
   keyConfigured,
-  onOpenFolder,
+  rootPaired,
+  onPickRoot,
   onOpenSetup,
 }: Props) {
   const [open, setOpen] = useState(false);
@@ -35,9 +37,9 @@ export function OnboardingStrip({
           <button
             type="button"
             className="ny-btn ny-btn--ghost"
-            onClick={onOpenFolder}
+            onClick={onPickRoot}
           >
-            Open a folder
+            {rootPaired ? "Change Nyrima folder" : "Pair Nyrima folder"}
           </button>
           <button
             type="button"

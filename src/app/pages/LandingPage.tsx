@@ -1,21 +1,17 @@
 /**
  * Lobby — Neon Drive Cinema dashboard.
  *
- * Layout strategy:
- *   - If the user has no Drive API key OR no libraries yet, lead with the
- *     full WelcomeBlock (onboarding-first).
- *   - Once the user has libraries, the lobby switches to a media dashboard:
- *       • Continue Hero (when there's an in-progress video) or compact
- *         featured-video LobbyHero (when there isn't).
- *       • SearchFilterBar for fast library/episode lookup.
- *       • Main column with shelves: Continue Watching, Pinned, All
- *         Libraries, Random Picks.
- *       • Right rail with the LibraryHealthCard.
- *       • Collapsed OnboardingStrip in the footer.
+ * Library shelf sourcing has changed: instead of "every folder you've ever
+ * opened" (the old recents list), the shelf renders the immediate child
+ * folders of the user's verified Nyrima root. That makes the extension a
+ * true cinema bound to a single Drive folder rather than a free-form file
+ * browser. See `useNyrimaRootStore` for the validation / wipe flow.
  *
- * All shelves and the right rail derive entirely from already-loaded
- * `recentStore.folders` + `usePlaybackPositions()` — no extra Drive
- * round-trips beyond the existing featured-video lookup.
+ * Layout strategy:
+ *   - No root paired yet → WelcomeBlock + NyrimaRootDialog.
+ *   - Paired but root errored (renamed, missing) → block with an error card
+ *     that offers "Pick a different folder".
+ *   - Otherwise → cinematic dashboard with hero, search/filter, shelves.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -24,9 +20,8 @@ import {
   Row,
   Text,
   Button,
-  Input,
-  Dialog,
 } from "@once-ui-system/core/components";
+import { useNyrimaRootStore } from "../stores/nyrima-root-store";
 import { useRecentStore } from "../stores/recent-store";
 import { usePlaybackPositions } from "../hooks/usePlaybackPositions";
 import { LibraryCard } from "../components/LibraryCard";
@@ -37,8 +32,8 @@ import { SearchFilterBar, type LobbyFilter } from "../components/SearchFilterBar
 import { LibraryHealthCard } from "../components/LibraryHealthCard";
 import { OnboardingStrip } from "../components/OnboardingStrip";
 import { SetupAccessDialog } from "../components/SetupAccessDialog";
+import { NyrimaRootDialog } from "../components/NyrimaRootDialog";
 import { WelcomeBlock } from "../components/WelcomeBlock";
-import { extractFolderId } from "@shared/parse-folder-url";
 import { useNavigate } from "react-router-dom";
 import { hasApiKey } from "../services/api-key";
 import { isVideoFile } from "../services/drive-api";
@@ -58,16 +53,21 @@ import type {
 import "./LandingPage.scss";
 
 export function LandingPage() {
-  const { folders, load } = useRecentStore();
-  const [open, setOpen] = useState(false);
-  const [input, setInput] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const root = useNyrimaRootStore((s) => s.root);
+  const libraries = useNyrimaRootStore((s) => s.libraries);
+  const rootLoading = useNyrimaRootStore((s) => s.loading);
+  const rootError = useNyrimaRootStore((s) => s.rootError);
+  const loadRoot = useNyrimaRootStore((s) => s.load);
+  const refreshRoot = useNyrimaRootStore((s) => s.refresh);
+
+  const { folders: recentFolders, load: loadRecents } = useRecentStore();
   const [setupOpen, setSetupOpen] = useState(() => {
     if (typeof window !== "undefined") {
       return new URLSearchParams(window.location.search).get("setup") === "1";
     }
     return false;
   });
+  const [rootDialogOpen, setRootDialogOpen] = useState(false);
   const [keyConfigured, setKeyConfigured] = useState<boolean | null>(null);
   const [positions] = usePlaybackPositions();
   const [featured, setFeatured] = useState<DriveFile | null>(null);
@@ -79,8 +79,15 @@ export function LandingPage() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void loadRoot();
+    void loadRecents();
+  }, [loadRoot, loadRecents]);
+
+  // Auto-refresh the Nyrima scan on a fresh visit so a folder added to Drive
+  // a moment ago shows up without the user clicking refresh.
+  useEffect(() => {
+    if (root) void refreshRoot();
+  }, [root, refreshRoot]);
 
   useEffect(() => {
     let cancelled = false;
@@ -102,10 +109,26 @@ export function LandingPage() {
     };
   }, []);
 
+  // Adapt Drive folder list → RecentFolder shape so the existing
+  // LibraryCard / LibraryHealthCard / SearchFilterBar UI keeps working.
+  // `lastOpenedAt` is enriched from the recents store when available so
+  // "5m ago" stays accurate; otherwise we use the root's verifiedAt.
+  const adaptedFolders = useMemo<RecentFolder[]>(() => {
+    const recentMap = new Map(recentFolders.map((f) => [f.id, f]));
+    const fallback = root?.verifiedAt ?? 0;
+    return libraries.map((lib) => {
+      const recent = recentMap.get(lib.id);
+      return {
+        id: lib.id,
+        name: lib.name,
+        lastOpenedAt: recent?.lastOpenedAt ?? fallback,
+        pinned: recent?.pinned,
+        itemCount: recent?.itemCount,
+      };
+    });
+  }, [libraries, recentFolders, root]);
+
   // --- Continue / Featured -------------------------------------------------
-  // Most-recent in-progress position drives the Continue hero. We
-  // additionally fetch the file's Drive metadata so the hero can show a
-  // real backdrop instead of a gradient.
   const mostRecentInProgress = useMemo<PlaybackPosition | null>(() => {
     const inProgress = Object.values(positions).filter(isInProgress);
     if (inProgress.length === 0) return null;
@@ -114,15 +137,11 @@ export function LandingPage() {
     );
   }, [positions]);
 
-  // Pull the matching RecentFolder for the hero panel + episode title.
   const continueFolder = useMemo<RecentFolder | undefined>(() => {
     if (!mostRecentInProgress?.folderId) return undefined;
-    return folders.find((f) => f.id === mostRecentInProgress.folderId);
-  }, [folders, mostRecentInProgress]);
+    return adaptedFolders.find((f) => f.id === mostRecentInProgress.folderId);
+  }, [adaptedFolders, mostRecentInProgress]);
 
-  // Lazily load the Drive thumbnailLink for the continue hero. We only
-  // need this for the backdrop image — text content comes from the
-  // PlaybackPosition itself.
   useEffect(() => {
     if (!mostRecentInProgress) {
       setContinueFile(null);
@@ -147,20 +166,15 @@ export function LandingPage() {
     };
   }, [mostRecentInProgress]);
 
-  // Featured fallback (random video from the most-recent folder) — only
-  // computed when there's nothing in progress to resume.
   useEffect(() => {
     if (mostRecentInProgress) return;
-    if (folders.length === 0) return;
+    if (adaptedFolders.length === 0) return;
     let cancelled = false;
     const ctrl = new AbortController();
-    const mostRecent = folders[0];
+    const target = adaptedFolders[0];
     void (async () => {
       try {
-        // Cached read: the lobby revisits this every time the user returns
-        // here, so going through the SWR cache turns the random-pick into
-        // a zero-request operation on warm cache.
-        const result = await cachedListFolder(mostRecent.id, {
+        const result = await cachedListFolder(target.id, {
           signal: ctrl.signal,
           priority: "low",
         });
@@ -170,7 +184,7 @@ export function LandingPage() {
           videos[Math.floor(Math.random() * Math.min(videos.length, 30))];
         if (!cancelled) {
           setFeatured(pick);
-          setFeaturedFolderId(mostRecent.id);
+          setFeaturedFolderId(target.id);
           const meta = await resolvePoster(pick);
           if (!cancelled) setFeaturedMeta(meta);
         }
@@ -182,7 +196,7 @@ export function LandingPage() {
       cancelled = true;
       ctrl.abort();
     };
-  }, [folders, mostRecentInProgress]);
+  }, [adaptedFolders, mostRecentInProgress]);
 
   // --- Continue Watching stubs (for the horizontal row) --------------------
   const continueFiles = useMemo<DriveFile[]>(
@@ -204,8 +218,6 @@ export function LandingPage() {
   );
 
   // --- Folder filtering ----------------------------------------------------
-  // Build the set of folder ids that have in-progress positions so the
-  // "Continue Watching" filter chip can resolve cheaply.
   const inProgressFolderIds = useMemo<Set<string>>(() => {
     const set = new Set<string>();
     for (const p of Object.values(positions)) {
@@ -216,26 +228,25 @@ export function LandingPage() {
 
   const filteredFolders = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return folders.filter((f) => {
+    return adaptedFolders.filter((f) => {
       if (q && !f.name.toLowerCase().includes(q)) return false;
       if (filter === "continue" && !inProgressFolderIds.has(f.id)) return false;
       if (filter === "unwatched" && inProgressFolderIds.has(f.id)) return false;
       return true;
     });
-  }, [folders, query, filter, inProgressFolderIds]);
+  }, [adaptedFolders, query, filter, inProgressFolderIds]);
 
   const pinned = filteredFolders.filter((f) => f.pinned);
   const others = filteredFolders.filter((f) => !f.pinned);
 
-  // Random picks: pull from the non-pinned others, capped to a small set so
-  // the shelf feels curated rather than dumping the whole library.
   const randomPicks = useMemo(() => {
     if (others.length <= 4) return [] as RecentFolder[];
     return shuffle(others).slice(0, 4);
   }, [others]);
 
-  const hasLibraries = folders.length > 0;
-  const showFullOnboarding = !keyConfigured || !hasLibraries;
+  const hasRoot = !!root;
+  const hasLibraries = libraries.length > 0;
+  const showFullOnboarding = !keyConfigured || !hasRoot;
   const watchedAnything = Object.values(positions).some(
     (p) => p && p.positionSeconds > 5,
   );
@@ -257,48 +268,43 @@ export function LandingPage() {
     }
   };
 
-  function onSubmit() {
-    const id = extractFolderId(input.trim());
-    if (!id) {
-      setError("Could not find a folder id in that input.");
-      return;
-    }
-    setOpen(false);
-    setInput("");
-    setError(null);
-    navigate(`/library/${encodeURIComponent(id)}`);
-  }
-
   // --- Render --------------------------------------------------------------
-  // First-run / no-libraries view: full WelcomeBlock + dialogs only.
+  // No API key OR no Nyrima root → welcome surface + dialogs.
   if (showFullOnboarding) {
     return (
       <div className="ny-landing">
         <WelcomeBlock
           keyConfigured={keyConfigured}
-          onOpenFolder={() => setOpen(true)}
+          rootPaired={hasRoot}
+          rootName={root?.name ?? null}
+          onPickRoot={() => setRootDialogOpen(true)}
           onOpenSetup={() => setSetupOpen(true)}
         />
 
-        {hasLibraries && (
-          <section className="ny-landing__section">
-            <h3 className="ny-landing__section-heading">Libraries</h3>
-            <div className="ny-library-grid">
-              {folders.map((f) => (
-                <LibraryCard key={f.id} folder={f} positions={positions} />
-              ))}
-            </div>
-          </section>
-        )}
-
         <DashboardDialogs
-          open={open}
-          setOpen={setOpen}
-          input={input}
-          setInput={setInput}
-          error={error}
-          setError={setError}
-          onSubmit={onSubmit}
+          rootDialogOpen={rootDialogOpen}
+          setRootDialogOpen={setRootDialogOpen}
+          setupOpen={setupOpen}
+          handleCloseSetup={handleCloseSetup}
+          setKeyConfigured={setKeyConfigured}
+        />
+      </div>
+    );
+  }
+
+  // Root paired but validation failed (renamed, deleted, etc.). Replace the
+  // shelf with a block — no point showing stale libraries.
+  if (rootError) {
+    return (
+      <div className="ny-landing">
+        <RootErrorCard
+          message={rootError.message}
+          onPick={() => setRootDialogOpen(true)}
+          onRetry={() => void refreshRoot()}
+        />
+        <DashboardDialogs
+          rootDialogOpen={rootDialogOpen}
+          setRootDialogOpen={setRootDialogOpen}
           setupOpen={setupOpen}
           handleCloseSetup={handleCloseSetup}
           setKeyConfigured={setKeyConfigured}
@@ -365,7 +371,9 @@ export function LandingPage() {
               <EmptyShelf
                 query={query}
                 filter={filter}
-                onAdd={() => setOpen(true)}
+                rootLoading={rootLoading}
+                hasLibraries={hasLibraries}
+                onPickRoot={() => setRootDialogOpen(true)}
                 onReset={() => {
                   setQuery("");
                   setFilter("all");
@@ -397,10 +405,11 @@ export function LandingPage() {
 
         <aside className="ny-dashboard__rail">
           <LibraryHealthCard
-            folders={folders}
+            folders={adaptedFolders}
             positions={positions}
             apiKeyConfigured={keyConfigured}
-            onOpenFolder={() => setOpen(true)}
+            rootName={root?.name ?? null}
+            onPickRoot={() => setRootDialogOpen(true)}
             onOpenSetup={() => setSetupOpen(true)}
           />
         </aside>
@@ -408,18 +417,14 @@ export function LandingPage() {
 
       <OnboardingStrip
         keyConfigured={keyConfigured}
-        onOpenFolder={() => setOpen(true)}
+        rootPaired={hasRoot}
+        onPickRoot={() => setRootDialogOpen(true)}
         onOpenSetup={() => setSetupOpen(true)}
       />
 
       <DashboardDialogs
-        open={open}
-        setOpen={setOpen}
-        input={input}
-        setInput={setInput}
-        error={error}
-        setError={setError}
-        onSubmit={onSubmit}
+        rootDialogOpen={rootDialogOpen}
+        setRootDialogOpen={setRootDialogOpen}
         setupOpen={setupOpen}
         handleCloseSetup={handleCloseSetup}
         setKeyConfigured={setKeyConfigured}
@@ -435,25 +440,39 @@ export function LandingPage() {
 function EmptyShelf({
   query,
   filter,
-  onAdd,
+  rootLoading,
+  hasLibraries,
+  onPickRoot,
   onReset,
 }: {
   query: string;
   filter: LobbyFilter;
-  onAdd: () => void;
+  rootLoading: boolean;
+  hasLibraries: boolean;
+  onPickRoot: () => void;
   onReset: () => void;
 }) {
   const filtered = query.trim() !== "" || filter !== "all";
+  if (rootLoading && !hasLibraries) {
+    return (
+      <div className="ny-landing__empty">
+        <span className="dc-tracker">SCANNING NYRIMA</span>
+        <p className="ny-landing__empty-title">Reading your folder…</p>
+      </div>
+    );
+  }
   return (
     <div className="ny-landing__empty">
-      <span className="dc-tracker">{filtered ? "NO MATCHES" : "NO ENTRIES"}</span>
+      <span className="dc-tracker">{filtered ? "NO MATCHES" : "EMPTY NYRIMA"}</span>
       <p className="ny-landing__empty-title">
-        {filtered ? "Nothing matches your filter" : "No libraries yet"}
+        {filtered
+          ? "Nothing matches your filter"
+          : "No subfolders inside Nyrima yet"}
       </p>
       <p className="ny-landing__empty-sub">
         {filtered
           ? "Try clearing the search or switching back to All."
-          : "Open any Drive folder to start your cinema archive."}
+          : "Create a folder per show (e.g. \"Gimai Seikatsu\") inside your Nyrima folder on Drive — it'll appear here automatically."}
       </p>
       {filtered ? (
         <button type="button" className="ny-btn ny-btn--ghost" onClick={onReset}>
@@ -462,35 +481,52 @@ function EmptyShelf({
       ) : (
         <button
           type="button"
-          className="ny-btn ny-btn--primary"
-          onClick={onAdd}
+          className="ny-btn ny-btn--ghost"
+          onClick={onPickRoot}
         >
-          Open a folder
+          Change Nyrima folder
         </button>
       )}
     </div>
   );
 }
 
+function RootErrorCard({
+  message,
+  onPick,
+  onRetry,
+}: {
+  message: string;
+  onPick: () => void;
+  onRetry: () => void;
+}) {
+  return (
+    <Column gap="12" padding="24" radius="l" background="surface">
+      <Text variant="display-strong-s">Nyrima folder unreachable</Text>
+      <Text variant="body-default-s" onBackground="neutral-weak">
+        {message}
+      </Text>
+      <Row gap="8">
+        <Button variant="primary" onClick={onPick}>
+          Pick a different folder
+        </Button>
+        <Button variant="tertiary" onClick={onRetry}>
+          Try again
+        </Button>
+      </Row>
+    </Column>
+  );
+}
+
 function DashboardDialogs({
-  open,
-  setOpen,
-  input,
-  setInput,
-  error,
-  setError,
-  onSubmit,
+  rootDialogOpen,
+  setRootDialogOpen,
   setupOpen,
   handleCloseSetup,
   setKeyConfigured,
 }: {
-  open: boolean;
-  setOpen: (v: boolean) => void;
-  input: string;
-  setInput: (v: string) => void;
-  error: string | null;
-  setError: (v: string | null) => void;
-  onSubmit: () => void;
+  rootDialogOpen: boolean;
+  setRootDialogOpen: (v: boolean) => void;
   setupOpen: boolean;
   handleCloseSetup: () => void;
   setKeyConfigured: (v: boolean) => void;
@@ -502,51 +538,10 @@ function DashboardDialogs({
         onClose={handleCloseSetup}
         onSaved={() => setKeyConfigured(true)}
       />
-      <Dialog
-        isOpen={open}
-        onClose={() => {
-          setOpen(false);
-          setError(null);
-        }}
-        title="Open a Drive folder"
-        description="Paste a Google Drive folder URL or its ID."
-        style={{
-          backgroundColor: "var(--page-background)",
-        }}
-        footer={
-          <Row gap="8">
-            <Button variant="tertiary" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
-            <Button variant="primary" onClick={onSubmit}>
-              Open
-            </Button>
-          </Row>
-        }
-      >
-        <Column gap="8" paddingY="8">
-          <Input
-            id="folder-url"
-            label="Folder URL or ID"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="https://drive.google.com/drive/folders/..."
-            autoFocus
-            onKeyDown={(e) => {
-              if (e.key === "Enter") onSubmit();
-            }}
-          />
-          {error && (
-            <Text variant="body-default-xs" onBackground="danger-medium">
-              {error}
-            </Text>
-          )}
-          <Text variant="body-default-xs" onBackground="neutral-weak">
-            Tip: right-click any folder on drive.google.com and choose "Open
-            with Nyrima".
-          </Text>
-        </Column>
-      </Dialog>
+      <NyrimaRootDialog
+        isOpen={rootDialogOpen}
+        onClose={() => setRootDialogOpen(false)}
+      />
     </>
   );
 }

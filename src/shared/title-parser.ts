@@ -1,0 +1,252 @@
+/**
+ * Folder-aware title parser.
+ *
+ * The Drive layout under Nyrima is:
+ *
+ *   Nyrima/
+ *     Gimai Seikatsu/
+ *       [GS]01.mkv          → "GIMAI SEIKATSU - EP01"
+ *       GS OVA.mkv          → "GIMAI SEIKATSU - OVA"
+ *     Yahari Ore.../
+ *       Kan/
+ *         [SubsPlease] Yahari Ore - 03.mkv  → "YAHARI ORE... - KAN - EP03"
+ *       Zoku/
+ *         …
+ *
+ * The **folder** is the source of truth for the show name. Filenames vary
+ * wildly across release groups, so we never try to recover the show title
+ * from `[GS]` or `[SubsPlease]` prefixes. The parser only extracts:
+ *
+ *   - episode number (if present), OR
+ *   - a special tag (OVA / SP / MOVIE / OP / ED / NCOP / NCED), OR
+ *   - a cleaned filename fallback when neither matches.
+ *
+ * Output:
+ *   - `fullTitle`   — header shown on the player page
+ *   - `shortLabel`  — what the playlist sidebar shows for each entry
+ *   - structured fields so other UI surfaces can rebuild their own format
+ *
+ * This module is pure and free of chrome.* / DOM dependencies so it can be
+ * imported from app code, content scripts, and the background worker alike.
+ */
+
+export interface ParsedVideoTitle {
+  /** Uppercase show name, derived from the show folder. */
+  showTitle: string;
+  /** Uppercase season label when the video lives inside a recognized season
+   *  subfolder (Kan / Zoku / Season 2 / S2 / …). Otherwise undefined. */
+  seasonLabel?: string;
+  /** Numeric episode, padded to two digits. Undefined when no episode number
+   *  was recoverable (movies, specials, OVAs, etc.). */
+  episodeNumber?: string;
+  /** Detected special tag (OVA / SP / MOVIE / OP / ED / NCOP / NCED). */
+  specialTag?: SpecialTag;
+  /** Header line for the player page. */
+  fullTitle: string;
+  /** Short label for playlist rows — show context is already on the page. */
+  shortLabel: string;
+  /** Cleaned filename (extension + group brackets + scene tags stripped). */
+  cleanedFileName: string;
+}
+
+export interface TitleParserInput {
+  /** Raw video filename including extension. */
+  filename: string;
+  /** Immediate parent folder name. Should be the **show** folder when the
+   *  video lives directly in it, or the **season** folder when nested. */
+  parentFolder: string;
+  /** The show folder when the video is inside a season subfolder. Leave
+   *  undefined when parentFolder IS the show folder. */
+  showFolder?: string;
+}
+
+export type SpecialTag = "OVA" | "SP" | "MOVIE" | "OP" | "ED" | "NCOP" | "NCED";
+
+// Recognized special tags. Order matters: NCOP/NCED before OP/ED so the
+// longer match wins. Detected case-insensitively on word boundaries.
+const SPECIAL_TAGS: SpecialTag[] = [
+  "NCOP",
+  "NCED",
+  "OVA",
+  "MOVIE",
+  "SPECIAL" as unknown as SpecialTag, // mapped → SP below
+  "SP",
+  "OP",
+  "ED",
+];
+
+// SCENE/RIP/CODEC junk we strip before looking for episode numbers, so e.g.
+// `1080p` doesn't get picked up as episode 1080. Same list the existing
+// title-normalizer uses — duplicated here so this module stays standalone.
+const NOISE_TOKEN_PATTERNS: RegExp[] = [
+  /\[[^\]]+\]/g,
+  /\([^)]+\)/g,
+  /\b(?:1080p|720p|480p|2160p|4k|hdr|hevc|x265|x264|h\.?264|h\.?265|aac|flac|ac3|dts|atmos|web-?dl|web-?rip|bluray|bd-?rip|hd-?rip|dvd-?rip|remux|10bit|8bit|multi|subbed|dubbed)\b/gi,
+];
+
+// Episode-number patterns. First match wins.
+const EPISODE_PATTERNS: RegExp[] = [
+  /\bS\d{1,2}E(\d{1,3})\b/i,
+  /\b(?:episode|ep|epi)[\s._-]*?(\d{1,3})\b/i,
+  /\bE(\d{1,3})\b/,
+  // Standalone numeric segment preceded by a common separator (incl.
+  // `]` and `)` so bracket-prefix styles like `[GS]07` match too).
+  /(?:^|[\s\-_.\]\)])(\d{1,3})(?=\s*(?:v\d)?\s*(?:\[|\(|$|\.|\s))/,
+];
+
+// Season-subfolder detection.
+//
+// We treat a folder as a "season" when its name matches one of:
+//   - Kan / Zoku / Kai / Ni / San   — common JP suffixes (Yahari Ore Kan etc.)
+//   - "Season 2", "S2", "2nd Season"
+//   - a bare ordinal: "Season 1", "Part 2"
+//
+// The check is case-insensitive against the whole folder name (with hyphens
+// and underscores normalized to spaces).
+const SEASON_PATTERNS: RegExp[] = [
+  /^(kan|zoku|kai|ni|san|yon|go|roku)$/i,
+  /^s\d{1,2}$/i,
+  /^season\s*\d{1,2}$/i,
+  /^\d{1,2}(?:st|nd|rd|th)?\s+season$/i,
+  /^part\s*\d{1,2}$/i,
+  /^cour\s*\d{1,2}$/i,
+];
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+export function parseTitle(input: TitleParserInput): ParsedVideoTitle {
+  const filename = input.filename;
+  const parentFolder = (input.parentFolder ?? "").trim();
+  const explicitShow = (input.showFolder ?? "").trim();
+
+  // Detect whether parentFolder is itself a season folder.
+  const parentIsSeason = isSeasonFolderName(parentFolder);
+  const showFolder = explicitShow || (parentIsSeason ? "" : parentFolder);
+  const seasonFolder = parentIsSeason ? parentFolder : undefined;
+
+  const showTitle = showFolder ? showFolder.toUpperCase() : "";
+  const seasonLabel = seasonFolder ? formatSeason(seasonFolder) : undefined;
+
+  const specialTag = extractSpecialTag(filename);
+  const episodeNumber = specialTag ? undefined : extractEpisodeNumber(filename);
+  const cleanedFileName = cleanFileName(filename);
+
+  const fullTitle = buildFullTitle({
+    showTitle,
+    seasonLabel,
+    episodeNumber,
+    specialTag,
+    cleanedFileName,
+    filename,
+  });
+  const shortLabel = buildShortLabel({
+    episodeNumber,
+    specialTag,
+    cleanedFileName,
+    filename,
+  });
+
+  return {
+    showTitle,
+    seasonLabel,
+    episodeNumber,
+    specialTag,
+    fullTitle,
+    shortLabel,
+    cleanedFileName,
+  };
+}
+
+/** True when the folder name matches a known season-naming convention. */
+export function isSeasonFolderName(folderName: string): boolean {
+  const norm = folderName.replace(/[._-]+/g, " ").trim();
+  return SEASON_PATTERNS.some((re) => re.test(norm));
+}
+
+// ---------------------------------------------------------------------------
+// Internals
+// ---------------------------------------------------------------------------
+
+function stripExtension(name: string): string {
+  return name.replace(/\.[^.]+$/, "");
+}
+
+function cleanFileName(rawFileName: string): string {
+  let s = stripExtension(rawFileName);
+  for (const re of NOISE_TOKEN_PATTERNS) s = s.replace(re, " ");
+  s = s.replace(/[._]/g, " ").replace(/\s+/g, " ").trim();
+  s = s.replace(/^[-–—\s]+|[-–—\s]+$/g, "").trim();
+  return s;
+}
+
+function extractSpecialTag(rawFileName: string): SpecialTag | undefined {
+  const stem = stripExtension(rawFileName);
+  // Normalize the parts that aren't word characters so e.g. "GS-OVA" still
+  // matches a word-boundary "OVA".
+  const normalized = stem.replace(/[._-]+/g, " ");
+  for (const tag of SPECIAL_TAGS) {
+    const re = new RegExp(`(?:^|\\W)${tag}(?:$|\\W)`, "i");
+    if (re.test(normalized)) {
+      // "SPECIAL" maps to "SP" for compactness on screen.
+      return (tag === ("SPECIAL" as unknown as SpecialTag)
+        ? "SP"
+        : tag) as SpecialTag;
+    }
+  }
+  return undefined;
+}
+
+function extractEpisodeNumber(rawFileName: string): string | undefined {
+  const stem = stripExtension(rawFileName);
+  for (const re of EPISODE_PATTERNS) {
+    const match = stem.match(re);
+    if (!match) continue;
+    const num = match[1];
+    if (!num) continue;
+    const value = Number(num);
+    // Drop four-digit "years" so `Inception 2010` isn't tagged Ep2010.
+    if (num.length === 4 && value >= 1900 && value <= 2099) continue;
+    // Bound to keep noise like resolution stems out (1080, 720, …).
+    if (value > 200) continue;
+    return num.length >= 2 ? num : num.padStart(2, "0");
+  }
+  return undefined;
+}
+
+function formatSeason(folderName: string): string {
+  return folderName.replace(/[._-]+/g, " ").trim().toUpperCase();
+}
+
+function buildFullTitle(args: {
+  showTitle: string;
+  seasonLabel?: string;
+  episodeNumber?: string;
+  specialTag?: SpecialTag;
+  cleanedFileName: string;
+  filename: string;
+}): string {
+  const base = [args.showTitle, args.seasonLabel].filter(Boolean).join(" - ");
+  if (args.episodeNumber) {
+    return base ? `${base} - EP${args.episodeNumber}` : `EP${args.episodeNumber}`;
+  }
+  if (args.specialTag) {
+    return base ? `${base} - ${args.specialTag}` : args.specialTag;
+  }
+  // Fallback: no recognizable episode/tag — show the cleaned filename
+  // alongside the show context. e.g. "GIMAI SEIKATSU - MOVIE NIGHT".
+  const fallback = (args.cleanedFileName || args.filename).toUpperCase();
+  return base ? `${base} - ${fallback}` : fallback;
+}
+
+function buildShortLabel(args: {
+  episodeNumber?: string;
+  specialTag?: SpecialTag;
+  cleanedFileName: string;
+  filename: string;
+}): string {
+  if (args.episodeNumber) return `Episode ${Number(args.episodeNumber)}`;
+  if (args.specialTag) return args.specialTag;
+  return args.cleanedFileName || args.filename;
+}

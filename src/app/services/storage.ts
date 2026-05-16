@@ -12,6 +12,7 @@ import type {
   UserProfile,
   PlaybackPosition,
   AppSettings,
+  NyrimaRoot,
 } from "@shared/types";
 import { DEFAULT_SETTINGS } from "@shared/types";
 
@@ -22,6 +23,20 @@ async function get<T>(key: string): Promise<T | undefined> {
 
 async function set<T>(key: string, value: T): Promise<void> {
   await chrome.storage.local.set({ [key]: value });
+}
+
+// --- Nyrima root -----------------------------------------------------------
+
+export async function getNyrimaRoot(): Promise<NyrimaRoot | undefined> {
+  return await get<NyrimaRoot>(STORAGE_KEYS.NYRIMA_ROOT);
+}
+
+export async function setNyrimaRoot(root: NyrimaRoot): Promise<void> {
+  await set(STORAGE_KEYS.NYRIMA_ROOT, root);
+}
+
+export async function clearNyrimaRoot(): Promise<void> {
+  await chrome.storage.local.remove(STORAGE_KEYS.NYRIMA_ROOT);
 }
 
 // --- Recent folders --------------------------------------------------------

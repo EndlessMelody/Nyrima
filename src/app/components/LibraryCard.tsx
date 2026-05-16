@@ -15,7 +15,7 @@ import { useNavigate } from "react-router-dom";
 import cn from "classnames";
 import type { PlaybackPosition, RecentFolder } from "@shared/types";
 import { useRecentStore } from "../stores/recent-store";
-import { buildDisplayTitle } from "../services/title-normalizer";
+import { parseTitle } from "@shared/title-parser";
 import { NyrimaMark } from "./NyrimaMark";
 import "./LibraryCard.scss";
 
@@ -27,7 +27,7 @@ interface Props {
 
 export function LibraryCard({ folder, positions }: Props) {
   const navigate = useNavigate();
-  const { togglePin, remove } = useRecentStore();
+  const { togglePin } = useRecentStore();
 
   // Find the most-recent in-progress position whose folderId matches this
   // folder. Lets us label the card with "Continue Ep09" or similar.
@@ -46,8 +46,12 @@ export function LibraryCard({ folder, positions }: Props) {
 
   const continueLabel = useMemo(() => {
     if (!continueItem?.name) return null;
-    const parsed = buildDisplayTitle(folder.name, continueItem.name);
+    const parsed = parseTitle({
+      filename: continueItem.name,
+      parentFolder: folder.name,
+    });
     if (parsed.episodeNumber) return `Continue · Ep${parsed.episodeNumber}`;
+    if (parsed.specialTag) return `Continue · ${parsed.specialTag}`;
     return "Continue";
   }, [continueItem, folder.name]);
 
@@ -131,15 +135,6 @@ export function LibraryCard({ folder, positions }: Props) {
         >
           <PinIcon />
         </button>
-        <button
-          type="button"
-          className="ny-library-card__action ny-library-card__action--danger"
-          onClick={() => remove(folder.id)}
-          aria-label="Remove folder"
-          title="Remove"
-        >
-          <CrossIcon />
-        </button>
       </span>
     </div>
   );
@@ -192,19 +187,6 @@ function PinIcon() {
         stroke="currentColor"
         strokeWidth="1.2"
         strokeLinejoin="round"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function CrossIcon() {
-  return (
-    <svg viewBox="0 0 16 16" fill="none" aria-hidden>
-      <path
-        d="m4 4 8 8M12 4l-8 8"
-        stroke="currentColor"
-        strokeWidth="1.2"
         strokeLinecap="round"
       />
     </svg>

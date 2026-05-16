@@ -27,6 +27,16 @@ export interface RecentFolder {
   coverFileId?: string; // optional thumbnail to display on the card
 }
 
+/** The single Nyrima root folder. Persisted once at onboarding; re-validated
+ *  on every refresh so a renamed/missing folder surfaces immediately. */
+export interface NyrimaRoot {
+  id: string;
+  /** The Drive folder's actual name at verification time. Used for display
+   *  and so we can detect when the user renames it on Drive. */
+  name: string;
+  verifiedAt: number; // epoch ms
+}
+
 export interface UserProfile {
   email: string;
   name?: string;

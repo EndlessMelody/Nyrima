@@ -10,7 +10,7 @@
  * Docs: https://developers.google.com/drive/api/v3/reference
  */
 
-import { authedFetch } from "./auth";
+import { authedFetch, tryGetAccessToken } from "./auth";
 import { getApiKey, appendApiKey } from "./api-key";
 import { inflight } from "./drive/dedup";
 import type { RequestOptions } from "./drive/types";
@@ -19,6 +19,7 @@ import {
   VIDEO_EXTENSIONS,
   SUBTITLE_EXTENSIONS,
   VIDEO_MIME_PATTERNS,
+  REQUIRED_FOLDER_NAME,
 } from "@shared/constants";
 
 const API_BASE = "https://www.googleapis.com/drive/v3";
@@ -119,6 +120,36 @@ export async function listFolderAll(
 }
 
 // ---------------------------------------------------------------------------
+// Nyrima root validation
+// ---------------------------------------------------------------------------
+
+export interface NyrimaRootProbe {
+  ok: boolean;
+  actualName: string;
+  isFolder: boolean;
+}
+
+/**
+ * Verify that the given Drive folder ID is named "Nyrima" (case-insensitive
+ * exact match) and is actually a folder. Single source of truth for the
+ * extension's "must live under Nyrima" constraint.
+ *
+ * Throws DriveAccessError (via authedFetch) if the folder is unreachable —
+ * callers should let that propagate so the same access-error UI surfaces.
+ */
+export async function validateNyrimaRoot(
+  folderId: string,
+  reqOpts: RequestOptions = {},
+): Promise<NyrimaRootProbe> {
+  const file = await getFile(folderId, "id,name,mimeType", reqOpts);
+  const isF = file.mimeType === "application/vnd.google-apps.folder";
+  const ok =
+    isF &&
+    file.name.trim().toLowerCase() === REQUIRED_FOLDER_NAME.toLowerCase();
+  return { ok, actualName: file.name, isFolder: isF };
+}
+
+// ---------------------------------------------------------------------------
 // Classification helpers
 // ---------------------------------------------------------------------------
 
@@ -184,28 +215,32 @@ export function buildMediaUrl(fileId: string): string {
 /**
  * Build a directly-streamable URL that can be assigned to <video src>.
  *
- * Returns null when no API key is configured. We deliberately do NOT use
- * the OAuth `access_token` URL parameter here even when a token is
- * available: Drive's media endpoint rejects access_token in the URL for
- * many file/account combinations (returns 403), and there's no way to
- * recover from that without tearing down the video element. The reliable
- * path for OAuth-only access is fetch+blob or the MSE remux pipeline,
- * both of which use the `Authorization: Bearer` header via authedFetch.
+ * Preference order:
+ *   1. **OAuth via DNR** — when a live OAuth token is available, return the
+ *      bare media URL. The background service worker installs a
+ *      declarativeNetRequest rule that stamps `Authorization: Bearer` onto
+ *      these requests, so the browser can issue native Range requests on
+ *      demand and start playback in seconds. Bandwidth is billed against the
+ *      user's personal Drive quota, not the throttled public-key quota.
+ *   2. **API key** — for "Anyone with the link" folders without OAuth, fall
+ *      back to the `?key=...` URL. Same native-Range fast path, but only
+ *      works for public files.
+ *   3. Neither — return null. The caller falls through to a blob/MSE path.
  *
- * Why this matters for playback:
- *   The previous Phase 1 path fetched the *entire* file as a Blob before
- *   assigning to <video>. For multi-GB movies that blocks playback for
- *   minutes and bloats RAM. With a stream URL, the browser's native HTTP
- *   stack issues Range requests on-demand and starts playing in seconds.
- *   The trade-off: this fast path is only available when an API key is
- *   configured (i.e. "Anyone with the link" folders).
+ * Why we don't use `?access_token=` in the URL: Drive rejects it for many
+ * file/account combos (silent 403), and once <video> fails there's no clean
+ * recovery. DNR header injection sidesteps that entirely.
  */
 export async function buildPublicStreamUrl(
   fileId: string,
 ): Promise<string | null> {
-  // tryGetAccessToken is intentionally NOT consulted here — see the
-  // function comment for why access_token URL params are unreliable.
-  // OAuth users without an API key fall back to MSE (MKV) or blob (other).
+  // OAuth path: DNR will stamp the Authorization header on <video>'s outgoing
+  // Range requests. Returning the bare URL avoids the 403 -> blob ricochet
+  // that used to force a full-file prefetch for OAuth-only users.
+  const token = await tryGetAccessToken(false);
+  if (token) {
+    return buildMediaUrl(fileId);
+  }
   const key = await getApiKey();
   if (key) {
     return appendApiKey(buildMediaUrl(fileId), key);

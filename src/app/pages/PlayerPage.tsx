@@ -44,10 +44,8 @@ import { DrivePlayer, type SubtitleTrack } from "../components/DrivePlayer";
 import { DriveStatusBanner } from "../components/DriveStatusBanner";
 import { extractMkvSubtitles } from "../services/mkv-subtitles";
 import { MkvMseController } from "../services/mkv-remux/mse-controller";
-import {
-  buildDisplayTitle,
-  normalizeMovieTitle,
-} from "../services/title-normalizer";
+import { normalizeMovieTitle } from "../services/title-normalizer";
+import { parseTitle, isSeasonFolderName } from "@shared/title-parser";
 import {
   formatBytes,
   formatRuntime,
@@ -103,6 +101,9 @@ export function PlayerPage() {
 
   const [file, setFile] = useState<DriveFile | null>(null);
   const [folderName, setFolderName] = useState<string>("");
+  /** Show folder name when the current `folderName` is a season folder (e.g.
+   *  "Yahari Ore.../Kan"). Empty string otherwise. */
+  const [showFolderName, setShowFolderName] = useState<string>("");
   const [subtitleTracks, setSubtitleTracks] = useState<SubtitleTrack[]>([]);
   const [folderVideos, setFolderVideos] = useState<DriveFile[]>([]);
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
@@ -131,6 +132,11 @@ export function PlayerPage() {
   const mkvSubFeederRef = useRef<{
     feedChunk: (data: Uint8Array) => boolean;
     finalize: () => void;
+    /** End offset (in headerBuf) of the last complete EBML element parsed
+     *  during the header walk. Native-mode streamers must pre-feed
+     *  `headerBuf.slice(headerParsedTo)` so the parser resumes at an element
+     *  boundary instead of starting mid-payload. */
+    headerParsedTo: number;
   } | null>(null);
   // Native-attempt watchdog. Armed when we start a native MKV stream; cleared
   // once `canplay` fires or fallback is triggered.
@@ -182,6 +188,7 @@ export function PlayerPage() {
     setSubtitleTracks([]);
     setFolderVideos([]);
     setFolderName("");
+    setShowFolderName("");
     setInitialSeek(0);
     if (blobUrlRef.current) {
       URL.revokeObjectURL(blobUrlRef.current);
@@ -236,6 +243,24 @@ export function PlayerPage() {
         if (cancelled) return;
         setFile(video);
         if (folder?.name) setFolderName(folder.name);
+
+        // When the parent is a recognized season folder (Kan / Zoku /
+        // Season 2 / …), the *show* name lives one level higher. Resolve it
+        // lazily so titles read "YAHARI ORE - KAN - EP03" instead of just
+        // "KAN - EP03".
+        if (folder?.name && isSeasonFolderName(folder.name)) {
+          const parentId = folder.parents?.[0];
+          if (parentId) {
+            void getFileMetadata(parentId, {
+              signal: loadAbort.signal,
+              priority: "low",
+            })
+              .then((show) => {
+                if (!cancelled && show?.name) setShowFolderName(show.name);
+              })
+              .catch(() => undefined);
+          }
+        }
 
         const siblings = siblingsResult;
         setFolderVideos(siblings.filter(isVideoFile));
@@ -319,6 +344,7 @@ export function PlayerPage() {
               mkvSubFeederRef.current = {
                 feedChunk: extracted.feedChunk,
                 finalize: extracted.finalize,
+                headerParsedTo: extracted.headerParsedTo,
               };
             }
           } catch (e) {
@@ -360,6 +386,20 @@ export function PlayerPage() {
                 `feeder=${feeder ? "ready" : "null"}`,
               );
               if (header && feeder && header.buf.length < header.fileSize) {
+                // Align the feeder to the last complete EBML element in the
+                // header. Without this, the stream's first chunk (starting at
+                // header.buf.length) lands mid-element; the parser reads the
+                // payload as a bogus id+length and never finds a real Cluster
+                // — yielding `clusters=0` for the entire file.
+                if (feeder.headerParsedTo < header.buf.length) {
+                  const trailing = header.buf.slice(feeder.headerParsedTo);
+                  // eslint-disable-next-line no-console
+                  console.info(
+                    `[subs] priming feeder with header tail ` +
+                    `[${feeder.headerParsedTo}, ${header.buf.length}) = ${trailing.length} bytes`,
+                  );
+                  feeder.feedChunk(trailing);
+                }
                 const subAbort = new AbortController();
                 mkvSubStreamAbortRef.current = subAbort;
                 // eslint-disable-next-line no-console
@@ -813,15 +853,19 @@ export function PlayerPage() {
   }
 
   // Main player -------------------------------------------------------------
-  // Anime-aware folder + episode title is the primary display; the movie
-  // normalizer is kept only for the year/quality pills below since
-  // `buildDisplayTitle` is intentionally formatting-only and doesn't extract
-  // those fields.
+  // Folder-aware title: parent folder is the show (or season, if it matches
+  // the season-naming convention — in which case the grandparent is the show
+  // and we already fetched it into `showFolderName`). The movie normalizer
+  // is kept only for the year/quality pills.
   const parsed = file
-    ? buildDisplayTitle(folderName, file.name)
+    ? parseTitle({
+        filename: file.name,
+        parentFolder: folderName,
+        showFolder: showFolderName || undefined,
+      })
     : null;
   const cleaned = file ? normalizeMovieTitle(file.name) : null;
-  const displayTitle = parsed?.displayTitle ?? cleaned?.title ?? file?.name ?? "";
+  const displayTitle = parsed?.fullTitle || cleaned?.title || file?.name || "";
   const progressPct = file
     ? playbackProgressPct(positions[file.id])
     : 0;
