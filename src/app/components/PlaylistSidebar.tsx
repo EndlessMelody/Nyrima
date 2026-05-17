@@ -2,7 +2,7 @@
  * PlaylistSidebar — grouped episode navigator for the player page.
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import cn from "classnames";
 import type { DriveFile, PlaybackPosition } from "@shared/types";
@@ -13,6 +13,7 @@ import {
   type LibraryVideoGroup,
   type LibraryVideoItem,
 } from "../services/library-view";
+import { buildPublicStreamUrl } from "../services/drive-api";
 import { formatRuntimeFromMillis } from "../services/formatters";
 import { NyrimaMark } from "./NyrimaMark";
 import "./PlaylistSidebar.scss";
@@ -38,6 +39,11 @@ export function PlaylistSidebar({
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
     () => new Set(),
   );
+  const [hoveredItemId, setHoveredItemId] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const hoverTimeoutRef = useRef<number | null>(null);
+  const isMountedRef = useRef(true);
 
   const items = useMemo(
     () =>
@@ -78,6 +84,41 @@ export function PlaylistSidebar({
       else next.add(id);
       return next;
     });
+  };
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    };
+  }, []);
+
+  const handleItemHover = (item: LibraryVideoItem) => {
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    hoverTimeoutRef.current = window.setTimeout(() => {
+      if (!isMountedRef.current) return;
+      setHoveredItemId(item.file.id);
+      setPreviewLoading(true);
+      setPreviewUrl(null);
+      void buildPublicStreamUrl(item.file.id).then((url: string | null) => {
+        if (!isMountedRef.current) return;
+        setHoveredItemId((currentId) => {
+          if (currentId === item.file.id) {
+            setPreviewUrl(url);
+          }
+          return currentId;
+        });
+        setPreviewLoading(false);
+      });
+    }, 300);
+  };
+
+  const handleItemLeave = () => {
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    setHoveredItemId(null);
+    setPreviewUrl(null);
+    setPreviewLoading(false);
   };
 
   return (
@@ -136,6 +177,11 @@ export function PlaylistSidebar({
             folderId={folderId}
             collapsed={collapsedGroups.has(group.id) && !query}
             onToggle={() => toggleGroup(group.id)}
+            hoveredItemId={hoveredItemId}
+            previewUrl={previewUrl}
+            previewLoading={previewLoading}
+            onItemHover={handleItemHover}
+            onItemLeave={handleItemLeave}
           />
         ))
       )}
@@ -149,12 +195,22 @@ function PlaylistGroup({
   folderId,
   collapsed,
   onToggle,
+  hoveredItemId,
+  previewUrl,
+  previewLoading,
+  onItemHover,
+  onItemLeave,
 }: {
   group: LibraryVideoGroup;
   currentFileId: string;
   folderId: string;
   collapsed: boolean;
   onToggle: () => void;
+  hoveredItemId: string | null;
+  previewUrl: string | null;
+  previewLoading: boolean;
+  onItemHover: (item: LibraryVideoItem) => void;
+  onItemLeave: () => void;
 }) {
   const noun =
     group.kind === "season"
@@ -188,6 +244,11 @@ function PlaylistGroup({
               item={item}
               folderId={folderId}
               isCurrent={item.file.id === currentFileId}
+              isHovered={item.file.id === hoveredItemId}
+              previewUrl={item.file.id === hoveredItemId ? previewUrl : null}
+              previewLoading={item.file.id === hoveredItemId && previewLoading}
+              onHover={onItemHover}
+              onLeave={onItemLeave}
             />
           ))}
         </div>
@@ -200,10 +261,20 @@ function PlaylistItem({
   item,
   folderId,
   isCurrent,
+  isHovered,
+  previewUrl,
+  previewLoading,
+  onHover,
+  onLeave,
 }: {
   item: LibraryVideoItem;
   folderId: string;
   isCurrent: boolean;
+  isHovered: boolean;
+  previewUrl: string | null;
+  previewLoading: boolean;
+  onHover: (item: LibraryVideoItem) => void;
+  onLeave: () => void;
 }) {
   const navigate = useNavigate();
   const duration = formatRuntimeFromMillis(item.durationMs);
@@ -221,20 +292,56 @@ function PlaylistItem({
       className={cn("ny-playlist__item", { "is-current": isCurrent })}
       role="button"
       tabIndex={0}
-      onClick={play}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          play();
-        }
-      }}
-      aria-label={isCurrent ? `Now playing ${displayLabel}` : `Play ${displayLabel}`}
+      onClick={isCurrent ? undefined : play}
+      onKeyDown={
+        isCurrent
+          ? undefined
+          : (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                play();
+              }
+            }
+      }
+      aria-label={
+        isCurrent ? `Now playing ${displayLabel}` : `Play ${displayLabel}`
+      }
+      onMouseEnter={() => onHover(item)}
+      onMouseLeave={onLeave}
     >
       <div className="ny-playlist__thumb">
-        {thumb ? (
-          <img src={thumb} alt="" loading="lazy" decoding="async" />
+        {isHovered && previewUrl ? (
+          <video
+            key={item.file.id}
+            src={previewUrl}
+            className="ny-playlist__preview-video"
+            autoPlay
+            muted
+            loop
+            playsInline
+            onLoadedData={(e) => {
+              const video = e.currentTarget;
+              video.currentTime = video.duration * 0.2;
+            }}
+          />
+        ) : thumb ? (
+          <img
+            src={thumb}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            className={cn({ "is-hidden": isHovered })}
+          />
         ) : (
-          <NyrimaMark size="header" />
+          <NyrimaMark
+            size="header"
+            className={cn({ "is-hidden": isHovered })}
+          />
+        )}
+        {isHovered && previewLoading && (
+          <div className="ny-playlist__thumb-loader" aria-hidden>
+            <SpinnerIcon />
+          </div>
         )}
       </div>
 
@@ -276,6 +383,14 @@ function SearchIcon() {
         strokeWidth="1.4"
         strokeLinecap="round"
       />
+    </svg>
+  );
+}
+
+function SpinnerIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="ny-playlist__spinner" aria-hidden>
+      <circle cx="12" cy="12" r="10" />
     </svg>
   );
 }
