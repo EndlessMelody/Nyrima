@@ -1,4 +1,5 @@
 import cn from "classnames";
+import type { RefObject } from "react";
 import type { LibrarySortKey, LibraryViewMode } from "@shared/types";
 import type { LibraryFilter } from "../services/library-view";
 import "./LibrarySearchBar.scss";
@@ -14,6 +15,9 @@ interface Props {
   onViewModeChange: (viewMode: LibraryViewMode) => void;
   totalCount: number;
   resultCount: number;
+  /** Forwarded so the parent can wire keyboard shortcuts (eg. `/` to focus
+   *  search) without reaching through DOM queries. */
+  inputRef?: RefObject<HTMLInputElement>;
 }
 
 const FILTERS: Array<{ id: LibraryFilter; label: string }> = [
@@ -40,16 +44,18 @@ export function LibrarySearchBar({
   onViewModeChange,
   totalCount,
   resultCount,
+  inputRef,
 }: Props) {
   return (
     <div className="ny-library-toolbar">
       <label className="ny-library-toolbar__search" aria-label="Search videos">
         <SearchIcon />
         <input
+          ref={inputRef}
           type="search"
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
-          placeholder="Search episodes, files, specials…"
+          placeholder="Search episodes, files, specials…  (press / to focus)"
           autoComplete="off"
           spellCheck={false}
         />

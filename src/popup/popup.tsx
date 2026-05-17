@@ -27,11 +27,13 @@ import "@fontsource/zen-kaku-gothic-new/400.css";
 import "../app/styles/fonts.scss";
 import "../app/styles/anime-theme.scss";
 import "./popup.scss";
-import type { RecentFolder } from "@shared/types";
+import type { PlaybackPosition, RecentFolder } from "@shared/types";
 import { APP_PAGE } from "@shared/constants";
 import {
-  getRecentFolders,
+  getAllPlaybackPositions,
+  isInProgress,
   togglePinRecentFolder,
+  getRecentFolders,
 } from "../app/services/storage";
 import { getApiKey } from "../app/services/api-key";
 
@@ -199,8 +201,20 @@ function FolderItem({
   );
 }
 
+function formatTimecode(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+  const total = Math.floor(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const mm = String(m).padStart(2, "0");
+  const ss = String(s).padStart(2, "0");
+  return h > 0 ? `${h}:${mm}:${ss}` : `${m}:${ss}`;
+}
+
 function Popup() {
   const [folders, setFolders] = useState<RecentFolder[]>([]);
+  const [resume, setResume] = useState<PlaybackPosition | null>(null);
   const [apiKeyConfigured, setApiKeyConfigured] = useState<boolean | null>(
     null,
   );
@@ -208,6 +222,19 @@ function Popup() {
   useEffect(() => {
     void getRecentFolders().then(setFolders);
     void getApiKey().then((k) => setApiKeyConfigured(Boolean(k)));
+    // Most-recent in-progress position — drives the big "Resume" CTA. We
+    // intentionally don't surface a list of in-progress items here; the
+    // popup is for one-tap muscle memory ("get me back to where I was"),
+    // not browsing. The full Continue Watching row lives on the lobby.
+    void getAllPlaybackPositions().then((positions) => {
+      const inProgress = positions.filter(isInProgress);
+      if (inProgress.length === 0) {
+        setResume(null);
+        return;
+      }
+      inProgress.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+      setResume(inProgress[0]);
+    });
   }, []);
 
   async function handleTogglePin(folderId: string) {
@@ -244,17 +271,57 @@ function Popup() {
         />
       </header>
 
-      <button
-        type="button"
-        className="dc-pop-cta"
-        onClick={() => openApp("/")}
-      >
-        <span className="dc-pop-cta__glyph" aria-hidden>
-          ▶
-        </span>
-        <span className="dc-pop-cta__label">Open Library</span>
-        <span className="dc-pop-cta__sub">ライブラリへ</span>
-      </button>
+      {resume && resume.folderId ? (
+        // Promote the in-progress watch to the primary CTA. One tap takes
+        // the user straight to where they left off; "Open Library" demotes
+        // to a secondary link below. When there's nothing in progress, the
+        // popup falls back to the original "Open Library" shape.
+        <>
+          <button
+            type="button"
+            className="dc-pop-cta dc-pop-cta--resume"
+            onClick={() =>
+              openApp(
+                `/play/${encodeURIComponent(resume.folderId!)}/${encodeURIComponent(resume.fileId)}`,
+              )
+            }
+            title={resume.name ?? "Resume last video"}
+          >
+            <span className="dc-pop-cta__glyph" aria-hidden>
+              ▶
+            </span>
+            <span className="dc-pop-cta__label">
+              Resume{" "}
+              <span className="dc-pop-cta__resume-name">
+                {(resume.name ?? "last video").replace(/\.[^.]+$/, "")}
+              </span>
+            </span>
+            <span className="dc-pop-cta__sub">
+              {formatTimecode(resume.positionSeconds)} ·{" "}
+              {formatTimecode(resume.durationSeconds)}
+            </span>
+          </button>
+          <button
+            type="button"
+            className="dc-pop-link"
+            onClick={() => openApp("/")}
+          >
+            Open Library ↗
+          </button>
+        </>
+      ) : (
+        <button
+          type="button"
+          className="dc-pop-cta"
+          onClick={() => openApp("/")}
+        >
+          <span className="dc-pop-cta__glyph" aria-hidden>
+            ▶
+          </span>
+          <span className="dc-pop-cta__label">Open Library</span>
+          <span className="dc-pop-cta__sub">ライブラリへ</span>
+        </button>
+      )}
 
       {empty ? (
         <div className="dc-pop-empty">

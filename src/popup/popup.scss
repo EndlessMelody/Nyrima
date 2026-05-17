@@ -246,6 +246,45 @@ button {
   color: var(--neutral-on-background-weak);
 }
 
+.dc-pop-cta--resume .dc-pop-cta__label {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.dc-pop-cta__resume-name {
+  display: inline-block;
+  max-width: 100%;
+  font-family: var(--dc-font-body);
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--neutral-on-background-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dc-pop-link {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 4px 6px;
+  margin-top: 4px;
+  cursor: pointer;
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--neutral-on-background-medium);
+  align-self: flex-start;
+}
+
+.dc-pop-link:hover {
+  color: var(--brand-on-background-strong);
+}
+
 /* ─────────────────────────── Section ─────────────────────────── */
 
 .dc-pop-section {

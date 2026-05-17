@@ -38,7 +38,6 @@ import {
 } from "../services/storage";
 import { wipeAccountData } from "../services/account-reset";
 import { DriveAccessError, type DriveAccessReason } from "../services/errors";
-import { REQUIRED_FOLDER_NAME } from "@shared/constants";
 import type { DriveFile, NyrimaRoot } from "@shared/types";
 
 export type RootErrorKind = "wrong-name" | "not-folder" | "drive-access";
@@ -114,15 +113,6 @@ export const useNyrimaRootStore = create<NyrimaRootState>((set, get) => ({
       set({ loading: false, rootError: err });
       return { ok: false, error: err };
     }
-    if (!probe.ok) {
-      const err: RootError = {
-        kind: "wrong-name",
-        message: `That folder is named "${probe.actualName}", not "${REQUIRED_FOLDER_NAME}". Rename it (or pick the right folder).`,
-        actualName: probe.actualName,
-      };
-      set({ loading: false, rootError: err });
-      return { ok: false, error: err };
-    }
 
     // Fresh root → wipe everything tied to whatever account/api-key the
     // previous root belonged to. Settings and saved keys survive.
@@ -149,22 +139,15 @@ export const useNyrimaRootStore = create<NyrimaRootState>((set, get) => ({
     // instead of an empty library shelf.
     try {
       const probe = await validateNyrimaRoot(root.id);
-      if (!probe.isFolder || !probe.ok) {
+      if (!probe.isFolder) {
         set({
           refreshing: false,
           libraries: [],
-          rootError: !probe.isFolder
-            ? { kind: "not-folder", message: "Root is no longer a folder." }
-            : {
-                kind: "wrong-name",
-                message: `Root folder is now named "${probe.actualName}", not "${REQUIRED_FOLDER_NAME}". Rename it on Drive or pick a different folder.`,
-                actualName: probe.actualName,
-              },
+          rootError: { kind: "not-folder", message: "Root is no longer a folder." },
         });
         return;
       }
-      // Update the cached name if the user renamed (still "Nyrima" but
-      // different casing/whitespace).
+      // Update the cached name if the user renamed the folder on Drive.
       if (probe.actualName !== root.name) {
         const next: NyrimaRoot = { ...root, name: probe.actualName, verifiedAt: Date.now() };
         await setNyrimaRoot(next);
@@ -194,7 +177,14 @@ if (typeof chrome !== "undefined" && chrome.storage?.onChanged) {
     const change = changes["dc.nyrimaRoot"];
     if (!change) return;
     const next = (change.newValue as NyrimaRoot | undefined) ?? null;
-    useNyrimaRootStore.setState({ root: next, libraries: next ? [] : [] });
+    // When the root is cleared, drop the library list. When it's swapped to
+    // a new root, keep the previous list visible until `refresh()` repaints —
+    // avoids a blank-shelf flash. (Previous code wrote `[] : []` — a dead
+    // conditional that always wiped the list.)
+    useNyrimaRootStore.setState((state) => ({
+      root: next,
+      libraries: next ? state.libraries : [],
+    }));
     if (next) void useNyrimaRootStore.getState().refresh();
   });
 }

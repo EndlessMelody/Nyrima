@@ -5,6 +5,13 @@
  * content sitting between them on the page grid. Borders are 1px hairlines
  * exclusively; we never use a heavy shadow here so the header doesn't compete
  * with the surface texture below.
+ *
+ * Scroll morph: at scroll=0 the header spans the full viewport (the "broad"
+ * state). Past COMPACT_SCROLL_THRESHOLD in AppShell.tsx it gains an
+ * `is-compact` modifier that re-shapes it into a centered floating pill
+ * anchored at the top edge. The transition animates max-width, height,
+ * border-radius, padding, the hairline border, and a soft drop shadow; all
+ * of these are GPU-cheap and don't trigger layout below the bar.
  */
 
 .dc-shell {
@@ -18,24 +25,67 @@
   top: 0;
   z-index: 20;
   width: 100%;
+  max-width: 100%;
+  margin: 0 auto;
   height: 64px;
 
   background: color-mix(in srgb, var(--page-background) 88%, transparent);
   backdrop-filter: blur(24px) saturate(140%);
   -webkit-backdrop-filter: blur(24px) saturate(140%);
   border-bottom: var(--dc-hairline);
+  border-radius: 0;
+  box-shadow: 0 0 0 0 transparent;
 
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: center;
   gap: 16px;
   padding: 0 32px;
+
+  transition:
+    max-width 320ms cubic-bezier(0.32, 0.72, 0, 1),
+    height 280ms cubic-bezier(0.32, 0.72, 0, 1),
+    padding 280ms cubic-bezier(0.32, 0.72, 0, 1),
+    border-radius 280ms cubic-bezier(0.32, 0.72, 0, 1),
+    margin-top 280ms cubic-bezier(0.32, 0.72, 0, 1),
+    border-bottom-color 220ms ease,
+    box-shadow 280ms ease,
+    background 220ms ease;
+}
+
+/* --- Compact "anchored island" state -------------------------------------
+ *
+ * Narrower max-width + auto margins centers the bar horizontally; a small
+ * margin-top floats it a hair below the viewport edge; rounded corners +
+ * soft drop shadow + a transparent hairline turn the edge-to-edge bar into
+ * a discrete pill. The grid + nav inside still flow normally — only the
+ * outer chrome reshapes.
+ */
+.dc-shell__header.is-compact {
+  max-width: 960px;
+  height: 56px;
+  padding: 0 14px;
+  margin-top: 10px;
+  border-radius: 28px;
+  border-bottom-color: transparent;
+  box-shadow:
+    0 0 0 1px var(--neutral-border-medium),
+    0 12px 32px -12px rgba(0, 0, 0, 0.42),
+    0 2px 8px -4px rgba(0, 0, 0, 0.28);
+  background: color-mix(in srgb, var(--page-background) 94%, transparent);
 }
 
 @media (max-width: 720px) {
   .dc-shell__header {
     height: 56px;
     padding: 0 20px;
+  }
+  /* On narrow viewports the compact pill basically tracks the wide state's
+   * shape; trim the top inset so it doesn't pop on scroll. */
+  .dc-shell__header.is-compact {
+    height: 48px;
+    margin-top: 6px;
+    padding: 0 10px;
   }
 }
 
@@ -54,6 +104,18 @@
   line-height: 1.1;
   min-width: 0;
   justify-content: center;
+  max-width: 200px;
+  opacity: 1;
+  overflow: hidden;
+  transition:
+    max-width 240ms cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 180ms ease;
+}
+
+/* Compact mode hides the wordmark text — the mark alone carries the brand. */
+.dc-shell__header.is-compact .dc-shell__wordmark {
+  max-width: 0;
+  opacity: 0;
 }
 
 .dc-shell__name {
@@ -62,6 +124,7 @@
   font-weight: 500;
   letter-spacing: -0.02em;
   color: var(--neutral-on-background-strong);
+  white-space: nowrap;
 }
 
 .dc-shell__name-accent {
@@ -94,13 +157,20 @@
   transition:
     border-color 160ms ease,
     color 160ms ease,
-    background 160ms ease;
+    background 160ms ease,
+    padding 240ms cubic-bezier(0.32, 0.72, 0, 1),
+    border-radius 240ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 .dc-shell__nav-btn:hover {
   color: var(--neutral-on-background-strong);
   border-color: var(--neutral-border-strong);
   background: var(--neutral-alpha-weak);
+}
+
+.dc-shell__nav-btn:focus-visible {
+  outline: 2px solid var(--brand-on-background-medium);
+  outline-offset: 2px;
 }
 
 .dc-shell__nav-btn--icon {
@@ -113,6 +183,55 @@
 .dc-shell__nav-btn svg {
   width: 14px;
   height: 14px;
+  flex-shrink: 0;
+}
+
+.dc-shell__nav-btn-label {
+  white-space: nowrap;
+}
+
+/* Primary CTA — the Share button. Brand-tinted border + soft brand fill so
+ * the most actionable affordance reads first in the right cluster. */
+.dc-shell__nav-btn--primary {
+  border-color: color-mix(in srgb, var(--brand-on-background-medium) 65%, transparent);
+  color: var(--brand-on-background-strong);
+  background: color-mix(in srgb, var(--brand-background-medium) 14%, transparent);
+}
+
+.dc-shell__nav-btn--primary:hover {
+  border-color: var(--brand-on-background-strong);
+  background: color-mix(in srgb, var(--brand-background-medium) 24%, transparent);
+}
+
+/* In compact mode, every nav button collapses to an icon-only puck EXCEPT
+ * the primary CTA, which keeps its label so the share affordance stays
+ * discoverable when the bar shrinks. The label hides via display:none (not
+ * width:0) because hiding a flex child's width still pays the gap; full
+ * removal keeps the pill tight. */
+.dc-shell__header.is-compact .dc-shell__nav-btn {
+  padding: 8px;
+  width: 34px;
+  height: 34px;
+  justify-content: center;
+  border-radius: 999px;
+}
+
+.dc-shell__header.is-compact .dc-shell__nav-btn-label {
+  display: none;
+}
+
+.dc-shell__header.is-compact .dc-shell__nav-btn--primary {
+  padding: 8px 12px;
+  width: auto;
+  border-radius: 999px;
+}
+
+.dc-shell__header.is-compact .dc-shell__nav-btn--primary .dc-shell__nav-btn-label {
+  display: inline;
+}
+
+.dc-shell__header.is-compact .dc-shell__nav {
+  gap: 4px;
 }
 
 .dc-shell__footer {

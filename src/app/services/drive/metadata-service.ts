@@ -45,7 +45,11 @@ import type { RequestOptions } from "./types";
 
 const FOLDER_SCAN_TTL = 20 * 60 * 1000; // 20 min
 const FILE_METADATA_TTL = 45 * 60 * 1000; // 45 min
-const SUBTITLE_TEXT_TTL = 45 * 60 * 1000; // 45 min
+// Subtitles rarely change after upload. The modifiedTime check in
+// getSubtitleText busts the cache the moment a sub is re-uploaded, so the
+// TTL only matters as a "force re-download after long absence" floor. A
+// week is generous without being effectively-forever.
+const SUBTITLE_TEXT_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 // ---------------------------------------------------------------------------
 // Stored shapes

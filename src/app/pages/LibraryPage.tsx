@@ -9,7 +9,7 @@
  *   - Compact folders row (subfolders)
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useLibraryStore } from "../stores/library-store";
 import { useRecentStore } from "../stores/recent-store";
@@ -23,9 +23,13 @@ import { SuggestionList } from "../components/SuggestionList";
 import { SetupAccessDialog } from "../components/SetupAccessDialog";
 import { NyrimaMark } from "../components/NyrimaMark";
 import { DriveStatusBanner } from "../components/DriveStatusBanner";
-import { resolvePoster } from "../services/poster-resolver";
+import { resolveSeriesPoster } from "../services/poster-resolver";
 import { getFileMetadata } from "../services/drive/metadata-service";
 import { getManyCached } from "../services/metadata-cache";
+import {
+  getLibraryViewState,
+  patchLibraryViewState,
+} from "../services/storage";
 import {
   buildLibraryVideoItems,
   filterLibraryItems,
@@ -92,11 +96,49 @@ export function LibraryPage() {
     };
   }, [folderId]);
 
+  // Hydrate per-folder UI state (last search + collapsed groups) on
+  // navigation. Reset transient filter to "all" — we intentionally don't
+  // persist the watched/in-progress filter because it's a per-session
+  // intent, not a property of the library itself.
   useEffect(() => {
-    setQuery("");
     setFilter("all");
-    setCollapsedGroups(new Set());
+    if (!folderId) {
+      setQuery("");
+      setCollapsedGroups(new Set());
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const view = await getLibraryViewState(folderId);
+      if (cancelled) return;
+      setQuery(view?.query ?? "");
+      setCollapsedGroups(new Set(view?.collapsedGroups ?? []));
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [folderId]);
+
+  // Debounced persistence of query + collapsed groups. Skip the initial
+  // hydration write by gating on `viewStateHydratedRef`, otherwise the
+  // first render would write back the just-loaded values and bump
+  // `updatedAt` for no reason.
+  const viewStateHydratedRef = useRef<string>("");
+  useEffect(() => {
+    if (!folderId) return;
+    // First effect run for this folder is the hydration; skip the write.
+    if (viewStateHydratedRef.current !== folderId) {
+      viewStateHydratedRef.current = folderId;
+      return;
+    }
+    const t = window.setTimeout(() => {
+      void patchLibraryViewState(folderId, {
+        query,
+        collapsedGroups: Array.from(collapsedGroups),
+      });
+    }, 400);
+    return () => window.clearTimeout(t);
+  }, [folderId, query, collapsedGroups]);
 
   // Note: an enriched upsertRecent runs further down once `libraryItems` and
   // `bulkMeta` are derived. That writes videoCount / runtimeMs / watchedCount
@@ -122,7 +164,10 @@ export function LibraryPage() {
     if (!featured) return;
     let cancelled = false;
     void (async () => {
-      const meta = await resolvePoster(featured, libraryTitle);
+      // Hero meta represents the *series*, not the specific picked episode.
+      // Folder-keyed lookup shares one cached entry across all episodes and
+      // matches the series poster the lobby's LibraryCard already shows.
+      const meta = await resolveSeriesPoster(libraryTitle);
       if (!cancelled) setFeaturedMeta(meta);
     })();
     return () => {
@@ -177,6 +222,18 @@ export function LibraryPage() {
   // open the lobby. Cover prefers the *first non-miss* MAL poster; with the
   // folder-aware resolver, every episode in a series resolves to the same
   // poster, so the first hit is the series cover.
+  //
+  // Fingerprint gating: this effect's deps include `libraryItems` (which
+  // rebuilds whenever positions tick during background playback) and
+  // `bulkMeta` (which can re-resolve as posters come in). Without a gate the
+  // upsert wrote the same payload to chrome.storage every few seconds. The
+  // ref-based fingerprint short-circuits identical writes; the ref is reset
+  // on folderId change so re-entering a library always logs one fresh
+  // `lastOpenedAt`.
+  const lastUpsertedFingerprintRef = useRef<string>("");
+  useEffect(() => {
+    lastUpsertedFingerprintRef.current = "";
+  }, [folderId]);
   useEffect(() => {
     if (!folderId || (videos.length === 0 && subfolders.length === 0)) return;
     const displayName =
@@ -186,6 +243,7 @@ export function LibraryPage() {
     let runtimeMs = 0;
     let watchedCount = 0;
     let coverPosterUrl: string | undefined;
+    let newestModifiedAt = 0;
     for (const item of libraryItems) {
       runtimeMs += item.durationMs;
       if (item.watched) watchedCount += 1;
@@ -195,7 +253,28 @@ export function LibraryPage() {
           coverPosterUrl = meta.posterUrl;
         }
       }
+      // Track the newest file so the lobby's "N new" badge has a baseline to
+      // compare against on subsequent visits.
+      const modified = item.file.modifiedTime
+        ? Date.parse(item.file.modifiedTime)
+        : 0;
+      if (Number.isFinite(modified) && modified > newestModifiedAt) {
+        newestModifiedAt = modified;
+      }
     }
+    const fingerprint = JSON.stringify([
+      displayName,
+      videos.length,
+      subfolders.length,
+      runtimeMs,
+      watchedCount,
+      coverPosterUrl ?? "",
+      newestModifiedAt,
+    ]);
+    if (fingerprint === lastUpsertedFingerprintRef.current) return;
+    lastUpsertedFingerprintRef.current = fingerprint;
+    // Visiting the library zeroes the badge. The next enrichment pass on
+    // the lobby will re-compute pendingNewCount against the new lastSeenAt.
     void upsertRecent({
       id: folderId,
       name: displayName,
@@ -205,6 +284,9 @@ export function LibraryPage() {
       runtimeMs: runtimeMs > 0 ? runtimeMs : undefined,
       watchedCount,
       coverPosterUrl,
+      newestModifiedAt: newestModifiedAt > 0 ? newestModifiedAt : undefined,
+      lastSeenAt: Date.now(),
+      pendingNewCount: 0,
     });
   }, [
     folderId,
@@ -230,6 +312,42 @@ export function LibraryPage() {
       return next;
     });
   };
+
+  // --- Keyboard shortcuts (theme 5) ---------------------------------------
+  // `/` focuses the search input; `Esc` either clears the active search or
+  // navigates back when the search is already empty. Ignored while the user
+  // is typing in any other field so it doesn't fight form inputs.
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      const inField =
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable);
+      if (e.key === "/" && !inField) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        return;
+      }
+      if (e.key === "Escape") {
+        // Escape inside the search input → clear it; otherwise → back to lobby.
+        if (target === searchInputRef.current && query) {
+          e.preventDefault();
+          setQuery("");
+          searchInputRef.current?.blur();
+          return;
+        }
+        if (!inField) {
+          navigate("/");
+        }
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [navigate, query]);
 
   if (loading) {
     return (
@@ -279,6 +397,33 @@ export function LibraryPage() {
         onBack={() => navigate("/")}
       />
 
+      {subfolders.length > 0 && (
+        // Subfolder chips moved out of the bottom-of-page "Folders" section
+        // on 2026-05-17 — when you're inside a series with seasons/specials,
+        // burying the only way to drill in at the bottom hides the navigation
+        // surface most likely to be the next click. Up top, the chips read as
+        // sibling routes alongside the title.
+        <nav className="ny-library__crumbs" aria-label="Subfolders">
+          <span className="dc-tracker ny-library__crumbs-label">
+            子フォルダ · OPEN
+          </span>
+          {subfolders.map((sf) => (
+            <button
+              key={sf.id}
+              type="button"
+              className="ny-folder-chip ny-folder-chip--crumb ny-focusable"
+              onClick={() =>
+                navigate(`/library/${encodeURIComponent(sf.id)}`)
+              }
+              aria-label={`Open subfolder ${sf.name}`}
+            >
+              <SubfolderIcon />
+              <span>{sf.name}</span>
+            </button>
+          ))}
+        </nav>
+      )}
+
       <DriveStatusBanner
         refreshing={refreshing}
         cacheAgeAt={cacheAgeAt}
@@ -318,6 +463,7 @@ export function LibraryPage() {
             onViewModeChange={setViewMode}
             totalCount={videoFiles.length}
             resultCount={filteredItems.length}
+            inputRef={searchInputRef}
           />
 
           {filteredItems.length === 0 ? (
@@ -334,6 +480,7 @@ export function LibraryPage() {
                   folderId={folderId}
                   folderName={libraryTitle}
                   bulkMeta={bulkMeta}
+                  seriesPosterUrl={featuredMeta?.posterUrl}
                   collapsed={collapsedGroups.has(group.id)}
                   onToggle={() => toggleGroup(group.id)}
                 />
@@ -347,6 +494,7 @@ export function LibraryPage() {
                   item={item}
                   folderId={folderId}
                   meta={bulkMeta[item.file.id]}
+                  seriesPosterUrl={featuredMeta?.posterUrl}
                 />
               ))}
             </div>
@@ -359,6 +507,7 @@ export function LibraryPage() {
                   folderId={folderId}
                   folderName={libraryTitle}
                   meta={bulkMeta[item.file.id]}
+                  seriesPosterUrl={featuredMeta?.posterUrl}
                   playbackPosition={item.position}
                   watched={item.watched}
                 />
@@ -372,36 +521,9 @@ export function LibraryPage() {
         videos={videoFiles}
         excludeFileId={featured?.id}
         folderId={folderId}
+        folderName={libraryTitle}
+        seriesPosterUrl={featuredMeta?.posterUrl}
       />
-
-      {subfolders.length > 0 && (
-        <section className="ny-library__section">
-          <h3 className="ny-library__section-heading">Folders</h3>
-          <div className="ny-folder-row">
-            {subfolders.map((sf) => (
-              <div
-                key={sf.id}
-                className="ny-folder-chip ny-focusable"
-                role="button"
-                tabIndex={0}
-                onClick={() =>
-                  navigate(`/library/${encodeURIComponent(sf.id)}`)
-                }
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    navigate(`/library/${encodeURIComponent(sf.id)}`);
-                  }
-                }}
-                aria-label={`Open subfolder ${sf.name}`}
-              >
-                <SubfolderIcon />
-                <span>{sf.name}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
 
       {empty && (
         <div className="ny-library__empty">
@@ -455,6 +577,7 @@ function LibraryGroupSection({
   folderId,
   folderName,
   bulkMeta,
+  seriesPosterUrl,
   collapsed,
   onToggle,
 }: {
@@ -462,6 +585,7 @@ function LibraryGroupSection({
   folderId: string;
   folderName: string;
   bulkMeta: Record<string, MovieMetadata>;
+  seriesPosterUrl?: string;
   collapsed: boolean;
   onToggle: () => void;
 }) {
@@ -503,6 +627,7 @@ function LibraryGroupSection({
               folderId={folderId}
               folderName={folderName}
               meta={bulkMeta[item.file.id]}
+              seriesPosterUrl={seriesPosterUrl}
               playbackPosition={item.position}
               watched={item.watched}
             />
@@ -517,17 +642,29 @@ function LibraryVideoRow({
   item,
   folderId,
   meta,
+  seriesPosterUrl,
 }: {
   item: LibraryVideoItem;
   folderId: string;
   meta?: MovieMetadata | null;
+  seriesPosterUrl?: string;
 }) {
   const navigate = useNavigate();
   // Prefer the parser-built `Series - EpNN` over `meta.title` so a series with
   // 12 episodes shows 12 distinct row labels instead of "Gimai Seikatsu" × 12.
   // `meta` is still the source of truth for the poster image.
   const title = item.parsed.fullTitle || meta?.title || item.file.name;
-  const thumb = meta?.backdropUrl || meta?.posterUrl || item.file.thumbnailLink;
+  // Thumbnail priority for the 16:9 row layout: Drive's frame thumbnail
+  // first (an actual still from this episode), then the series poster
+  // (so unprocessed episodes still get matched art instead of a blank
+  // tile), then per-file MAL meta as last resort. This matches the user
+  // ask: "use the file's thumbnail if it has one, otherwise the same
+  // picture as the series poster".
+  const thumb =
+    item.file.thumbnailLink ||
+    seriesPosterUrl ||
+    meta?.backdropUrl ||
+    meta?.posterUrl;
   const duration = formatRuntimeFromMillis(item.durationMs);
   const size = item.sizeBytes > 0 ? formatBytes(item.sizeBytes) : "";
   const modified = formatModifiedDate(item.file.modifiedTime);

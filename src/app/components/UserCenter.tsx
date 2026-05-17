@@ -15,8 +15,10 @@ import { useTheme } from "../providers/AppProviders";
 import { useSettingsStore } from "../stores/settings-store";
 import { signOut, tryGetAccessToken } from "../services/auth";
 import { clearUserProfile, getUserProfile } from "../services/user-profile";
+import { useDevModeStore } from "../services/drive/dev-mode";
 import { SubtitleConfigPanel } from "./SubtitleConfigPanel";
 import { ApiConfigPanel } from "./ApiConfigPanel";
+import { STORAGE_KEYS } from "@shared/constants";
 import type { UserProfile, AppSettings } from "@shared/types";
 
 import "./UserCenter.scss";
@@ -69,8 +71,13 @@ export function UserCenter({ profile, onClose, onProfileChange }: Props) {
   const handleClearHistory = useCallback(async () => {
     setClearing(true);
     try {
-      await chrome.storage.local.remove("dc.positions");
-      // Reload positions in the current session.
+      // Was `"dc.positions"` — a key that never existed; the button silently
+      // cleared nothing. The real key is STORAGE_KEYS.PLAYBACK_STATE.
+      await chrome.storage.local.remove(STORAGE_KEYS.PLAYBACK_STATE);
+      // The in-memory cache in storage.ts has a chrome.storage.onChanged
+      // listener and will refresh itself, but the lobby/library's React
+      // `usePlaybackPositions` state is loaded once on mount — reload to
+      // get a clean view across all open surfaces.
       window.location.reload();
     } catch {
       setClearing(false);
@@ -79,16 +86,16 @@ export function UserCenter({ profile, onClose, onProfileChange }: Props) {
 
   const handleClearCache = useCallback(async () => {
     try {
-      // Wipe the SWR metadata cache.
-      const all = await chrome.storage.local.get(null);
-      const cacheKeys = Object.keys(all).filter(
-        (k) => k.startsWith("dc.meta:") || k.startsWith("dc.folder:"),
-      );
-      if (cacheKeys.length > 0) {
-        await chrome.storage.local.remove(cacheKeys);
-      }
+      // The prior implementation filtered on `"dc.meta:"` / `"dc.folder:"` —
+      // prefixes that never existed in this codebase, so the button cleared
+      // nothing. The real surfaces are:
+      //   - The MAL/Jikan metadata cache at STORAGE_KEYS.METADATA_CACHE.
+      //   - The IDB-backed SWR caches (folder scans, file metadata, subtitle
+      //     text, thumbnails, media segments) managed by dev-mode.
+      await chrome.storage.local.remove(STORAGE_KEYS.METADATA_CACHE);
+      await useDevModeStore.getState().clearAllCaches();
     } catch {
-      // ignore
+      // ignore — best-effort cleanup
     }
   }, []);
 

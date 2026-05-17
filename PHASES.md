@@ -25,7 +25,9 @@ _Last touched: 2026-05-16_
 - [x] Storage layer (recents, playback positions, settings)
 - [x] First clean `npm run build` (Once UI alias + stubs in vite.config.ts)
 - [x] OAuth client setup docs (`docs/oauth-setup.md`)
-- [ ] Replace placeholder PNG icons with the SVG-derived export
+- [x] Replace placeholder PNG icons with the SVG-derived export
+  - `scripts/make-icons.mjs` resamples `public/icons/Icon.png` via `sharp` into
+    16/32/48/128 PNGs. The SVG path is kept as fallback documentation.
 - [ ] End-to-end smoke test on a real shared folder, recorded somewhere
 
 ## Phase 2 — Real player · **shipped**
@@ -101,14 +103,72 @@ _Last touched: 2026-05-16_
     episodes / total runtime / watched count across the collection.
 - [→] **P3.6** Multi-folder libraries — _deferred_ (data-model rewrite)
 
-## Phase 4 — Sharing layer · **not started**
-_Last touched: never_
+## Phase 4 — Sharing layer · **in progress**
+_Last touched: 2026-05-17_
 
-- [ ] Schema for share entries (JSON in a `Shared/` subfolder)
-- [ ] Central bootstrap index (public Drive folder with `index.json`)
-- [ ] User-to-user follow + pull
-- [ ] Comments-as-JSONL append-only
-- [ ] "Share this video" UX → produces a viewable Drive link + share entry
+Drive-only social model. Each user gets a `Shared/` subfolder set to
+"Anyone with the link → Viewer". Inside: `index.json` manifest,
+`entries/{id}.json` per share, `comments/{shareId}.jsonl` for the user's
+own comments on other users' shares. Comments are decentralized — each
+commenter writes to their own folder; the share owner reconstructs threads
+by scanning followers' Shared folders for matching `{shareId}.jsonl`.
+This sidesteps Drive's binary view/edit permission model.
+
+- [x] **P4.0** Foundation — schema + Shared/ bootstrap + Drive write helpers
+  - Types: `ShareEntry`, `ShareIndex`, `ShareIndexEntry`, `ShareComment`,
+    `ShareAuthor`, `ShareTarget`, `FollowedUser`, `ShareProfile` in
+    `@shared/types`.
+  - Constants: `SHARED_FOLDER_NAME` / `SHARED_ENTRIES_SUBFOLDER` /
+    `SHARED_COMMENTS_SUBFOLDER` / `SHARED_INDEX_FILENAME`, caps
+    (`MAX_SHARE_INDEX_ENTRIES`, comment + caption char limits),
+    `SHARE_HANDLE_PATTERN`. Storage keys: `SHARE_PROFILE`,
+    `SHARED_FOLDER_ID`, `SHARED_SUBFOLDER_IDS`, `FOLLOWED_USERS`.
+  - Drive write helpers added to `drive-api.ts`: `createFolder`,
+    `findChildByName`, `findOrCreateChildFolder`, `uploadJsonFile`,
+    `updateJsonFile`, `downloadJsonFile`. All route through the existing
+    `authedFetch` queue/retry/cooldown pipeline.
+  - Sharing service module at `src/app/services/sharing/`:
+    `share-folder.ts` (idempotent bootstrap of Shared/, entries/,
+    comments/), `index-store.ts` (read/write `index.json`),
+    `entry-store.ts` (read/write entry JSONs + id generation),
+    `share-profile.ts` (handle picker + author projection).
+  - OAuth: scope set expanded to include `drive.file` (narrowest write
+    scope — only files the app creates). Existing users need to
+    disconnect + reconnect once to pick up the new scope; their cached
+    token lacks `drive.file` and writes will 403 until then.
+  - Account-reset: drops `SHARED_FOLDER_ID` + `SHARED_SUBFOLDER_IDS` on
+    root re-pair. Preserves `SHARE_PROFILE` + `FOLLOWED_USERS` (same
+    person, just different Drive).
+- [x] **P4.1** "Share this video" UX — handle picker on first use, share
+      composer, write entry + bump index, surface "make Shared/ public"
+      confirmation
+  - `SharingHost` (mounted at App root) hydrates `ShareProfile` from
+    chrome.storage and listens for the topbar's `nyrima:topbar` CustomEvent
+    (scope: "share"). Decouples the topbar from the sharing store so
+    Phase 4.2 surfaces can hang off the same event channel.
+  - `HandlePickerDialog` — first-use onboarding. Prefills handle / display
+    name / avatar from the connected Google profile (Drive About API),
+    enforces `SHARE_HANDLE_PATTERN`, persists via `setShareProfile`.
+  - `ShareComposerDialog` — infers target from the current route
+    (`/play/x/y` → video, `/library/x` → library), resolves title + poster
+    from cached metadata, accepts an optional caption (capped at
+    `MAX_SHARE_CAPTION_CHARS = 600`), and offers a "make Shared/ public"
+    checkbox the first time (gated on probed permission state). Success
+    state surfaces the Drive folder URL with a copy-to-clipboard button.
+  - `useSharingStore.submitShare()` is the integration seam: ensureFolders
+    → readShareIndex → writeShareEntry → prependIndexEntry → writeShareIndex
+    → (optional) publishSharedFolder, all in one transaction. Errors
+    surface via `lastError` so the composer can inline-render them.
+  - Drive permissions API helpers (`getFolderIsPublic`, `setFolderPublic`,
+    `setFolderPrivate`) added to drive-api.ts. `share-permissions.ts`
+    wraps them with a chrome.storage cache so the composer reads the
+    public state without burning a roundtrip per open.
+- [ ] **P4.2** Follow + pull — paste a friend's Shared/ URL, scan their
+      index, populate the Inbox surface
+- [ ] **P4.3** Comments — append-only JSONL writer + owner aggregator
+      that reads followers' `Shared/comments/`
+- [ ] **P4.4** Bootstrap index — public opt-in directory of discoverable
+      users
 
 ## Phase 5 — Realtime + privacy · **not started**
 _Last touched: never_

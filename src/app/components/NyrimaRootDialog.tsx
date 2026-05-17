@@ -1,8 +1,9 @@
 /**
- * NyrimaRootDialog — pair the extension with the user's Nyrima folder.
+ * NyrimaRootDialog — pair the extension with the user's root cinema folder.
  *
- * Replaces the generic "Open a folder" dialog. Validates that the picked
- * folder is named "Nyrima" (case-insensitive) before persisting; on a fresh
+ * Replaces the generic "Open a folder" dialog. As of 2026-05-17 we no longer
+ * require the folder be literally named "Nyrima" — any Drive folder works,
+ * and its immediate child folders become the lobby's libraries. On a fresh
  * pick, wipes any data tied to the previously-paired account so leftover
  * libraries from earlier API keys can't bleed into the new lobby.
  */
@@ -19,7 +20,6 @@ import {
 } from "@once-ui-system/core/components";
 import { useNyrimaRootStore } from "../stores/nyrima-root-store";
 import { extractFolderId } from "@shared/parse-folder-url";
-import { REQUIRED_FOLDER_NAME } from "@shared/constants";
 
 interface Props {
   isOpen: boolean;
@@ -63,11 +63,11 @@ export function NyrimaRootDialog({ isOpen, onClose, onSaved }: Props) {
     <Dialog
       isOpen={isOpen}
       onClose={onClose}
-      title={root ? "Change Nyrima folder" : "Pair your Nyrima folder"}
+      title={root ? "Change cinema folder" : "Pair your cinema folder"}
       description={
         root
-          ? `Currently paired to "${root.name}". Pick a different "${REQUIRED_FOLDER_NAME}" folder to switch — this wipes the previous library data.`
-          : `Paste the URL of the Google Drive folder named "${REQUIRED_FOLDER_NAME}". The extension only scans that folder.`
+          ? `Currently paired to "${root.name}". Pick a different Drive folder to switch — this wipes the previous library data.`
+          : `Paste the URL of any Google Drive folder. Its immediate subfolders become your libraries (one per show).`
       }
       style={{ backgroundColor: "var(--page-background)" }}
       footer={

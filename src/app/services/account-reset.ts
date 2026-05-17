@@ -7,7 +7,9 @@
  *
  * What we drop:
  *   - chrome.storage.local: dc.recentFolders, dc.playbackState,
- *     dc.metadataCache, dc.playbackEngineCache
+ *     dc.metadataCache, dc.playbackEngineCache, dc.sharedFolderId,
+ *     dc.sharedSubfolderIds (Phase 4 — share folder ids point at the
+ *     previous root and would 404 against the new account)
  *   - IndexedDB caches: folder scans, file metadata, subtitle text,
  *     thumbnails, media segments
  *
@@ -16,6 +18,11 @@
  *   - dc.apiKey                — the user just pasted it, don't wipe
  *   - dc.oauthClientId         — same as above
  *   - dc.userProfile           — re-derived from auth on next call
+ *   - dc.shareProfile          — the user's handle survives across roots;
+ *                                they're the same person on Drive #2
+ *   - dc.followedUsers         — their follow graph is also account-
+ *                                independent (follows point at OTHER users'
+ *                                Shared/ folder ids, not the user's own)
  */
 
 import { STORAGE_KEYS } from "@shared/constants";
@@ -26,6 +33,11 @@ const STORAGE_KEYS_TO_CLEAR: string[] = [
   STORAGE_KEYS.PLAYBACK_STATE,
   STORAGE_KEYS.METADATA_CACHE,
   STORAGE_KEYS.PLAYBACK_ENGINE_CACHE,
+  STORAGE_KEYS.SHARED_FOLDER_ID,
+  STORAGE_KEYS.SHARED_SUBFOLDER_IDS,
+  // The cached "anyone with the link" flag belongs to the old folder id —
+  // wipe it so the next bootstrap re-queries against the new account.
+  "dc.sharedFolderIsPublic",
 ];
 
 /**

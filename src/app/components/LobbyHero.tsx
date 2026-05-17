@@ -38,7 +38,13 @@ export function LobbyHero({ file, meta, folderId, loading }: Props) {
   const title = meta?.title || cleaned.title;
   const year = meta?.year;
   const overview = meta?.overview;
-  const backdrop = meta?.backdropUrl || file.thumbnailLink;
+  // Backdrop preference: Drive's actual frame from the featured episode
+  // (cinematic) > MAL backdrop (rare, Jikan doesn't return one) > MAL
+  // series poster (square but at least matched to the right show). The
+  // poster fallback ensures the hero never renders empty when Drive has
+  // no thumbnailLink for the picked file.
+  const backdrop =
+    file.thumbnailLink || meta?.backdropUrl || meta?.posterUrl;
   const quality = meta?.quality || cleaned.quality;
   const resolution = file.videoMediaMetadata
     ? `${file.videoMediaMetadata.width ?? "?"}×${file.videoMediaMetadata.height ?? "?"}`

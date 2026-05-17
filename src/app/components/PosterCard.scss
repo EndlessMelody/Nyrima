@@ -211,3 +211,47 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+// Right-click context menu — `position: fixed` so it escapes the card's
+// clipped frame and lands at the cursor regardless of where the card is in
+// the grid. Z-index sits above the player chrome so a card in the playlist
+// sidebar can still be acted on without the menu disappearing under HUD.
+.ny-poster-card__menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 180px;
+  padding: 6px;
+  border: var(--dc-hairline);
+  border-radius: var(--ny-radius-sm);
+  background: var(--surface-background-strong);
+  box-shadow: 0 12px 36px -10px rgba(0, 0, 0, 0.6);
+  font-family: var(--dc-font-body);
+  font-size: 0.8125rem;
+}
+
+.ny-poster-card__menu-item {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+  color: var(--neutral-on-background-strong);
+}
+
+.ny-poster-card__menu-item:hover,
+.ny-poster-card__menu-item:focus-visible {
+  background: var(--surface-background);
+  outline: none;
+}
+
+.ny-poster-card__menu-item--quiet {
+  color: var(--neutral-on-background-weak);
+  font-size: 0.75rem;
+  margin-top: 4px;
+  border-top: var(--dc-hairline);
+  padding-top: 8px;
+  border-radius: 0;
+}

@@ -160,89 +160,80 @@ async function getAuthToken(interactive: boolean): Promise<string> {
   const obj = await chrome.storage.local.get(STORAGE_KEYS.OAUTH_CLIENT_ID);
   const customClientId = obj[STORAGE_KEYS.OAUTH_CLIENT_ID] as string | undefined;
 
-  if (customClientId) {
-    // Try in-memory first, then session storage. This is the hot path on
-    // every Drive call — keep it cheap.
-    if (customTokenCache && Date.now() < customTokenCache.expiresAt) {
-      await setDnrAuthRule(customTokenCache.token);
-      return customTokenCache.token;
-    }
-    const persisted = await readPersistedToken();
-    if (persisted) {
-      customTokenCache = persisted;
-      await setDnrAuthRule(persisted.token);
-      return persisted.token;
-    }
+  if (!customClientId) {
+    // BYOK: no client_id, no auth. The fallback to
+    // `chrome.identity.getAuthToken` was removed along with the manifest
+    // oauth2 block — without a real client_id it could only throw "bad
+    // client id" and confuse callers. Surface the same shape the UI
+    // already handles via DriveAccessError("needs-oauth").
+    throw new Error(
+      "OAuth not configured. Open User Center → API Settings and paste your Google Cloud OAuth Client ID.",
+    );
+  }
 
-    return new Promise((resolve, reject) => {
-      const redirectUri = chrome.identity.getRedirectURL();
-      const scopes = encodeURIComponent(
-        "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile"
-      );
-      // For non-interactive, add prompt=none so it fails fast or succeeds silently.
-      const promptParam = interactive ? "" : "&prompt=none";
-      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${customClientId}&response_type=token&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes}${promptParam}`;
-
-      chrome.identity.launchWebAuthFlow({ url: authUrl, interactive }, (redirectUrl) => {
-        if (chrome.runtime.lastError || !redirectUrl) {
-          reject(new Error(chrome.runtime.lastError?.message || "OAuth flow failed or cancelled."));
-          return;
-        }
-
-        try {
-          const hash = new URL(redirectUrl).hash.substring(1);
-          const params = new URLSearchParams(hash);
-          const token = params.get("access_token");
-          const expiresIn = parseInt(params.get("expires_in") || "3599", 10);
-
-          if (token) {
-            // Cache token with a 5-minute safety margin in BOTH layers so a
-            // service-worker idle restart doesn't force a re-auth.
-            const entry = {
-              token,
-              expiresAt: Date.now() + (expiresIn - 300) * 1000,
-            };
-            customTokenCache = entry;
-            void writePersistedToken(entry);
-            void setDnrAuthRule(token);
-            resolve(token);
-          } else {
-            reject(new Error("No access_token found in redirect URI."));
-          }
-        } catch (err) {
-          reject(new Error("Failed to parse redirect URI."));
-        }
-      });
-    });
+  // Try in-memory first, then session storage. This is the hot path on
+  // every Drive call — keep it cheap.
+  if (customTokenCache && Date.now() < customTokenCache.expiresAt) {
+    await setDnrAuthRule(customTokenCache.token);
+    return customTokenCache.token;
+  }
+  const persisted = await readPersistedToken();
+  if (persisted) {
+    customTokenCache = persisted;
+    await setDnrAuthRule(persisted.token);
+    return persisted.token;
   }
 
   return new Promise((resolve, reject) => {
-    // Newer chrome.identity types declare getAuthToken with a GetAuthTokenResult
-    // object response. Older Chrome builds still call back with a bare string.
-    // We accept both, hence the `unknown` cast + runtime narrowing.
-    chrome.identity.getAuthToken({ interactive }, (result: unknown) => {
-      if (chrome.runtime.lastError || !result) {
-        reject(
-          new Error(chrome.runtime.lastError?.message ?? "No token returned"),
-        );
+    const redirectUri = chrome.identity.getRedirectURL();
+    // Scope set:
+    //   - drive.readonly  → existing Phase 1-3 path (browse + stream user's libraries)
+    //   - drive.file      → Phase 4 sharing layer needs to create the user's
+    //                       Shared/ folder, write index.json + entry files,
+    //                       and (eventually) set "Anyone with the link"
+    //                       permissions on the publish surface. `drive.file`
+    //                       is the narrowest write scope — it only grants
+    //                       access to files the app itself created. Existing
+    //                       users will need to disconnect + reconnect once
+    //                       to pick up the new scope; their cached token
+    //                       lacks drive.file and writes will 403 until then.
+    //   - userinfo.email / userinfo.profile → user identity + avatar
+    const scopes = encodeURIComponent(
+      "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile"
+    );
+    // For non-interactive, add prompt=none so it fails fast or succeeds silently.
+    const promptParam = interactive ? "" : "&prompt=none";
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${customClientId}&response_type=token&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes}${promptParam}`;
+
+    chrome.identity.launchWebAuthFlow({ url: authUrl, interactive }, (redirectUrl) => {
+      if (chrome.runtime.lastError || !redirectUrl) {
+        reject(new Error(chrome.runtime.lastError?.message || "OAuth flow failed or cancelled."));
         return;
       }
-      const finish = (t: string) => {
-        void setDnrAuthRule(t);
-        resolve(t);
-      };
-      if (typeof result === "string") {
-        finish(result);
-        return;
-      }
-      if (typeof result === "object" && result && "token" in result) {
-        const t = (result as { token?: string }).token;
-        if (t) {
-          finish(t);
-          return;
+
+      try {
+        const hash = new URL(redirectUrl).hash.substring(1);
+        const params = new URLSearchParams(hash);
+        const token = params.get("access_token");
+        const expiresIn = parseInt(params.get("expires_in") || "3599", 10);
+
+        if (token) {
+          // Cache token with a 5-minute safety margin in BOTH layers so a
+          // service-worker idle restart doesn't force a re-auth.
+          const entry = {
+            token,
+            expiresAt: Date.now() + (expiresIn - 300) * 1000,
+          };
+          customTokenCache = entry;
+          void writePersistedToken(entry);
+          void setDnrAuthRule(token);
+          resolve(token);
+        } else {
+          reject(new Error("No access_token found in redirect URI."));
         }
+      } catch (err) {
+        reject(new Error("Failed to parse redirect URI."));
       }
-      reject(new Error("Unexpected getAuthToken response shape"));
     });
   });
 }

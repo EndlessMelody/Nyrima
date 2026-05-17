@@ -86,6 +86,11 @@ export function LibraryCard({ folder, positions }: Props) {
     };
   }, [folder.videoCount, folder.watchedCount]);
 
+  // "N new" pill — appears when the background enrichment on the lobby has
+  // observed files modified after the user last opened this library. Cleared
+  // by LibraryPage on visit (lastSeenAt → now, pendingNewCount → 0).
+  const newCount = folder.pendingNewCount ?? 0;
+
   const onOpen = () => navigate(`/library/${encodeURIComponent(folder.id)}`);
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -152,6 +157,15 @@ export function LibraryCard({ folder, positions }: Props) {
             title={`${watchedRatio.watched} of ${watchedRatio.total} watched`}
           >
             {watchedRatio.label}
+          </span>
+        )}
+
+        {newCount > 0 && (
+          <span
+            className="ny-library-card__new-pill"
+            title={`${newCount} new ${newCount === 1 ? "file" : "files"} since you last opened this library`}
+          >
+            {newCount} new
           </span>
         )}
 

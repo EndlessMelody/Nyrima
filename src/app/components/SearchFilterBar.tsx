@@ -8,6 +8,7 @@
  */
 
 import cn from "classnames";
+import type { RefObject } from "react";
 import "./SearchFilterBar.scss";
 
 export type LobbyFilter = "all" | "continue" | "unwatched";
@@ -18,6 +19,8 @@ interface Props {
   filter: LobbyFilter;
   onFilterChange: (f: LobbyFilter) => void;
   libraryCount: number;
+  /** Forwarded so the parent can wire `/` to focus the input. */
+  inputRef?: RefObject<HTMLInputElement>;
 }
 
 const FILTERS: Array<{ id: LobbyFilter; label: string }> = [
@@ -32,16 +35,18 @@ export function SearchFilterBar({
   filter,
   onFilterChange,
   libraryCount,
+  inputRef,
 }: Props) {
   return (
     <div className="ny-search-bar">
       <label className="ny-search-bar__input" aria-label="Search libraries">
         <SearchIcon />
         <input
+          ref={inputRef}
           type="search"
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
-          placeholder="Search libraries, episodes, titles…"
+          placeholder="Search libraries…  (press / to focus)"
           autoComplete="off"
           spellCheck={false}
         />

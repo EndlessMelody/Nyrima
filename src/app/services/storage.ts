@@ -94,35 +94,92 @@ export async function clearUserProfile(): Promise<void> {
 }
 
 // --- Playback positions ----------------------------------------------------
+//
+// PlayerPage saves a position every ~4 seconds during playback. The naive
+// pattern (full chrome.storage `get` + full `set` per save) marshals the
+// entire PlaybackMap as JSON twice per tick; with dozens of positions that
+// adds up. Mirror the metadata-cache shape: keep one in-memory map and flush
+// to chrome.storage on a coalesced micro-task. Multiple writes inside the
+// same tick collapse to a single `set`. A storage-onChanged listener keeps
+// the in-memory copy honest if another tab (or UserCenter "Clear history")
+// mutates the underlying entry.
 
 type PlaybackMap = Record<string, PlaybackPosition>;
+
+let memPlaybackMap: PlaybackMap | null = null;
+let pendingPlaybackFlush: Promise<void> | null = null;
+
+async function loadPlaybackMap(): Promise<PlaybackMap> {
+  if (memPlaybackMap) return memPlaybackMap;
+  memPlaybackMap =
+    (await get<PlaybackMap>(STORAGE_KEYS.PLAYBACK_STATE)) ?? {};
+  return memPlaybackMap;
+}
+
+function schedulePlaybackFlush(): Promise<void> {
+  if (pendingPlaybackFlush) return pendingPlaybackFlush;
+  pendingPlaybackFlush = Promise.resolve().then(async () => {
+    pendingPlaybackFlush = null;
+    if (!memPlaybackMap) return;
+    await set(STORAGE_KEYS.PLAYBACK_STATE, memPlaybackMap);
+  });
+  return pendingPlaybackFlush;
+}
+
+// Drop the in-memory cache when chrome.storage is mutated outside this
+// module (other tabs, popup, "Clear watch history"). Next read repopulates
+// from disk so we don't ship a fresh write built on top of a stale view.
+if (typeof chrome !== "undefined" && chrome.storage?.onChanged) {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return;
+    if (!(STORAGE_KEYS.PLAYBACK_STATE in changes)) return;
+    const next = changes[STORAGE_KEYS.PLAYBACK_STATE].newValue as
+      | PlaybackMap
+      | undefined;
+    memPlaybackMap = next ?? {};
+  });
+}
 
 export async function getPlaybackPosition(
   fileId: string,
 ): Promise<PlaybackPosition | undefined> {
-  const map = (await get<PlaybackMap>(STORAGE_KEYS.PLAYBACK_STATE)) ?? {};
+  const map = await loadPlaybackMap();
   return map[fileId];
 }
 
 export async function savePlaybackPosition(
   pos: PlaybackPosition,
 ): Promise<void> {
-  const map = (await get<PlaybackMap>(STORAGE_KEYS.PLAYBACK_STATE)) ?? {};
+  const map = await loadPlaybackMap();
   const existing = map[pos.fileId];
   map[pos.fileId] = existing
     ? { ...existing, ...pos, updatedAt: Date.now() }
     : pos;
-  await set(STORAGE_KEYS.PLAYBACK_STATE, map);
+  await schedulePlaybackFlush();
 }
 
 export async function getAllPlaybackPositions(): Promise<PlaybackPosition[]> {
-  const map = (await get<PlaybackMap>(STORAGE_KEYS.PLAYBACK_STATE)) ?? {};
+  const map = await loadPlaybackMap();
   return Object.values(map);
 }
 
-/** Same as getAllPlaybackPositions() but keyed by fileId for O(1) lookup. */
+/** Remove a stored playback position entirely — used by the "Clear progress"
+ *  context-menu action on PosterCard. Different from `markUnwatched`: this
+ *  drops the entry so the file no longer shows up in Continue Watching at
+ *  all, rather than rewriting it to 0 sec (which still counts as in-progress
+ *  if positionSeconds > 5). */
+export async function clearPlaybackPosition(fileId: string): Promise<void> {
+  const map = await loadPlaybackMap();
+  if (!(fileId in map)) return;
+  delete map[fileId];
+  await schedulePlaybackFlush();
+}
+
+/** Same as getAllPlaybackPositions() but keyed by fileId for O(1) lookup.
+ *  Returns a shallow copy so callers can't mutate the in-memory cache. */
 export async function getPlaybackPositionMap(): Promise<PlaybackMap> {
-  return (await get<PlaybackMap>(STORAGE_KEYS.PLAYBACK_STATE)) ?? {};
+  const map = await loadPlaybackMap();
+  return { ...map };
 }
 
 /** 0–100 integer; 0 when position/duration is missing or invalid. */
@@ -182,4 +239,57 @@ export async function saveSettings(
   const next = { ...current, ...patch };
   await set(STORAGE_KEYS.SETTINGS, next);
   return next;
+}
+
+// --- Per-library view state ------------------------------------------------
+//
+// Remembers UI state inside a library page (search query + which group
+// headers the user collapsed) keyed by folderId, so navigating away and
+// back doesn't reset filters. Kept separate from AppSettings because
+// folder-scoped state can grow unbounded and shouldn't bloat the global
+// settings blob; pruned to a soft cap so a power-user with 200 libraries
+// doesn't fill storage with stale entries.
+
+export interface LibraryViewState {
+  /** Last search query typed inside this library. Empty string = cleared. */
+  query?: string;
+  /** Group ids the user expanded *closed* in the grouped view. */
+  collapsedGroups?: string[];
+  /** Bumped each time chrome.storage writes — used as a soft LRU signal so
+   *  the prune step can evict the oldest entries when the map gets huge. */
+  updatedAt?: number;
+}
+
+type LibraryViewStateMap = Record<string, LibraryViewState>;
+
+const LIBRARY_VIEW_STATE_CAP = 100;
+
+export async function getLibraryViewState(
+  folderId: string,
+): Promise<LibraryViewState | undefined> {
+  const map =
+    (await get<LibraryViewStateMap>(STORAGE_KEYS.LIBRARY_VIEW_STATE)) ?? {};
+  return map[folderId];
+}
+
+export async function patchLibraryViewState(
+  folderId: string,
+  patch: LibraryViewState,
+): Promise<void> {
+  const map =
+    (await get<LibraryViewStateMap>(STORAGE_KEYS.LIBRARY_VIEW_STATE)) ?? {};
+  const existing = map[folderId] ?? {};
+  map[folderId] = { ...existing, ...patch, updatedAt: Date.now() };
+
+  // Soft prune. When the map exceeds the cap, drop the oldest entries by
+  // `updatedAt`. The current folder is always retained because we just
+  // touched its `updatedAt` above.
+  const entries = Object.entries(map);
+  if (entries.length > LIBRARY_VIEW_STATE_CAP) {
+    entries.sort((a, b) => (b[1].updatedAt ?? 0) - (a[1].updatedAt ?? 0));
+    const kept = Object.fromEntries(entries.slice(0, LIBRARY_VIEW_STATE_CAP));
+    await set(STORAGE_KEYS.LIBRARY_VIEW_STATE, kept);
+    return;
+  }
+  await set(STORAGE_KEYS.LIBRARY_VIEW_STATE, map);
 }

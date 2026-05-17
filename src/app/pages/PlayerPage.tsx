@@ -72,7 +72,8 @@ import {
 } from "../services/playback-strategy";
 import { PlayerLayout } from "../components/PlayerLayout";
 import { PlaylistSidebar } from "../components/PlaylistSidebar";
-import { getCached } from "../services/metadata-cache";
+import { getManyCached } from "../services/metadata-cache";
+import { debugLog } from "../services/debug-log";
 import { NyrimaMark } from "../components/NyrimaMark";
 import {
   UNSUPPORTED_CONTAINERS,
@@ -312,8 +313,7 @@ export function PlayerPage() {
           const decision = decideInitialMode(video, ACTIVE_STRATEGY, remembered);
           markPlayback("playback:mode-initial");
           setPlaybackMode(decision.mode);
-          // eslint-disable-next-line no-console
-          console.info(
+          debugLog(
             `[playback] mode=${decision.mode} reason=${decision.reason} file=${video.name}`,
           );
 
@@ -390,8 +390,7 @@ export function PlayerPage() {
             const directUrl = await buildPublicStreamUrl(fileId);
             if (cancelled) return;
             if (!directUrl) {
-              // eslint-disable-next-line no-console
-              console.info("[playback] no API key; MKV → MSE (OAuth mode)");
+              debugLog("[playback] no API key; MKV → MSE (OAuth mode)");
               setPlaybackMode("mse-remux");
               setIsMkvMse(true);
             } else {
@@ -405,8 +404,7 @@ export function PlayerPage() {
               // that feeds Cluster bytes into the feeder until EOF.
               const header = mkvHeaderRef.current;
               const feeder = mkvSubFeederRef.current;
-              // eslint-disable-next-line no-console
-              console.info(
+              debugLog(
                 `[subs] native-mode setup: header=${header ? `${header.buf.length}/${header.fileSize}` : "null"} ` +
                 `feeder=${feeder ? "ready" : "null"}`,
               );
@@ -417,9 +415,13 @@ export function PlayerPage() {
                 // payload as a bogus id+length and never finds a real Cluster
                 // — yielding `clusters=0` for the entire file.
                 if (feeder.headerParsedTo < header.buf.length) {
-                  const trailing = header.buf.slice(feeder.headerParsedTo);
-                  // eslint-disable-next-line no-console
-                  console.info(
+                  // subarray (not slice) — zero-copy view. Safe because the
+                  // feeder either consumes the bytes synchronously or makes
+                  // its own .slice() copy for the straddling-element leftover
+                  // path; either way the backing buffer (header.buf) is held
+                  // alive by mkvHeaderRef until the next file loads.
+                  const trailing = header.buf.subarray(feeder.headerParsedTo);
+                  debugLog(
                     `[subs] priming feeder with header tail ` +
                     `[${feeder.headerParsedTo}, ${header.buf.length}) = ${trailing.length} bytes`,
                   );
@@ -427,8 +429,7 @@ export function PlayerPage() {
                 }
                 const subAbort = new AbortController();
                 mkvSubStreamAbortRef.current = subAbort;
-                // eslint-disable-next-line no-console
-                console.info(
+                debugLog(
                   `[subs] starting background stream offset=${header.buf.length} eof=${header.fileSize}`,
                 );
                 void streamMkvSubsForNative(
@@ -443,8 +444,7 @@ export function PlayerPage() {
               // clears it and remembers `native`. If decode error lands
               // first, `handleMediaError` calls `fallbackToMse`.
               if (allowsFallback(ACTIVE_STRATEGY)) {
-                // eslint-disable-next-line no-console
-                console.info(
+                debugLog(
                   `[playback] native attempt armed; watchdog=${NATIVE_WATCHDOG_MS}ms`,
                 );
                 nativeWatchdogRef.current = window.setTimeout(() => {
@@ -642,8 +642,7 @@ export function PlayerPage() {
       nativeWatchdogRef.current = null;
     }
     const ctx = playbackContextRef.current;
-    // eslint-disable-next-line no-console
-    console.info(`[playback] canplay reached; mode=${ctx.mode ?? "?"}`);
+    debugLog(`[playback] canplay reached; mode=${ctx.mode ?? "?"}`);
     if (ctx.fileId && ctx.mode) void rememberMode(ctx.fileId, ctx.mode);
     if (!file) return;
     summarizePlaybackStartup(file.name);
@@ -772,45 +771,33 @@ export function PlayerPage() {
       ? folderVideos[currentIndex + 1]
       : null;
 
-  // Look up cached MAL metadata for the next/prev episodes so the Next-up
-  // card can render a poster + the parsed "Series - EpNN" display title. We
-  // intentionally only read the cache (no network) — the resolver-fed cache
-  // is populated by the library page; if the user jumped straight into a
-  // player URL we just fall back to the filename.
+  // Look up cached MAL metadata for the current + next episode in one cache
+  // walk. `currentPosterUrl` feeds the DrivePlayer's ambient bloom; the
+  // next-episode poster powers the Next-up card. Cache-only (no network) —
+  // populated by the library page on visit; cold player URLs just fall back
+  // to the filename.
+  const [currentPosterUrl, setCurrentPosterUrl] = useState<string | undefined>();
   const [nextPosterUrl, setNextPosterUrl] = useState<string | undefined>();
   useEffect(() => {
     let cancelled = false;
-    if (!nextVideo) {
+    const ids = [fileId, nextVideo?.id].filter(
+      (s): s is string => typeof s === "string" && s.length > 0,
+    );
+    if (ids.length === 0) {
+      setCurrentPosterUrl(undefined);
       setNextPosterUrl(undefined);
       return;
     }
     void (async () => {
-      const meta = await getCached(nextVideo.id);
-      if (!cancelled) setNextPosterUrl(meta?.posterUrl);
+      const map = await getManyCached(ids);
+      if (cancelled) return;
+      setCurrentPosterUrl(fileId ? map[fileId]?.posterUrl : undefined);
+      setNextPosterUrl(nextVideo ? map[nextVideo.id]?.posterUrl : undefined);
     })();
     return () => {
       cancelled = true;
     };
-  }, [nextVideo]);
-
-  // Ambient glow source — the *current* file's cached MAL poster. Same cache
-  // pattern as nextPosterUrl; the DrivePlayer samples this to derive a per-
-  // episode bloom around the frame.
-  const [currentPosterUrl, setCurrentPosterUrl] = useState<string | undefined>();
-  useEffect(() => {
-    let cancelled = false;
-    if (!fileId) {
-      setCurrentPosterUrl(undefined);
-      return;
-    }
-    void (async () => {
-      const meta = await getCached(fileId);
-      if (!cancelled) setCurrentPosterUrl(meta?.posterUrl);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [fileId]);
+  }, [fileId, nextVideo]);
 
   const nextDisplayTitle = useMemo(() => {
     if (!nextVideo) return undefined;
@@ -1257,8 +1244,7 @@ async function streamMkvSubsForNative(
       },
       { kind: "subtitle", priority: "low", signal },
     );
-    // eslint-disable-next-line no-console
-    console.info(
+    debugLog(
       `[subs] stream response: status=${res.status} contentRange=${res.headers.get("content-range")}`,
     );
     const reader = res.body?.getReader();
@@ -1278,8 +1264,7 @@ async function streamMkvSubsForNative(
         feedChunk(value);
       }
     }
-    // eslint-disable-next-line no-console
-    console.info(
+    debugLog(
       `[subs] stream finished: totalBytes=${totalBytes} aborted=${signal.aborted}`,
     );
     if (!signal.aborted) finalize();

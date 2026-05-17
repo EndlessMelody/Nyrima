@@ -226,6 +226,33 @@
   right: 70px;
 }
 
+// "N new" badge — bottom-right corner of the poster so it doesn't compete
+// with the progress pill (top-right) or the continue pill (top-left). Uses
+// the accent gradient so it reads as an unread / actionable signal.
+.ny-library-card__new-pill {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-family: var(--dc-font-mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--neutral-on-solid-strong);
+  background: linear-gradient(
+    135deg,
+    var(--accent-solid-strong),
+    var(--brand-solid-medium)
+  );
+  border: 1px solid transparent;
+  box-shadow: 0 4px 14px -4px var(--accent-alpha-strong);
+}
+
 // Continue pill — top-left over the poster.
 .ny-library-card__continue-pill {
   position: absolute;

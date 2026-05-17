@@ -60,10 +60,10 @@ export function WelcomeBlock({
             Your Drive, made&nbsp;cinematic.
           </h1>
           <p className="ny-welcome__lede">
-            Turn one Google Drive folder named <strong>“Nyrima”</strong> into a
-            private cinema. Nothing uploads, nothing mirrors — your files stay
-            where they live, you just get a player that treats them like the
-            movies they are.
+            Point Nyrima at one Google Drive folder and turn it into a private
+            cinema. Nothing uploads, nothing mirrors — your files stay where
+            they live, you just get a player that treats them like the movies
+            they are.
           </p>
           <div className="ny-welcome__cta">
             <button
@@ -122,13 +122,12 @@ export function WelcomeBlock({
       <ol className="ny-welcome__steps" aria-label="How to get started">
         <Step
           index="01"
-          title="Create your Nyrima folder"
+          title="Create your cinema folder"
           body={
             <>
-              Make a folder named exactly <strong>“Nyrima”</strong> in Google
-              Drive and drop your videos into it. One subfolder per show
-              (Gimai Seikatsu, Yahari Ore…) — Nyrima only scans this one
-              folder.
+              Make any folder in Google Drive and drop your videos into it.
+              One subfolder per show (Gimai Seikatsu, Yahari Ore…) — Nyrima
+              scans this one folder and treats each subfolder as a library.
             </>
           }
         />

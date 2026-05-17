@@ -305,6 +305,28 @@
   gap: 10px;
 }
 
+.ny-library__crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: -8px 0 18px;
+  padding-bottom: 14px;
+  border-bottom: var(--dc-hairline);
+}
+
+.ny-library__crumbs-label {
+  margin-right: 4px;
+  letter-spacing: 0.18em;
+  color: var(--neutral-on-background-medium);
+  font-size: 0.625rem;
+}
+
+.ny-folder-chip--crumb {
+  padding: 6px 12px;
+  font-size: 0.75rem;
+}
+
 .ny-folder-chip {
   display: inline-flex;
   align-items: center;

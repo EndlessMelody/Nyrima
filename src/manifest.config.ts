@@ -5,8 +5,12 @@ import pkg from "../package.json";
  * Chrome Extension Manifest V3 configuration for Nyrima.
  *
  * Key design decisions:
- *  - We request `identity` and `identity.email` to authenticate the user via
- *    chrome.identity.getAuthToken (uses the user's Chrome profile login).
+ *  - Auth is BYOK: each user pastes their own Google Cloud OAuth Client ID
+ *    in the User Center → API Settings. The background SW then runs
+ *    `chrome.identity.launchWebAuthFlow` with that client_id. The legacy
+ *    `manifest.oauth2` block + `chrome.identity.getAuthToken` path has been
+ *    removed because a single shared client_id would have to live in the
+ *    public manifest and would put every user behind one quota.
  *  - We use the broad `https://www.googleapis.com/auth/drive.readonly` scope
  *    for browsing arbitrary folders the user selects. This can be tightened to
  *    `drive.file` later if we move to a Picker-based UX.
@@ -16,10 +20,6 @@ import pkg from "../package.json";
  *    and stream byte ranges via `alt=media`.
  *  - The app UI itself lives in a normal extension page (chrome-extension://.../app.html)
  *    so it can run heavy WASM video decoders without CSP friction.
- *
- * NOTE: The oauth2.client_id below is a placeholder. The user will create one
- * in the Google Cloud Console (OAuth client → Chrome Extension) and paste it
- * here, or override via .env. See docs/oauth-setup.md.
  */
 export default defineManifest({
   manifest_version: 3,
@@ -71,21 +71,10 @@ export default defineManifest({
     "https://myanimelist.net/*",
   ],
 
-  // oauth2 is intentionally omitted in this build. With a placeholder
-  // client_id, chrome.identity.getAuthToken throws "bad client id". Nyrima
-  // falls back to API-key access for "Anyone with the link" folders
-  // (see src/app/services/api-key.ts). To enable OAuth for PRIVATE folders,
-  // create a Chrome Extension OAuth client at
-  //   https://console.cloud.google.com/apis/credentials
-  // and uncomment the block below with your client_id:\
-   oauth2: {
-     client_id: "1234567890-xxxx.apps.googleusercontent.com",
-     scopes: [
-       "https://www.googleapis.com/auth/drive.readonly",
-       "https://www.googleapis.com/auth/userinfo.email",
-       "https://www.googleapis.com/auth/userinfo.profile",
-     ],
-  },
+  // `oauth2` is intentionally not declared. BYOK auth runs through
+  // `chrome.identity.launchWebAuthFlow` with the user's own client_id;
+  // `chrome.identity.getAuthToken` (which is the only API that reads
+  // manifest.oauth2) is no longer called. See service-worker.ts.
 
   icons: {
     "16": "icons/icon-16.png",

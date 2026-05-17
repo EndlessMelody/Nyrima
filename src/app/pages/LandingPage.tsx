@@ -41,8 +41,7 @@ import {
   getFileMetadata,
   listFolder as cachedListFolder,
 } from "../services/drive/metadata-service";
-import { resolvePoster } from "../services/poster-resolver";
-import { getCached } from "../services/metadata-cache";
+import { resolveSeriesPoster } from "../services/poster-resolver";
 import { isInProgress, isWatched } from "../services/storage";
 import { shuffle } from "../utils/shuffle";
 import type {
@@ -78,7 +77,35 @@ export function LandingPage() {
   const [continueFile, setContinueFile] = useState<DriveFile | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<LobbyFilter>("all");
+  const [randomPicksOpen, setRandomPicksOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+
+  // --- Keyboard shortcuts (theme 5) ---------------------------------------
+  // `/` focuses the lobby search; `Esc` clears the query when focused.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      const inField =
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable);
+      if (e.key === "/" && !inField) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        return;
+      }
+      if (e.key === "Escape" && target === searchInputRef.current && query) {
+        e.preventDefault();
+        setQuery("");
+        searchInputRef.current?.blur();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [query]);
 
   useEffect(() => {
     void loadRoot();
@@ -114,7 +141,11 @@ export function LandingPage() {
   // Adapt Drive folder list → RecentFolder shape so the existing
   // LibraryCard / LibraryHealthCard / SearchFilterBar UI keeps working.
   // `lastOpenedAt` is enriched from the recents store when available so
-  // "5m ago" stays accurate; otherwise we use the root's verifiedAt.
+  // "5m ago" stays accurate; otherwise we use the root's verifiedAt. We
+  // forward the full enriched payload (videoCount, runtimeMs, lastSeenAt,
+  // pendingNewCount, …) so the LibraryCard renders stats + the "N new" pill
+  // and the background-enrichment effect can read prior state without a
+  // second storage round-trip.
   const adaptedFolders = useMemo<RecentFolder[]>(() => {
     const recentMap = new Map(recentFolders.map((f) => [f.id, f]));
     const fallback = root?.verifiedAt ?? 0;
@@ -126,6 +157,13 @@ export function LandingPage() {
         lastOpenedAt: recent?.lastOpenedAt ?? fallback,
         pinned: recent?.pinned,
         itemCount: recent?.itemCount,
+        videoCount: recent?.videoCount,
+        runtimeMs: recent?.runtimeMs,
+        watchedCount: recent?.watchedCount,
+        coverPosterUrl: recent?.coverPosterUrl,
+        newestModifiedAt: recent?.newestModifiedAt,
+        lastSeenAt: recent?.lastSeenAt,
+        pendingNewCount: recent?.pendingNewCount,
       };
     });
   }, [libraries, recentFolders, root]);
@@ -144,13 +182,28 @@ export function LandingPage() {
   // `enrichingRef` keeps a per-session set of folder ids that are in-flight
   // or done so a positions update (which re-renders adaptedFolders identity)
   // doesn't re-fire the work.
+  //
+  // 2026-05-17: this pass now also computes `newestModifiedAt` +
+  // `pendingNewCount` per library so the LibraryCard can show a "N new"
+  // pill when Drive received new files since the user last opened the
+  // library. First-ever enrichment seeds `lastSeenAt = newestModifiedAt` so
+  // a brand-new install doesn't flag every existing file as "new".
   const enrichingRef = useRef(new Set<string>());
   const positionsRef = useRef(positions);
   positionsRef.current = positions;
   useEffect(() => {
-    const todo = adaptedFolders.filter(
-      (f) => f.videoCount == null && !enrichingRef.current.has(f.id),
-    );
+    // Re-enrich whenever the persisted stats are missing OR potentially
+    // stale (no recent enrichment). Without this, the "N new" pill never
+    // appears for already-enriched libraries.
+    const STALE_MS = 6 * 60 * 60 * 1000; // 6 hours
+    const now = Date.now();
+    const todo = adaptedFolders.filter((f) => {
+      if (enrichingRef.current.has(f.id)) return false;
+      if (f.videoCount == null) return true;
+      // Re-check stale folders so newly added Drive files surface eventually.
+      const lastTouched = f.lastOpenedAt ?? 0;
+      return now - lastTouched > STALE_MS;
+    });
     if (todo.length === 0) return;
     let cancelled = false;
     const ctrl = new AbortController();
@@ -168,27 +221,44 @@ export function LandingPage() {
           const livePositions = positionsRef.current;
           let runtimeMs = 0;
           let watchedCount = 0;
+          let newestModifiedAt = 0;
           for (const v of videos) {
             const durStr = v.videoMediaMetadata?.durationMillis;
             const dur = durStr ? Number(durStr) : 0;
             if (Number.isFinite(dur) && dur > 0) runtimeMs += dur;
             if (isWatched(livePositions[v.id])) watchedCount++;
+            const mod = v.modifiedTime ? Date.parse(v.modifiedTime) : 0;
+            if (Number.isFinite(mod) && mod > newestModifiedAt) {
+              newestModifiedAt = mod;
+            }
           }
-          // Cover lookup. Prefer the cache to avoid spamming Jikan; only fall
-          // through to a fresh resolve when we have a probe video and no hit.
-          let coverPosterUrl: string | undefined;
-          if (videos.length > 0) {
-            const cached = await getCached(videos[0].id);
-            if (cached?.status === "ok" && cached.posterUrl) {
-              coverPosterUrl = cached.posterUrl;
-            } else {
-              try {
-                const meta = await resolvePoster(videos[0], folder.name);
-                if (meta.status === "ok") coverPosterUrl = meta.posterUrl;
-              } catch {
-                // ignore — leave coverPosterUrl undefined
+          // First enrichment: seed lastSeenAt so the user doesn't see "N new"
+          // on a library they've never opened. Subsequent passes only update
+          // newestModifiedAt + pendingNewCount, leaving lastSeenAt alone
+          // (LibraryPage handles the reset).
+          const isFirstEnrichment = folder.lastSeenAt == null;
+          const effectiveLastSeen = folder.lastSeenAt ?? newestModifiedAt;
+          let pendingNewCount = 0;
+          if (!isFirstEnrichment) {
+            for (const v of videos) {
+              const mod = v.modifiedTime ? Date.parse(v.modifiedTime) : 0;
+              if (Number.isFinite(mod) && mod > effectiveLastSeen) {
+                pendingNewCount++;
               }
             }
+          }
+          // Cover lookup — series-level. Keyed purely on the folder name so
+          // every episode in the library shares one Jikan hit, and so even a
+          // library with zero videos (eg. user-just-created subfolder) still
+          // gets a poster. The folder name is the truth source for the series
+          // identity here; the random "first episode" we used to probe was a
+          // weak signal that varied wildly across release groups.
+          let coverPosterUrl: string | undefined;
+          try {
+            const meta = await resolveSeriesPoster(folder.name);
+            if (meta.status === "ok") coverPosterUrl = meta.posterUrl;
+          } catch {
+            // ignore — leave coverPosterUrl undefined
           }
           if (cancelled) return;
           await upsertRecent({
@@ -201,6 +271,9 @@ export function LandingPage() {
             watchedCount,
             coverPosterUrl,
             pinned: folder.pinned,
+            newestModifiedAt: newestModifiedAt > 0 ? newestModifiedAt : undefined,
+            lastSeenAt: isFirstEnrichment ? newestModifiedAt : folder.lastSeenAt,
+            pendingNewCount,
           });
         } catch {
           // Network blip or abort — release the slot so a later session retries.
@@ -255,26 +328,37 @@ export function LandingPage() {
     };
   }, [mostRecentInProgress]);
 
+  // Seed by `firstFolderId` (not full `adaptedFolders` identity) so the
+  // background bulk-enrichment effect — which mutates adaptedFolders 20+
+  // times on a fresh install — doesn't re-pick the hero on every tick. And
+  // seed the episode index by the folder id so the same lobby visit picks
+  // the same episode on every re-render until the user switches root.
+  const firstFolderId = adaptedFolders[0]?.id ?? "";
+  const firstFolderName = adaptedFolders[0]?.name ?? "";
   useEffect(() => {
     if (mostRecentInProgress) return;
-    if (adaptedFolders.length === 0) return;
+    if (!firstFolderId) return;
     let cancelled = false;
     const ctrl = new AbortController();
-    const target = adaptedFolders[0];
     void (async () => {
       try {
-        const result = await cachedListFolder(target.id, {
+        const result = await cachedListFolder(firstFolderId, {
           signal: ctrl.signal,
           priority: "low",
         });
         const videos = result.files.filter(isVideoFile);
         if (videos.length === 0) return;
-        const pick =
-          videos[Math.floor(Math.random() * Math.min(videos.length, 30))];
+        const seed = hashString(firstFolderId);
+        const idx = seed % Math.min(videos.length, 30);
+        const pick = videos[idx];
         if (!cancelled) {
           setFeatured(pick);
-          setFeaturedFolderId(target.id);
-          const meta = await resolvePoster(pick, target.name);
+          setFeaturedFolderId(firstFolderId);
+          // Hero meta is series-level — the user wants to know which *show*
+          // is featured, not which random episode the rotator picked. The
+          // backdrop still uses the file's Drive frame thumbnail (more
+          // cinematic than the same square poster everywhere).
+          const meta = await resolveSeriesPoster(firstFolderName);
           if (!cancelled) setFeaturedMeta(meta);
         }
       } catch {
@@ -285,13 +369,18 @@ export function LandingPage() {
       cancelled = true;
       ctrl.abort();
     };
-  }, [adaptedFolders, mostRecentInProgress]);
+  }, [firstFolderId, firstFolderName, mostRecentInProgress]);
 
   // --- Continue Watching stubs (for the horizontal row) --------------------
+  // When `ContinueHero` is rendered, the most-recent in-progress item already
+  // owns the lobby's top slot — including it in this row would show the same
+  // poster twice. Skipping it here makes the two surfaces complementary: hero
+  // = "your last episode", row = "everything else you've started".
+  const heroFileId = mostRecentInProgress?.fileId;
   const continueFiles = useMemo<DriveFile[]>(
     () =>
       Object.values(positions)
-        .filter((p) => p.name && p.folderId)
+        .filter((p) => p.name && p.folderId && p.fileId !== heroFileId)
         .map(
           (p) =>
             ({
@@ -303,7 +392,7 @@ export function LandingPage() {
                 : undefined,
             }) as DriveFile,
         ),
-    [positions],
+    [positions, heroFileId],
   );
 
   // --- Folder filtering ----------------------------------------------------
@@ -461,6 +550,7 @@ export function LandingPage() {
         filter={filter}
         onFilterChange={setFilter}
         libraryCount={filteredFolders.length}
+        inputRef={searchInputRef}
       />
 
       <div className="ny-dashboard__grid">
@@ -514,16 +604,29 @@ export function LandingPage() {
           </section>
 
           {randomPicks.length > 0 && (
+            // Random Picks is now opt-in via the Surprise me button — it used
+            // to render unconditionally and added a fourth shelf to the lobby
+            // even on returning visits where the user already knew what to
+            // watch. Now it's a single CTA that reveals when the user
+            // actively wants serendipity.
             <section className="ny-landing__section ny-shelf ny-shelf--quiet">
               <header className="ny-shelf__head">
                 <h3 className="ny-shelf__title">Random Picks</h3>
-                <span className="ny-shelf__count">Tonight's roll of the dice</span>
+                <button
+                  type="button"
+                  className="ny-btn ny-btn--ghost"
+                  onClick={() => setRandomPicksOpen((v) => !v)}
+                >
+                  {randomPicksOpen ? "Hide" : "Surprise me"}
+                </button>
               </header>
-              <div className="ny-library-grid ny-library-grid--quiet">
-                {randomPicks.map((f) => (
-                  <LibraryCard key={f.id} folder={f} positions={positions} />
-                ))}
-              </div>
+              {randomPicksOpen && (
+                <div className="ny-library-grid ny-library-grid--quiet">
+                  {randomPicks.map((f) => (
+                    <LibraryCard key={f.id} folder={f} positions={positions} />
+                  ))}
+                </div>
+              )}
             </section>
           )}
         </div>
@@ -540,12 +643,19 @@ export function LandingPage() {
         </aside>
       </div>
 
-      <OnboardingStrip
-        keyConfigured={keyConfigured}
-        rootPaired={hasRoot}
-        onPickRoot={() => setRootDialogOpen(true)}
-        onOpenSetup={() => setSetupOpen(true)}
-      />
+      {/* OnboardingStrip is suppressed once both onboarding gates are green.
+          The same actions (change folder, manage access) live in the
+          LibraryHealthCard rail, so the strip was a duplicate row stealing
+          vertical space on returning visits. It re-appears the moment
+          either gate breaks (key cleared, root unreachable). */}
+      {(!keyConfigured || !hasRoot) && (
+        <OnboardingStrip
+          keyConfigured={keyConfigured}
+          rootPaired={hasRoot}
+          onPickRoot={() => setRootDialogOpen(true)}
+          onOpenSetup={() => setSetupOpen(true)}
+        />
+      )}
 
       <DashboardDialogs
         rootDialogOpen={rootDialogOpen}
@@ -734,6 +844,16 @@ function LobbyStatsStrip({
       </ul>
     </section>
   );
+}
+
+/** FNV-1a 32-bit, used to seed the featured pick deterministically. */
+function hashString(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
 }
 
 function formatTotalRuntime(ms: number): string {

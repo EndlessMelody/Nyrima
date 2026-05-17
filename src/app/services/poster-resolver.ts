@@ -27,6 +27,18 @@ import { getCached, setCached } from "./metadata-cache";
 
 const JIKAN_API = "https://api.jikan.moe/v4";
 
+/** Prefix used to namespace folder-scoped (series) cache entries inside the
+ *  same `metadataCache.v2` map that holds per-file entries. The shape
+ *  remains `MovieMetadata` — `fileId` just stores this synthetic key. */
+const SERIES_CACHE_PREFIX = "series:";
+
+/** Build the cache key for a folder/series query. Lower-cased + collapsed
+ *  whitespace so "Bokutachi no Remake" and "bokutachi  no remake" share an
+ *  entry. */
+export function seriesCacheKey(folderName: string): string {
+  return SERIES_CACHE_PREFIX + folderName.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
 /** Conservative concurrency cap. Jikan's public API also has a per-minute
  *  bucket, so a large library must trickle requests rather than burst. */
 const MAX_CONCURRENT = 1;
@@ -98,6 +110,49 @@ export async function resolvePoster(
   return meta;
 }
 
+/**
+ * Resolve a *series-level* poster keyed purely by the folder name. This is
+ * the right entry point for surfaces that advertise the series rather than a
+ * specific file (library cards on the lobby, the featured hero, episode
+ * thumbnail fallbacks). Differences from `resolvePoster`:
+ *
+ *   - Cache is keyed by folder name (with a "series:" prefix) rather than
+ *     by Drive fileId, so every episode in the library shares one cached
+ *     query result instead of burning 12 cache slots.
+ *   - Works on folders with zero videos (returns a miss but still bumps the
+ *     cache so we don't re-query on every lobby visit).
+ *   - The synthetic `MovieMetadata.fileId` carries the cache key, so callers
+ *     can re-read it with `getCached(seriesCacheKey(folder))`.
+ */
+export async function resolveSeriesPoster(
+  folderName: string,
+): Promise<MovieMetadata> {
+  const folder = (folderName ?? "").trim();
+  if (!folder) {
+    return {
+      fileId: seriesCacheKey(""),
+      title: "",
+      status: "miss",
+      fetchedAt: Date.now(),
+    };
+  }
+  const key = seriesCacheKey(folder);
+  const cached = await getCached(key);
+  if (cached) return cached;
+
+  // Build a synthetic DriveFile so `fetchJikan` can stamp `fileId = key`.
+  const synthetic: DriveFile = {
+    id: key,
+    name: folder,
+    mimeType: "application/vnd.google-apps.folder",
+  };
+  const meta = await withThrottle(() =>
+    fetchJikan(folder, null, undefined, synthetic),
+  );
+  await setCached(meta);
+  return meta;
+}
+
 interface JikanAnime {
   mal_id: number;
   title?: string;
@@ -131,10 +186,10 @@ async function fetchJikan(
   file: DriveFile,
 ): Promise<MovieMetadata> {
   const query = encodeURIComponent(title);
-  // `limit=5` keeps the response small; we only need to pick the best match.
-  // `sfw=true` filters adult content from search — Nyrima is a personal-cinema
-  // tool, not a discovery surface, so this is a safe default.
-  const url = `${JIKAN_API}/anime?q=${query}&limit=5&sfw=true`;
+  // `limit=10` (up from 5) gives the similarity picker more options to score
+  // against — Jikan's relevance order isn't always the closest title match
+  // for short queries. `sfw=true` filters adult content from search.
+  const url = `${JIKAN_API}/anime?q=${query}&limit=10&sfw=true`;
 
   try {
     const res = await fetch(url);
@@ -145,7 +200,15 @@ async function fetchJikan(
     const results = data.data ?? [];
     if (results.length === 0) return miss(file, title, quality);
 
-    const hit = year ? pickByYear(results, year) ?? results[0] : results[0];
+    // Pick strategy:
+    //   1. If we have a year, prefer the year-matching candidate.
+    //   2. Otherwise, score every candidate by title similarity to the query
+    //      and take the highest. Jikan's default relevance order routinely
+    //      returns wrong matches for short queries like "Bokutachi no Remake"
+    //      — its index favours older/popular anime, so a query for a recent
+    //      lesser-known series can land on something unrelated at index 0.
+    const yearHit = year ? pickByYear(results, year) : null;
+    const hit = yearHit ?? pickBySimilarity(results, title) ?? results[0];
     const displayTitle =
       hit.title_english?.trim() ||
       hit.title?.trim() ||
@@ -191,6 +254,75 @@ function pickByYear(results: JikanAnime[], year: number): JikanAnime | null {
     (r) => typeof r.year === "number" && Math.abs((r.year ?? 0) - year) <= 1,
   );
   return nearby ?? null;
+}
+
+/**
+ * Pick the candidate whose title is closest to the query string. Compares
+ * the query against each of MAL's three title fields (default / english /
+ * japanese romaji) and takes the highest score. Used to overrule Jikan's
+ * default relevance ranking, which often surfaces a high-popularity
+ * unrelated match ahead of an exact hit for niche queries.
+ *
+ * Returns `null` when no candidate scores above the minimum threshold,
+ * letting the caller fall back to `results[0]`.
+ */
+function pickBySimilarity(
+  results: JikanAnime[],
+  query: string,
+): JikanAnime | null {
+  const q = normaliseForCompare(query);
+  if (!q) return null;
+  let best: JikanAnime | null = null;
+  let bestScore = 0;
+  for (const r of results) {
+    const candidates = [r.title, r.title_english, r.title_japanese].filter(
+      (s): s is string => typeof s === "string" && s.length > 0,
+    );
+    const score = Math.max(
+      0,
+      ...candidates.map((c) => similarity(q, normaliseForCompare(c))),
+    );
+    if (score > bestScore) {
+      bestScore = score;
+      best = r;
+    }
+  }
+  // 0.55 = "mostly the same string with a few char/word swaps". Below that
+  // the candidate is likely a different show — fall back to results[0]
+  // (Jikan's relevance pick) rather than ship a misleading "best" match.
+  return bestScore >= 0.55 ? best : null;
+}
+
+/** Lower-case, strip punctuation, collapse whitespace. Makes "Bokutachi no
+ *  Remake" and "bokutachi-no-remake" compare equal. */
+function normaliseForCompare(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Jaccard similarity over token sets, with a length-ratio cap so a query
+ *  doesn't "match" a strict superset by accident (e.g. "Naruto" matching
+ *  "Naruto Shippuden Sayonara…" perfectly when the query was just "naruto"). */
+function similarity(a: string, b: string): number {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  const tokensA = new Set(a.split(" "));
+  const tokensB = new Set(b.split(" "));
+  let inter = 0;
+  for (const t of tokensA) if (tokensB.has(t)) inter++;
+  const union = tokensA.size + tokensB.size - inter;
+  if (union === 0) return 0;
+  const jaccard = inter / union;
+  // Length-ratio penalty: candidates that are much longer than the query
+  // (lots of extra words) get scored down so an exact 3-word query doesn't
+  // mistakenly match a 10-word title that happens to contain all 3.
+  const lenA = tokensA.size;
+  const lenB = tokensB.size;
+  const ratio = Math.min(lenA, lenB) / Math.max(lenA, lenB);
+  return jaccard * (0.5 + 0.5 * ratio);
 }
 
 function miss(
