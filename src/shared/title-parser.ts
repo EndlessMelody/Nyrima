@@ -176,10 +176,10 @@ function stripExtension(name: string): string {
 // ---------------------------------------------------------------------------
 // Filename-only normalization
 //
-// Used by the poster resolver to build a Jikan query string and by lobby /
-// player surfaces that just need a clean display label. `parseTitle` above
-// handles the folder-aware case; this one is for the cold-start /
-// movie / suggestion-card path where only a filename is in hand.
+// Used by lobby / player surfaces that need a clean display label from a
+// bare filename. `parseTitle` above handles the folder-aware case; this
+// one is for the cold-start / movie / suggestion-card path where only a
+// filename is in hand.
 //
 // This block was originally a separate `services/title-normalizer.ts` module
 // that drifted out of sync with the parser's regex set. It now lives next
@@ -247,16 +247,15 @@ function toTitleCase(str: string): string {
 
 /**
  * Normalize a raw video filename into a clean movie title + extracted year
- * and quality flag. Used as the Jikan query string for non-episodic files
- * and as the display label on lobby surfaces that don't have folder context.
+ * and quality flag. Used as the display label on lobby surfaces that don't
+ * have folder context.
  */
 export function normalizeMovieTitle(filename: string): NormalizedTitle {
   let raw = stripExtension(filename);
 
   // Extract the year BEFORE stripping parens, so `Tenki no Ko (2019).mkv`
   // keeps the year intact. We pull from the raw stem (after extension)
-  // because the year is the most reliable signal Jikan keys against, and
-  // a parenthesised year is the common fansub style for movies.
+  // because parenthesised year is the common fansub style for movies.
   const now = new Date().getFullYear();
   const yearMatch = raw.match(/\b(19\d{2}|20\d{2})\b/);
   let year: number | null = null;

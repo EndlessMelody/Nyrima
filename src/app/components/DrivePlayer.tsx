@@ -76,16 +76,26 @@ interface Props {
    * API is missing (older WebView).
    */
   onFirstFrame?: () => void;
-  /** Exposes the raw <video> element so the parent can attach MSE. */
+  /** Exposes the raw <video> element so the parent can attach MSE. Setting
+   *  this prop also tells DrivePlayer to leave the `src` attribute unset
+   *  (MSE owns it) and disables the timeline preview, so it's NOT a general
+   *  observer hook — use `onVideoElement` below for that. */
   onVideoRef?: (el: HTMLVideoElement | null) => void;
+  /** Pure observer hook — fires with the current <video> element on mount
+   *  and again with `null` on unmount. Unlike `onVideoRef` this does not
+   *  alter how DrivePlayer manages the `src` attribute, so it's safe to
+   *  use from features like screenshot capture that just need to read off
+   *  the live element. */
+  onVideoElement?: (el: HTMLVideoElement | null) => void;
   nextVideo?: {
     fileId: string;
     title: string;
     /** Display title produced by the folder-aware title parser
      *  (e.g. "GIMAI SEIKATSU - EP07"). Falls back to `title` when missing. */
     displayTitle?: string;
-    /** Best-known poster URL (MAL/Jikan or Drive thumbnail) for the Next-up
-     *  card. Card still renders without it — image just stays blank. */
+    /** Folder cover poster URL (from the user-placed `Poster.*` in the
+     *  Drive folder) for the Next-up card. Card still renders without it —
+     *  image just stays blank. */
     posterUrl?: string;
   } | null;
   prevVideo?: { fileId: string; title: string } | null;
@@ -127,6 +137,7 @@ export function DrivePlayer({
   onCanPlay,
   onFirstFrame,
   onVideoRef,
+  onVideoElement,
   nextVideo,
   prevVideo,
   onNext,
@@ -187,6 +198,18 @@ export function DrivePlayer({
   useEffect(() => {
     initialSeekAppliedRef.current = false;
   }, [src, initialSeek]);
+
+  // Mirror `initialSeek` into a ref so the loadedmetadata listener — which
+  // is attached once via a stable-closure `useEffect([])` below — always
+  // reads the latest prop value. Without this, a still-loading effect
+  // updating `initialSeek` after first mount, or an autoplay-next jump to
+  // the next episode (DrivePlayer stays mounted, only `src` changes),
+  // would observe the stale closure-captured value and either skip the
+  // resume pill entirely or fire it with the previous file's offset.
+  const initialSeekRef = useRef(initialSeek);
+  useEffect(() => {
+    initialSeekRef.current = initialSeek;
+  }, [initialSeek]);
 
   // Ambient backdrop glow — samples the dominant colour out of the supplied
   // poster URL and writes it as RGB CSS custom properties on the player
@@ -427,7 +450,12 @@ export function DrivePlayer({
         // case stays one click free; an explicit Restart click skips the
         // jump entirely. `initialSeekAppliedRef` keeps the offer single-shot
         // across re-loads of the same src.
-        const seek = initialSeek ?? 0;
+        //
+        // Read `initialSeek` off the ref (not the closure) so the value is
+        // never stale — this handler is attached once via empty-deps
+        // useEffect and the closure capture would otherwise lock in
+        // whatever `initialSeek` was at first mount.
+        const seek = initialSeekRef.current ?? 0;
         if (
           !initialSeekAppliedRef.current &&
           seek > 0 &&
@@ -487,6 +515,15 @@ export function DrivePlayer({
   useEffect(() => {
     if (onVideoRef) onVideoRef(videoRef.current);
   }, [onVideoRef]);
+
+  // Pure observer hook for things like the screenshot button — fires with
+  // the live element on mount, then with `null` on unmount so the parent
+  // can clear its ref. Does not affect how DrivePlayer manages `src`.
+  useEffect(() => {
+    if (!onVideoElement) return;
+    onVideoElement(videoRef.current);
+    return () => onVideoElement(null);
+  }, [onVideoElement]);
 
   // Telemetry: mark the first painted frame for the current src.
   // requestVideoFrameCallback is Chromium-only and the only reliable way to

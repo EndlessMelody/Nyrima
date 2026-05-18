@@ -86,12 +86,12 @@ export function UserCenter({ profile, onClose, onProfileChange }: Props) {
 
   const handleClearCache = useCallback(async () => {
     try {
-      // The prior implementation filtered on `"dc.meta:"` / `"dc.folder:"` —
-      // prefixes that never existed in this codebase, so the button cleared
-      // nothing. The real surfaces are:
-      //   - The MAL/Jikan metadata cache at STORAGE_KEYS.METADATA_CACHE.
-      //   - The IDB-backed SWR caches (folder scans, file metadata, subtitle
-      //     text, thumbnails, media segments) managed by dev-mode.
+      // Wipe the IDB-backed SWR caches (folder scans, file metadata,
+      // subtitle text, thumbnails, media segments) managed by dev-mode.
+      // The legacy `METADATA_CACHE` chrome.storage key (former MAL poster
+      // cache) is also purged here so an existing install can recover from
+      // a runaway-sized blob — the key holds nothing useful since posters
+      // moved to per-folder `Poster.*` files.
       await chrome.storage.local.remove(STORAGE_KEYS.METADATA_CACHE);
       await useDevModeStore.getState().clearAllCaches();
     } catch {

@@ -23,9 +23,11 @@ import { SuggestionList } from "../components/SuggestionList";
 import { SetupAccessDialog } from "../components/SetupAccessDialog";
 import { NyrimaMark } from "../components/NyrimaMark";
 import { DriveStatusBanner } from "../components/DriveStatusBanner";
-import { resolveSeriesPoster } from "../services/poster-resolver";
 import { getFileMetadata } from "../services/drive/metadata-service";
-import { getManyCached } from "../services/metadata-cache";
+import {
+  findPosterFile,
+  resolveFolderPoster,
+} from "../services/folder-poster";
 import {
   getLibraryViewState,
   patchLibraryViewState,
@@ -42,11 +44,7 @@ import {
 import { useSettingsStore } from "../stores/settings-store";
 import { driveFolderUrl } from "@shared/drive-urls";
 import type { DriveAccessReason } from "../services/errors";
-import type {
-  LibrarySortKey,
-  LibraryViewMode,
-  MovieMetadata,
-} from "@shared/types";
+import type { LibrarySortKey, LibraryViewMode } from "@shared/types";
 import { formatBytes, formatRuntimeFromMillis } from "../services/formatters";
 import "./LibraryPage.scss";
 
@@ -61,6 +59,7 @@ export function LibraryPage() {
     errorReason,
     videos,
     subfolders,
+    allFiles,
     loadFolder,
     refresh,
   } = useLibraryStore();
@@ -84,9 +83,18 @@ export function LibraryPage() {
   const patchSettings = useSettingsStore((s) => s.patch);
   const [setupOpen, setSetupOpen] = useState(false);
   const [positions] = usePlaybackPositions(folderId);
-  const [bulkMeta, setBulkMeta] = useState<Record<string, MovieMetadata>>({});
-  const [featuredMeta, setFeaturedMeta] = useState<MovieMetadata | null>(null);
+  /** Resolved folder cover URL — from the user-placed `Poster.{jpg,png,…}`
+   *  in this library, or the parent library's poster when this one has none
+   *  (matches Plex's "show poster applies to seasons" rule). */
+  const [posterUrl, setPosterUrl] = useState<string | undefined>(undefined);
+  /** Drive file id of the matched poster. Persisted on RecentFolder so a
+   *  later visit can re-mint a fresh thumbnailLink if the cached URL has
+   *  expired. */
+  const [posterFileId, setPosterFileId] = useState<string | undefined>(undefined);
   const [folderName, setFolderName] = useState("");
+  /** Parent folder id, captured from `getFileMetadata(folderId).parents[0]`.
+   *  Drives the one-level-up poster fallback for season subfolders. */
+  const [parentFolderId, setParentFolderId] = useState<string | undefined>(undefined);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<LibraryFilter>("all");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
@@ -101,9 +109,15 @@ export function LibraryPage() {
     if (!folderId) return;
     let cancelled = false;
     setFolderName("");
+    setParentFolderId(undefined);
     void getFileMetadata(folderId, { priority: "normal" })
       .then((folder) => {
-        if (!cancelled) setFolderName(folder.name);
+        if (cancelled) return;
+        setFolderName(folder.name);
+        // `parents` is a single-element array under My Drive; shared drives
+        // can sometimes return multiple. We only need one for the fallback
+        // — the first is fine.
+        setParentFolderId(folder.parents?.[0]);
       })
       .catch(() => undefined);
     return () => {
@@ -163,9 +177,9 @@ export function LibraryPage() {
   }, [folderId, query, collapsedGroups]);
 
   // Note: an enriched upsertRecent runs further down once `libraryItems` and
-  // `bulkMeta` are derived. That writes videoCount / runtimeMs / watchedCount
-  // / coverPosterUrl so the lobby's LibraryCard can render real stats and a
-  // cover backdrop without refetching the folder.
+  // the folder poster are derived. That writes videoCount / runtimeMs /
+  // watchedCount / coverPosterUrl so the lobby's LibraryCard can render real
+  // stats and a cover backdrop without refetching the folder.
 
   const videoFiles = useMemo(() => videos.map((v) => v.video), [videos]);
   const libraryTitle =
@@ -174,7 +188,7 @@ export function LibraryPage() {
     "Library";
 
   // Seed by folderId so revisiting the same library doesn't pick a new
-  // featured every time (which would also trigger a poster-resolver call).
+  // featured every time — keeps the hero stable across re-renders.
   const featured = useMemo(() => {
     if (videos.length === 0) return null;
     const seed = hashString(folderId);
@@ -182,36 +196,42 @@ export function LibraryPage() {
     return videos[idx]?.video ?? null;
   }, [videos, folderId]);
 
+  // Resolve the folder's cover poster. First we scan the already-loaded
+  // file listing (`allFiles`) for a `Poster.{jpg,png,…}` — that's the fast
+  // path and covers most libraries. If absent, we fall through to the
+  // parent folder's poster (a season subfolder inheriting its show's
+  // poster). Both lookups are cache-fronted by the metadata service.
   useEffect(() => {
-    if (!featured) return;
+    if (!folderId) {
+      setPosterUrl(undefined);
+      setPosterFileId(undefined);
+      return;
+    }
+    // Synchronous read of the already-loaded listing — no Drive request.
+    const localPoster = findPosterFile(allFiles);
+    if (localPoster?.thumbnailLink) {
+      setPosterUrl(localPoster.thumbnailLink);
+      setPosterFileId(localPoster.id);
+      return;
+    }
+    // No local poster: try the parent folder. Only fires when we know the
+    // parent id (captured in the folderName effect above).
+    if (!parentFolderId) {
+      setPosterUrl(undefined);
+      setPosterFileId(undefined);
+      return;
+    }
     let cancelled = false;
     void (async () => {
-      // Hero meta represents the *series*, not the specific picked episode.
-      // Folder-keyed lookup shares one cached entry across all episodes and
-      // matches the series poster the lobby's LibraryCard already shows.
-      const meta = await resolveSeriesPoster(libraryTitle);
-      if (!cancelled) setFeaturedMeta(meta);
+      const inherited = await resolveFolderPoster(folderId, parentFolderId);
+      if (cancelled) return;
+      setPosterUrl(inherited?.url);
+      setPosterFileId(inherited?.fileId);
     })();
     return () => {
       cancelled = true;
     };
-  }, [featured, libraryTitle]);
-
-  // Bulk-load cached metadata in one chrome.storage read so every PosterCard
-  // doesn't pay its own round-trip; misses still fall back to the per-card
-  // resolvePoster fetch.
-  useEffect(() => {
-    if (videos.length === 0) return;
-    let cancelled = false;
-    void (async () => {
-      const ids = videos.map((v) => v.video.id);
-      const map = await getManyCached(ids);
-      if (!cancelled) setBulkMeta(map);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [videos]);
+  }, [folderId, allFiles, parentFolderId]);
 
   const shortFolderId = (folderId || "").slice(0, 10).toUpperCase();
   const empty = videos.length === 0 && subfolders.length === 0;
@@ -241,16 +261,15 @@ export function LibraryPage() {
   // Persisted library stats on the RecentFolder entry. The lobby's
   // LibraryCard renders these without refetching the folder, so the user
   // gets episode counts + total runtime + a cover backdrop the moment they
-  // open the lobby. Cover prefers the *first non-miss* MAL poster; with the
-  // folder-aware resolver, every episode in a series resolves to the same
-  // poster, so the first hit is the series cover.
+  // open the lobby. The cover comes from the folder's `Poster.{jpg,png,…}`
+  // (resolved above into `posterUrl` / `posterFileId`).
   //
   // Fingerprint gating: this effect's deps include `libraryItems` (which
   // rebuilds whenever positions tick during background playback) and
-  // `bulkMeta` (which can re-resolve as posters come in). Without a gate the
-  // upsert wrote the same payload to chrome.storage every few seconds. The
-  // ref-based fingerprint short-circuits identical writes; the ref is reset
-  // on folderId change so re-entering a library always logs one fresh
+  // `posterUrl` (which resolves async). Without a gate the upsert wrote
+  // the same payload to chrome.storage every few seconds. The ref-based
+  // fingerprint short-circuits identical writes; the ref is reset on
+  // folderId change so re-entering a library always logs one fresh
   // `lastOpenedAt`.
   const lastUpsertedFingerprintRef = useRef<string>("");
   useEffect(() => {
@@ -264,17 +283,10 @@ export function LibraryPage() {
       "Drive folder";
     let runtimeMs = 0;
     let watchedCount = 0;
-    let coverPosterUrl: string | undefined;
     let newestModifiedAt = 0;
     for (const item of libraryItems) {
       runtimeMs += item.durationMs;
       if (item.watched) watchedCount += 1;
-      if (!coverPosterUrl) {
-        const meta = bulkMeta[item.file.id];
-        if (meta?.status === "ok" && meta.posterUrl) {
-          coverPosterUrl = meta.posterUrl;
-        }
-      }
       // Track the newest file so the lobby's "N new" badge has a baseline to
       // compare against on subsequent visits.
       const modified = item.file.modifiedTime
@@ -290,7 +302,8 @@ export function LibraryPage() {
       subfolders.length,
       runtimeMs,
       watchedCount,
-      coverPosterUrl ?? "",
+      posterUrl ?? "",
+      posterFileId ?? "",
       newestModifiedAt,
     ]);
     if (fingerprint === lastUpsertedFingerprintRef.current) return;
@@ -305,7 +318,8 @@ export function LibraryPage() {
       videoCount: videos.length,
       runtimeMs: runtimeMs > 0 ? runtimeMs : undefined,
       watchedCount,
-      coverPosterUrl,
+      coverPosterUrl: posterUrl,
+      coverFileId: posterFileId,
       newestModifiedAt: newestModifiedAt > 0 ? newestModifiedAt : undefined,
       lastSeenAt: Date.now(),
       pendingNewCount: 0,
@@ -316,7 +330,8 @@ export function LibraryPage() {
     videos,
     subfolders,
     libraryItems,
-    bulkMeta,
+    posterUrl,
+    posterFileId,
     upsertRecent,
   ]);
 
@@ -481,7 +496,12 @@ export function LibraryPage() {
       />
 
       {featured && (
-        <LobbyHero file={featured} meta={featuredMeta} folderId={folderId} />
+        <LobbyHero
+          file={featured}
+          posterUrl={posterUrl}
+          title={libraryTitle}
+          folderId={folderId}
+        />
       )}
 
       {!empty && (
@@ -489,7 +509,7 @@ export function LibraryPage() {
           videos={videoFiles}
           folderId={folderId}
           positions={positions}
-          metaByFileId={bulkMeta}
+          seriesPosterUrl={posterUrl}
         />
       )}
 
@@ -529,8 +549,7 @@ export function LibraryPage() {
                   group={group}
                   folderId={folderId}
                   folderName={libraryTitle}
-                  bulkMeta={bulkMeta}
-                  seriesPosterUrl={featuredMeta?.posterUrl}
+                  seriesPosterUrl={posterUrl}
                   collapsed={collapsedGroups.has(group.id)}
                   onToggle={() => toggleGroup(group.id)}
                 />
@@ -543,8 +562,7 @@ export function LibraryPage() {
                   key={item.file.id}
                   item={item}
                   folderId={folderId}
-                  meta={bulkMeta[item.file.id]}
-                  seriesPosterUrl={featuredMeta?.posterUrl}
+                  seriesPosterUrl={posterUrl}
                 />
               ))}
             </div>
@@ -556,8 +574,7 @@ export function LibraryPage() {
                   file={item.file}
                   folderId={folderId}
                   folderName={libraryTitle}
-                  meta={bulkMeta[item.file.id]}
-                  seriesPosterUrl={featuredMeta?.posterUrl}
+                  seriesPosterUrl={posterUrl}
                   playbackPosition={item.position}
                   watched={item.watched}
                 />
@@ -572,7 +589,7 @@ export function LibraryPage() {
         excludeFileId={featured?.id}
         folderId={folderId}
         folderName={libraryTitle}
-        seriesPosterUrl={featuredMeta?.posterUrl}
+        seriesPosterUrl={posterUrl}
       />
 
       {empty && (
@@ -626,7 +643,6 @@ function LibraryGroupSection({
   group,
   folderId,
   folderName,
-  bulkMeta,
   seriesPosterUrl,
   collapsed,
   onToggle,
@@ -634,7 +650,6 @@ function LibraryGroupSection({
   group: LibraryVideoGroup;
   folderId: string;
   folderName: string;
-  bulkMeta: Record<string, MovieMetadata>;
   seriesPosterUrl?: string;
   collapsed: boolean;
   onToggle: () => void;
@@ -676,7 +691,6 @@ function LibraryGroupSection({
               file={item.file}
               folderId={folderId}
               folderName={folderName}
-              meta={bulkMeta[item.file.id]}
               seriesPosterUrl={seriesPosterUrl}
               playbackPosition={item.position}
               watched={item.watched}
@@ -691,30 +705,22 @@ function LibraryGroupSection({
 function LibraryVideoRow({
   item,
   folderId,
-  meta,
   seriesPosterUrl,
 }: {
   item: LibraryVideoItem;
   folderId: string;
-  meta?: MovieMetadata | null;
   seriesPosterUrl?: string;
 }) {
   const navigate = useNavigate();
-  // Prefer the parser-built `Series - EpNN` over `meta.title` so a series with
-  // 12 episodes shows 12 distinct row labels instead of "Gimai Seikatsu" × 12.
-  // `meta` is still the source of truth for the poster image.
-  const title = item.parsed.fullTitle || meta?.title || item.file.name;
+  // Parser-built `Series - EpNN` keeps each episode distinct; fall back to
+  // the raw filename when the parser can't pick a clean label.
+  const title = item.parsed.fullTitle || item.file.name;
   // Thumbnail priority for the 16:9 row layout: Drive's frame thumbnail
-  // first (an actual still from this episode), then the series poster
+  // first (an actual still from this episode), then the folder poster
   // (so unprocessed episodes still get matched art instead of a blank
-  // tile), then per-file MAL meta as last resort. This matches the user
-  // ask: "use the file's thumbnail if it has one, otherwise the same
-  // picture as the series poster".
-  const thumb =
-    item.file.thumbnailLink ||
-    seriesPosterUrl ||
-    meta?.backdropUrl ||
-    meta?.posterUrl;
+  // tile). Matches the user ask: "use the file's thumbnail if it has one,
+  // otherwise the same picture as the folder poster".
+  const thumb = item.file.thumbnailLink || seriesPosterUrl;
   const duration = formatRuntimeFromMillis(item.durationMs);
   const size = item.sizeBytes > 0 ? formatBytes(item.sizeBytes) : "";
   const modified = formatModifiedDate(item.file.modifiedTime);

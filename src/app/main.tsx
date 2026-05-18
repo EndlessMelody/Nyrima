@@ -18,6 +18,10 @@ import "@fontsource/geist-mono/500.css";
 import "@fontsource/geist-mono/600.css";
 import "@fontsource/zen-kaku-gothic-new/400.css";
 import "@fontsource/zen-kaku-gothic-new/500.css";
+// M PLUS Rounded 1c 800 — chunky rounded Japanese sans, used by the topbar
+// Nyrima wordmark. Heavy weight gives the animated brand-gradient + neon
+// halo enough surface area to flow over without losing legibility at 15-17px.
+import "@fontsource/m-plus-rounded-1c/800.css";
 // Comic Neue — FOSS Comic Sans clone for the SubtitleOverlay. Falls back to
 // system "Comic Sans MS" when present (Windows/macOS) and to Comic Neue on
 // Linux/cross-OS so the fansub-style subtitle look stays consistent.

@@ -8,7 +8,9 @@
       "PowerShell($ErrorActionPreference='Continue'; node \".\\\\node_modules\\\\typescript\\\\bin\\\\tsc\" --noEmit; \"TSC=$LASTEXITCODE\"; if \\($LASTEXITCODE -eq 0\\) { node \".\\\\node_modules\\\\vite\\\\bin\\\\vite.js\" build 2>&1 | Select-Object -Last 4; \"BUILD=$LASTEXITCODE\" })",
       "Bash(npm install *)",
       "Bash(powershell -Command \"\\(Get-ChildItem -Recurse -File -Path src | Measure-Object -Property Length -Sum\\).Sum / 1KB\")",
-      "Bash(Select-Object -First 5)"
+      "Bash(Select-Object -First 5)",
+      "Bash(npx tsc *)",
+      "Bash(echo \"exit=$?\")"
     ]
   }
 }

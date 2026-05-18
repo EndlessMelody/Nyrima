@@ -159,8 +159,25 @@ function FolderItem({
         onClick={onOpen}
         title={folder.name}
       >
-        <span className="dc-pop-thumb" aria-hidden>
-          <SakuraGlyph size={22} />
+        <span
+          className={`dc-pop-thumb${folder.coverPosterUrl ? " has-cover" : ""}`}
+          aria-hidden
+        >
+          {folder.coverPosterUrl ? (
+            // Real folder cover — pulled from the user-placed Poster.{jpg,png,…}
+            // inside the Drive folder (see services/folder-poster.ts). The
+            // SakuraGlyph stays as the fallback for never-visited or
+            // poster-less libraries so the row never renders empty.
+            <img
+              src={folder.coverPosterUrl}
+              alt=""
+              loading="lazy"
+              decoding="async"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <SakuraGlyph size={22} />
+          )}
         </span>
         <span className="dc-pop-item__body">
           <span className="dc-pop-item__name">{folder.name}</span>

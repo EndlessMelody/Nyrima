@@ -22,11 +22,11 @@
   scrollbar-width: thin;
 }
 
+/* The Continue Watching row sits inside cards; a slimmer rail keeps the
+ * gradient thumb from competing visually with the poster row above. The
+ * thumb's gradient + glow are inherited from the global rule in
+ * anime-theme.scss — overriding only the height keeps both surfaces in
+ * sync if the brand palette changes. */
 .ny-continue__scroll::-webkit-scrollbar {
   height: 6px;
-}
-
-.ny-continue__scroll::-webkit-scrollbar-thumb {
-  background: var(--neutral-alpha-medium);
-  border-radius: 999px;
 }

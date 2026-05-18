@@ -41,12 +41,11 @@ import {
   getFileMetadata,
   listFolder as cachedListFolder,
 } from "../services/drive/metadata-service";
-import { resolveSeriesPoster } from "../services/poster-resolver";
+import { findPosterFile } from "../services/folder-poster";
 import { isInProgress, isWatched } from "../services/storage";
 import { shuffle } from "../utils/shuffle";
 import type {
   DriveFile,
-  MovieMetadata,
   PlaybackPosition,
   RecentFolder,
 } from "@shared/types";
@@ -72,8 +71,11 @@ export function LandingPage() {
   const [keyConfigured, setKeyConfigured] = useState<boolean | null>(null);
   const [positions] = usePlaybackPositions();
   const [featured, setFeatured] = useState<DriveFile | null>(null);
-  const [featuredMeta, setFeaturedMeta] = useState<MovieMetadata | null>(null);
+  const [featuredPosterUrl, setFeaturedPosterUrl] = useState<string | undefined>(
+    undefined,
+  );
   const [featuredFolderId, setFeaturedFolderId] = useState<string>("");
+  const [featuredFolderName, setFeaturedFolderName] = useState<string>("");
   const [continueFile, setContinueFile] = useState<DriveFile | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<LobbyFilter>("all");
@@ -166,9 +168,9 @@ export function LandingPage() {
   // fresh install or a never-visited library, the card falls back to
   // "N items" and the lobby stats strip stays hidden. We close that gap by
   // walking unenriched libraries in the background and writing the stats
-  // ourselves: one `cachedListFolder` per library + an optional Jikan lookup
-  // for the cover. Throttled by the existing request queue + Jikan's 1 req/s
-  // gap so a large root doesn't burst.
+  // ourselves: one `cachedListFolder` per library — the same listing also
+  // surfaces the user-placed `Poster.{jpg,png,…}` file when present, so we
+  // get the cover for free without an extra request.
   //
   // `enrichingRef` keeps a per-session set of folder ids that are in-flight
   // or done so a positions update (which re-renders adaptedFolders identity)
@@ -191,13 +193,12 @@ export function LandingPage() {
     const todo = adaptedFolders.filter((f) => {
       if (enrichingRef.current.has(f.id)) return false;
       if (f.videoCount == null) return true;
-      // Missing poster → enrich. Catches the post-migration case where
-      // a stale bad match was evicted from both the metadata cache and
-      // the RecentFolder record. The resolver is cache-fronted, so a
-      // legitimately MAL-less library only pays one Jikan call across
-      // the next 7 days (the miss-cache TTL) — subsequent enrich passes
-      // hit the cached miss and write nothing.
-      if (f.coverPosterUrl == null) return true;
+      // Missing poster → re-list the folder. Folder listings are cache-
+      // fronted, so a library whose user genuinely hasn't placed a
+      // `Poster.*` file pays one cheap listing per stale window rather
+      // than per render. The fallback `LibraryCard` art shows in the
+      // meantime; no external network is involved.
+      if (f.coverPosterUrl == null && f.coverFileId == null) return true;
       // Re-check stale folders so newly added Drive files surface eventually.
       const lastTouched = f.lastOpenedAt ?? 0;
       return now - lastTouched > STALE_MS;
@@ -245,19 +246,13 @@ export function LandingPage() {
               }
             }
           }
-          // Cover lookup — series-level. Keyed purely on the folder name so
-          // every episode in the library shares one Jikan hit, and so even a
-          // library with zero videos (eg. user-just-created subfolder) still
-          // gets a poster. The folder name is the truth source for the series
-          // identity here; the random "first episode" we used to probe was a
-          // weak signal that varied wildly across release groups.
-          let coverPosterUrl: string | undefined;
-          try {
-            const meta = await resolveSeriesPoster(folder.name);
-            if (meta.status === "ok") coverPosterUrl = meta.posterUrl;
-          } catch {
-            // ignore — leave coverPosterUrl undefined
-          }
+          // Cover lookup — read the user-placed `Poster.{jpg,png,…}` straight
+          // from the listing we just performed. No second request, no
+          // external service. A library without a Poster file falls through
+          // to the initials tile in LibraryCard.
+          const posterFile = findPosterFile(result.files);
+          const coverPosterUrl = posterFile?.thumbnailLink;
+          const coverFileId = posterFile?.id;
           if (cancelled) return;
           await upsertRecent({
             id: folder.id,
@@ -268,6 +263,7 @@ export function LandingPage() {
             runtimeMs: runtimeMs > 0 ? runtimeMs : undefined,
             watchedCount,
             coverPosterUrl,
+            coverFileId,
             pinned: folder.pinned,
             newestModifiedAt: newestModifiedAt > 0 ? newestModifiedAt : undefined,
             lastSeenAt: isFirstEnrichment ? newestModifiedAt : folder.lastSeenAt,
@@ -289,8 +285,15 @@ export function LandingPage() {
   }, [adaptedFolders, upsertRecent]);
 
   // --- Continue / Featured -------------------------------------------------
+  // Skip positions without a `folderId` — those came from an earlier bug
+  // where `handleTimeUpdate` in PlayerPage didn't stamp folderId on the
+  // first save. ContinueHero / Resume would otherwise build `/play//fileId`
+  // (router warning + broken navigation). New saves carry folderId from
+  // tick zero, so this guard just suppresses legacy orphan rows.
   const mostRecentInProgress = useMemo<PlaybackPosition | null>(() => {
-    const inProgress = Object.values(positions).filter(isInProgress);
+    const inProgress = Object.values(positions).filter(
+      (p) => isInProgress(p) && !!p.folderId,
+    );
     if (inProgress.length === 0) return null;
     return inProgress.reduce((best, p) =>
       (p.updatedAt ?? 0) > (best.updatedAt ?? 0) ? p : best,
@@ -349,15 +352,16 @@ export function LandingPage() {
         const seed = hashString(firstFolderId);
         const idx = seed % Math.min(videos.length, 30);
         const pick = videos[idx];
+        // Hero poster = the same Poster.* the lobby card uses (series-level
+        // image), pulled from the listing we just performed. The backdrop
+        // <img> in LobbyHero still prefers the file's Drive frame thumbnail
+        // (more cinematic) and only falls back to the poster when absent.
+        const posterFile = findPosterFile(result.files);
         if (!cancelled) {
           setFeatured(pick);
           setFeaturedFolderId(firstFolderId);
-          // Hero meta is series-level — the user wants to know which *show*
-          // is featured, not which random episode the rotator picked. The
-          // backdrop still uses the file's Drive frame thumbnail (more
-          // cinematic than the same square poster everywhere).
-          const meta = await resolveSeriesPoster(firstFolderName);
-          if (!cancelled) setFeaturedMeta(meta);
+          setFeaturedFolderName(firstFolderName);
+          setFeaturedPosterUrl(posterFile?.thumbnailLink);
         }
       } catch {
         // ignore — hero just won't render
@@ -528,7 +532,8 @@ export function LandingPage() {
       ) : featured ? (
         <LobbyHero
           file={featured}
-          meta={featuredMeta}
+          posterUrl={featuredPosterUrl}
+          title={featuredFolderName}
           folderId={featuredFolderId}
         />
       ) : null}

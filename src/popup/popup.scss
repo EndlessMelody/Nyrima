@@ -366,7 +366,22 @@ button {
   justify-content: center;
   flex-shrink: 0;
   opacity: 0.85;
+  overflow: hidden;
   transition: opacity 160ms ease, border-color 160ms ease;
+}
+
+/* When a real Poster.* image is present, the thumb becomes a tiny library
+ * card. Drop the inner gradient + sakura padding so the image fills the
+ * full 44×44 slot; the brand-tinted border on hover frames it cleanly. */
+.dc-pop-thumb.has-cover {
+  background: var(--page-background);
+}
+
+.dc-pop-thumb.has-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .dc-pop-item:hover .dc-pop-thumb {
@@ -544,17 +559,10 @@ button {
   }
 }
 
-/* Scrollbar — keep the popup's vertical overflow subtle */
+/* The popup pulls in anime-theme.scss too, so the global themed scrollbar
+ * (gradient thumb + neon glow) applies here automatically. Only the rail
+ * width gets tightened — at 360px popup width a 6px rail keeps from
+ * eating into the row layout. */
 .dc-pop::-webkit-scrollbar {
   width: 6px;
-}
-.dc-pop::-webkit-scrollbar-track {
-  background: transparent;
-}
-.dc-pop::-webkit-scrollbar-thumb {
-  background: var(--brand-alpha-medium);
-  border-radius: 999px;
-}
-.dc-pop::-webkit-scrollbar-thumb:hover {
-  background: var(--brand-alpha-strong);
 }

@@ -7,6 +7,7 @@ import { AppShell } from "./components/AppShell";
 import { DriveDebugPanel } from "./components/DriveDebugPanel";
 import { SharingHost } from "./components/SharingHost";
 import { useDevModeStore } from "./services/drive/dev-mode";
+import { runMalPosterMigration } from "./services/mal-poster-migration";
 
 // Player pulls in EBML, MSE controller, JASSUB (libass), and the MKV
 // subtitle pipeline — none of which the lobby needs. Splitting it out keeps
@@ -20,6 +21,10 @@ export function App() {
   const loadDevMode = useDevModeStore((s) => s.load);
   useEffect(() => {
     void loadDevMode();
+    // One-shot boot migration: drop the legacy MAL poster cache and scrub
+    // stale MAL-origin cover URLs off existing RecentFolder records, so
+    // upgraded installs don't render dead links until the next enrichment.
+    void runMalPosterMigration();
   }, [loadDevMode]);
 
   return (

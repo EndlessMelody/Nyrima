@@ -39,16 +39,11 @@
   }
 }
 
-/* Scrollbar styling */
+/* Tighter rail for the User Center panel — the surface is a slim sidebar
+ * so a 6px scrollbar keeps the gradient legible without crowding the
+ * settings rows. Thumb gradient + glow inherited from anime-theme.scss. */
 .dc-uc::-webkit-scrollbar {
-  width: 4px;
-}
-.dc-uc::-webkit-scrollbar-track {
-  background: transparent;
-}
-.dc-uc::-webkit-scrollbar-thumb {
-  background: var(--neutral-alpha-weak);
-  border-radius: 2px;
+  width: 6px;
 }
 
 /* ── Identity ──────────────────────────────────────────────────── */

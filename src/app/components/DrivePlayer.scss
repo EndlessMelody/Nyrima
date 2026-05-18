@@ -828,15 +828,13 @@
   padding: 8px;
   max-height: min(72vh, 560px);
   overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--brand-alpha-strong) transparent;
 
+  /* Tighter rail for the in-player settings menu — the surface is dark and
+   * compact, so a 6px scrollbar keeps the gradient legible without ever
+   * dominating the menu rows. Thumb gradient + glow inherited from the
+   * global rule in anime-theme.scss. */
   &::-webkit-scrollbar {
     width: 6px;
-  }
-  &::-webkit-scrollbar-thumb {
-    background: var(--brand-alpha-medium);
-    border-radius: 3px;
   }
 }
 

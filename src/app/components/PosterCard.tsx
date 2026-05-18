@@ -5,17 +5,20 @@
  *   - "poster"   → 2:3 portrait (library grid, suggestions).
  *   - "backdrop" → 16:9 landscape (continue-watching scroll row).
  *
- * Lazy-loads MAL/Jikan poster via poster-resolver; falls back to Drive's
- * thumbnailLink; final fallback is a gradient tile with the Nyrima mark.
- * Parent can short-circuit the per-card fetch by passing `meta` from a
- * page-level bulk resolve.
+ * Image source order:
+ *   - "backdrop" → Drive frame thumbnail → folder poster → initials.
+ *   - "poster"   → folder poster → Drive frame thumbnail → initials.
+ *
+ * The folder poster (`seriesPosterUrl`) is resolved once at the page level
+ * from the user-placed `Poster.{jpg,png,…}` file; this card no longer
+ * touches any external API. The displayed title is always built from the
+ * filename + folder name via the shared title parser.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import cn from "classnames";
-import type { DriveFile, MovieMetadata } from "@shared/types";
-import { resolvePoster } from "../services/poster-resolver";
+import type { DriveFile } from "@shared/types";
 import { normalizeMovieTitle, parseTitle } from "@shared/title-parser";
 import {
   playbackProgressPct,
@@ -31,18 +34,13 @@ export type PosterCardVariant = "poster" | "backdrop";
 interface Props {
   file: DriveFile;
   folderId?: string;
-  /** Parent-folder name. Forwarded to the resolver so episodic filenames like
-   *  `[GS]01.mkv` resolve via the series name instead of the bare episode
-   *  number. */
+  /** Parent-folder name. Used by the title parser to render
+   *  "Series - EpNN" instead of the bare filename. */
   folderName?: string;
   variant?: PosterCardVariant;
-  /** When provided, skips the per-card Jikan fetch. */
-  meta?: MovieMetadata | null;
-  /** Series-level poster URL (resolved once per library by the parent).
-   *  When present, the per-card Jikan fetch is skipped — the card relies
-   *  on Drive's frame thumbnail with this as the fallback, which is the
-   *  user-facing rule "use the file's thumbnail if it has one, otherwise
-   *  use the series poster". */
+  /** Folder-level poster URL (the user-placed `Poster.*` in the library).
+   *  Used as the portrait artwork and as fallback for backdrop tiles when
+   *  the file has no Drive frame thumbnail. */
   seriesPosterUrl?: string;
   playbackPosition?: {
     positionSeconds: number;
@@ -56,75 +54,36 @@ export function PosterCard({
   folderId,
   folderName,
   variant = "poster",
-  meta: externalMeta,
   seriesPosterUrl,
   playbackPosition,
   watched,
 }: Props) {
   const navigate = useNavigate();
-  const [fetchedMeta, setFetchedMeta] = useState<MovieMetadata | null>(null);
   const [imgLoaded, setImgLoaded] = useState(false);
   // Right-click context menu — { x, y } in viewport space when open.
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-
-  const meta = externalMeta ?? fetchedMeta;
 
   const cleaned = useMemo(
     () => normalizeMovieTitle(file.name),
     [file.name],
   );
 
-  useEffect(() => {
-    // Skip the per-card Jikan fetch when:
-    //   - the parent supplied an explicit meta (page-level bulk resolve), or
-    //   - the parent supplied a series poster (whole library resolved once), or
-    //   - we have a folder context at all (the per-file resolve would query
-    //     a bare "01" / "02" filename, which Jikan matches to whatever random
-    //     anime contains those digits — Digimon Adventure 02, Kikaider 01,
-    //     07-Ghost. Without folder context the result is noise, so refuse
-    //     to fire it and let the cleaned filename serve as the title).
-    if (externalMeta || seriesPosterUrl || folderName) {
-      // Clear any stale per-file fetched meta so a previous render's title
-      // ("Digimon Adventure 02") doesn't survive when the parent later
-      // upgrades us with seriesPosterUrl.
-      if (fetchedMeta) setFetchedMeta(null);
-      return;
-    }
-    let mounted = true;
-    void (async () => {
-      const m = await resolvePoster(file, folderName);
-      if (mounted) setFetchedMeta(m);
-    })();
-    return () => {
-      mounted = false;
-    };
-    // fetchedMeta intentionally omitted from deps — including it would
-    // re-fire this effect after setFetchedMeta(null) and loop.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file, folderName, externalMeta, seriesPosterUrl]);
-
   // Image priority differs by aspect ratio:
   //   - "backdrop" (16:9 rows like ContinueWatching, list view) prefers
   //     Drive's frame thumbnail so the user sees the *actual scene* rather
-  //     than the same series cover twelve times. Falls back to the series
-  //     poster, then the per-card MAL hit.
-  //   - "poster" (2:3 grid tiles) keeps the series poster first — Drive's
+  //     than the same folder cover twelve times. Falls back to the folder
+  //     poster.
+  //   - "poster" (2:3 grid tiles) keeps the folder poster first — Drive's
   //     16:9 thumbnail looks wrong cropped to portrait.
   const thumbUrl =
     variant === "backdrop"
-      ? file.thumbnailLink ||
-        seriesPosterUrl ||
-        meta?.backdropUrl ||
-        meta?.posterUrl
-      : seriesPosterUrl || meta?.posterUrl || file.thumbnailLink;
+      ? file.thumbnailLink || seriesPosterUrl
+      : seriesPosterUrl || file.thumbnailLink;
 
-  // Display title — episodes inside a known series should NEVER use the MAL
-  // title field. `meta.title` is the *series* name ("Gimai Seikatsu"), which
-  // would repeat across every episode card and provides no information.
-  // With folder context we build "Gimai Seikatsu - Ep01" via the parser.
-  // Without folder context (rare: cards rendered outside a library page) we
-  // fall back to MAL → cleaned filename.
+  // Display title — episodes inside a known series get the parser-built
+  // "Series - EpNN" form. Without folder context (rare: cards rendered
+  // outside a library page) we fall back to the cleaned filename.
   const displayTitle = useMemo(() => {
     if (folderName) {
       try {
@@ -134,11 +93,11 @@ export function PosterCard({
         });
         return parsed.fullTitle || parsed.cleanedFileName || cleaned.title;
       } catch {
-        // ignore — fall through to MAL/cleaned
+        // ignore — fall through to cleaned filename
       }
     }
-    return meta?.title || cleaned.title;
-  }, [folderName, file.name, meta?.title, cleaned.title]);
+    return cleaned.title;
+  }, [folderName, file.name, cleaned.title]);
 
   const progressPct = playbackProgressPct(playbackPosition);
 

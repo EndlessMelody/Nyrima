@@ -35,6 +35,16 @@
     "Geist Mono", "Zen Kaku Gothic New", "Hiragino Kaku Gothic ProN",
     "Yu Gothic", sans-serif;
 
+  /* Wordmark: only used for the "Nyrima" lockup in the AppShell topbar (and
+     anywhere else the brand-name lockup repeats). M PLUS Rounded 1c at 800
+     is the iconic chunky-rounded Japanese title face — its heavy strokes
+     carry the animated pink↔cyan gradient + neon drop-shadow halo
+     cleanly. Falls back through the standard sans stack so dev / SSR
+     contexts that haven't loaded the woff2 still render a readable mark. */
+  --dc-font-wordmark:
+    "M PLUS Rounded 1c", "Zen Kaku Gothic New", "Hiragino Kaku Gothic ProN",
+    "Yu Gothic", system-ui, sans-serif;
+
   /* Subtitle: anime-fansub voice — system Comic Sans MS where present
      (Windows/macOS, full Vietnamese coverage), Comic Neue (bundled) as the
      cross-OS clone. "Itim" is included with a Vietnamese-only unicode-range

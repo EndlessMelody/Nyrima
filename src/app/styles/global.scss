@@ -36,24 +36,9 @@ button {
   font: inherit;
 }
 
-/* Custom scrollbar — uses theme tokens so it adapts to the active palette */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--neutral-alpha-medium);
-  border-radius: 999px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--neutral-alpha-strong);
-}
+/* Scrollbars live in anime-theme.scss as a single themed block. Keeping
+ * them there means light/dark palette swaps update the gradient
+ * automatically and we don't fight a duplicate rule for specificity. */
 
 /* Page wrapper used by AppShell — 1280px max-width with generous vertical */
 /* breathing room. Keep horizontal padding modest so hairline dividers feel */

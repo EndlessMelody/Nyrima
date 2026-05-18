@@ -163,17 +163,66 @@
   opacity: 0;
 }
 
+/* Anime-style brand wordmark — chunky rounded face with a slow-flowing
+ * pink↔cyan gradient and a soft neon halo. The gradient is painted by
+ * clipping a wider linear-gradient to the glyphs (`background-clip: text`),
+ * sized at 200% so animating `background-position` cycles the band across
+ * the letterforms without ever clipping at the edges. Two layered
+ * `drop-shadow` filters apply a brand-pink + accent-cyan bloom; using
+ * `filter` (not `text-shadow`) lets the halo respect the per-glyph alpha
+ * from `background-clip`, so the glow follows the gradient's hue.
+ * Reduced-motion users get the static rendering. */
 .dc-shell__name {
-  font-family: var(--dc-font-display);
-  font-size: 0.9375rem; /* 15px */
-  font-weight: 500;
-  letter-spacing: -0.02em;
-  color: var(--neutral-on-background-strong);
+  font-family: var(--dc-font-wordmark);
+  font-size: 1.0625rem; /* 17px — a hair larger to balance the new weight */
+  font-weight: 800;
+  letter-spacing: -0.01em;
   white-space: nowrap;
+  background: linear-gradient(
+    100deg,
+    var(--brand-on-background-strong) 0%,
+    var(--accent-on-background-strong) 45%,
+    var(--brand-on-background-strong) 100%
+  );
+  background-size: 220% 100%;
+  background-position: 0% 50%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  filter:
+    drop-shadow(0 0 10px var(--brand-alpha-medium))
+    drop-shadow(0 0 4px var(--accent-alpha-medium));
+  animation: ny-wordmark-flow 7s ease-in-out infinite;
+  will-change: background-position;
 }
 
+/* Reset the accent span — the gradient already does the colour work, and
+ * leaving the accent's own colour would re-paint "ma" with a solid fill,
+ * breaking the flowing effect on the back half of the word. */
 .dc-shell__name-accent {
-  color: var(--brand-on-background-strong);
+  color: inherit;
+  -webkit-text-fill-color: inherit;
+  background: inherit;
+}
+
+@keyframes ny-wordmark-flow {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dc-shell__name {
+    animation: none;
+    background-position: 0% 50%;
+  }
 }
 
 .dc-shell__nav {

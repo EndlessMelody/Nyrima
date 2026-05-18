@@ -3,11 +3,12 @@
  * video or library.
  *
  * Target inference: reads the current URL via react-router's useLocation.
- *   - `/play/:folderId/:fileId` → video target. Title + poster pulled from
- *     getFileMetadata + the metadata-cache (no extra Jikan call; we settle
- *     for "miss" if uncached).
+ *   - `/play/:folderId/:fileId` → video target. Title from the file's name,
+ *     poster from the parent folder's `Poster.{jpg,png,…}` (or the Drive
+ *     frame thumbnail when that's missing).
  *   - `/library/:folderId`      → library target. Title from
- *     getFileMetadata + poster via resolveSeriesPoster.
+ *     getFileMetadata + poster from the folder's `Poster.*` (with the same
+ *     one-level-up parent fallback the rest of the app uses).
  *   - Anywhere else             → empty state with a hint to open something.
  *
  * The composer is a single-step Dialog (no wizard) — caption textbox,
@@ -30,8 +31,7 @@ import {
 } from "@once-ui-system/core/components";
 import { useSharingStore } from "../stores/sharing-store";
 import { getFileMetadata } from "../services/drive/metadata-service";
-import { resolveSeriesPoster } from "../services/poster-resolver";
-import { getCached } from "../services/metadata-cache";
+import { resolveFolderPoster } from "../services/folder-poster";
 import { MAX_SHARE_CAPTION_CHARS } from "@shared/constants";
 import { driveFolderUrl } from "@shared/drive-urls";
 import type {
@@ -395,28 +395,36 @@ async function resolveTargetFromPath(
   if (play) {
     const file = await getFileMetadata(play.fileId, { priority: "normal" })
       .catch(() => null);
-    const cached = await getCached(play.fileId).catch(() => undefined);
+    // For a video share the poster snapshot is the parent folder's cover,
+    // not the per-file thumbnail — the recipient should see what the *show*
+    // looks like, not a single frame from one episode. Fall through to the
+    // Drive frame thumbnail when the folder has no Poster.* placed.
+    const folderPoster = play.folderId
+      ? await resolveFolderPoster(play.folderId).catch(() => null)
+      : null;
     return {
       target: {
         kind: "video",
         fileId: play.fileId,
         folderId: play.folderId,
       },
-      title: bestVideoTitle(file, cached?.title),
-      posterUrl: cached?.posterUrl ?? file?.thumbnailLink,
+      title: bestVideoTitle(file),
+      posterUrl: folderPoster?.url ?? file?.thumbnailLink,
     };
   }
   const lib = matchLibrary(pathname);
   if (lib) {
     const folder = await getFileMetadata(lib.folderId, { priority: "normal" })
       .catch(() => null);
-    const seriesMeta = folder?.name
-      ? await resolveSeriesPoster(folder.name).catch(() => null)
-      : null;
+    const parentId = folder?.parents?.[0];
+    const folderPoster = await resolveFolderPoster(
+      lib.folderId,
+      parentId,
+    ).catch(() => null);
     return {
       target: { kind: "library", folderId: lib.folderId },
       title: folder?.name ?? "Library",
-      posterUrl: seriesMeta?.posterUrl ?? folder?.thumbnailLink,
+      posterUrl: folderPoster?.url ?? folder?.thumbnailLink,
     };
   }
   return null;
@@ -439,8 +447,7 @@ function matchLibrary(pathname: string): { folderId: string } | null {
   return { folderId: decodeURIComponent(m[1]) };
 }
 
-function bestVideoTitle(file: DriveFile | null, metaTitle?: string): string {
-  if (metaTitle) return metaTitle;
+function bestVideoTitle(file: DriveFile | null): string {
   if (file?.name) {
     // Strip extension for a cleaner display.
     const dot = file.name.lastIndexOf(".");

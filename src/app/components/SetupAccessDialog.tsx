@@ -246,7 +246,7 @@ export function SetupAccessDialog({ isOpen, onClose, onSaved }: Props) {
           }}
         />
 
-        {/* Anime metadata note */}
+        {/* Library posters — manual */}
         <Column
           gap="8"
           padding="12"
@@ -254,36 +254,13 @@ export function SetupAccessDialog({ isOpen, onClose, onSaved }: Props) {
           background="surface"
           border="brand-alpha-weak"
         >
-          <Text variant="body-strong-s">
-            Anime metadata — automatic
-          </Text>
+          <Text variant="body-strong-s">Library posters — manual</Text>
           <Text variant="body-default-xs" onBackground="neutral-weak">
-            Posters and series info come from{" "}
-            <a
-              href="https://myanimelist.net"
-              target="_blank"
-              rel="noreferrer"
-              style={{
-                color: "var(--brand-on-background-strong)",
-                textDecoration: "underline",
-              }}
-            >
-              MyAnimeList
-            </a>{" "}
-            via the public{" "}
-            <a
-              href="https://jikan.moe"
-              target="_blank"
-              rel="noreferrer"
-              style={{
-                color: "var(--brand-on-background-strong)",
-                textDecoration: "underline",
-              }}
-            >
-              Jikan
-            </a>{" "}
-            API. No account or API key needed — results are cached locally for
-            30 days.
+            Drop a <code>Poster.jpg</code> or <code>Poster.png</code> into
+            each library folder on Drive and Nyrima will use it as the
+            cover. Season subfolders inherit their parent show's poster
+            when they don't carry their own. No third-party service is
+            contacted.
           </Text>
         </Column>
 
@@ -300,8 +277,8 @@ export function SetupAccessDialog({ isOpen, onClose, onSaved }: Props) {
 
         <Text variant="body-default-xs" onBackground="neutral-weak">
           Your Google key is stored locally (chrome.storage.local) and sent
-          only to googleapis.com. Anime lookups go to api.jikan.moe with the
-          filename only — no personal data.
+          only to googleapis.com. Posters come from images you place in
+          your own Drive folders — no third-party network calls.
         </Text>
       </Column>
     </Dialog>

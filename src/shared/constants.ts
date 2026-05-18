@@ -19,10 +19,11 @@ export const STORAGE_KEYS = {
   USER_PROFILE: "dc.userProfile",
   PLAYBACK_STATE: "dc.playbackState",
   SETTINGS: "dc.settings",
-  // v3: folder-keyed series resolver + similarity-scored Jikan picks
-  // (2026-05-17). Bumped to evict the v2 per-file entries that still
-  // contained the bare-episode-number misses (Kikaider 01, Digimon 02,
-  // 07-Ghost) plus the wrong "Bokutachi no Remake" relevance result.
+  /** Legacy MAL/Jikan poster cache. Removed on 2026-05-18 in favour of
+   *  user-placed `Poster.{jpg,png,…}` files inside each Drive folder. The
+   *  key stays here so the boot-time migration can purge any stale entry
+   *  on existing installs. Safe to drop entirely once all clients have
+   *  rolled past the migration marker. */
   METADATA_CACHE: "dc.metadataCache.v3",
   OAUTH_CLIENT_ID: "dc.oauthClientId",
   /** Per-file last-known playback mode (native vs mse-remux) for MKV files. */

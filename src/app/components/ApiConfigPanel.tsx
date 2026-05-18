@@ -124,17 +124,13 @@ export function ApiConfigPanel() {
       <div className="dc-api-cfg__divider" />
 
       <div className="dc-api-cfg__section">
-        <div className="dc-api-cfg__label">Anime metadata</div>
+        <div className="dc-api-cfg__label">Library posters</div>
         <p className="dc-api-cfg__desc">
-          Posters and series info are fetched from{" "}
-          <a href="https://myanimelist.net" target="_blank" rel="noreferrer">
-            MyAnimeList
-          </a>{" "}
-          via the public{" "}
-          <a href="https://jikan.moe" target="_blank" rel="noreferrer">
-            Jikan
-          </a>{" "}
-          API. No key required — results are cached locally for 30 days.
+          Library covers come from a <code>Poster.jpg</code> or{" "}
+          <code>Poster.png</code> placed in each Drive folder. Drop one in
+          and it appears here automatically — no external service is
+          contacted. Season subfolders inherit their parent show's poster
+          when they don't carry their own.
         </p>
       </div>
 

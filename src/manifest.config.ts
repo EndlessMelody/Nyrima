@@ -62,13 +62,6 @@ export default defineManifest({
     "https://drive.google.com/*",
     "https://www.googleapis.com/*",
     "https://content.googleapis.com/*",
-    // MyAnimeList metadata via the public Jikan v4 API. Posters come back from
-    // multiple hosts depending on the entry: `cdn.myanimelist.net` for most
-    // titles, the bare `myanimelist.net` for a few older entries that haven't
-    // been migrated to the CDN. Whitelist both so neither path is blocked.
-    "https://api.jikan.moe/*",
-    "https://cdn.myanimelist.net/*",
-    "https://myanimelist.net/*",
   ],
 
   // `oauth2` is intentionally not declared. BYOK auth runs through
@@ -103,16 +96,15 @@ export default defineManifest({
       [
         "script-src 'self' 'wasm-unsafe-eval'",
         "object-src 'self'",
-        "connect-src 'self' https://www.googleapis.com https://content.googleapis.com https://oauth2.googleapis.com https://api.jikan.moe",
+        "connect-src 'self' https://www.googleapis.com https://content.googleapis.com https://oauth2.googleapis.com",
         // Drive occasionally redirects ranged media requests to googleusercontent
         // or drive.google.com mirrors; allow them under media-src to avoid silent
         // CSP blocks during playback.
         "media-src 'self' blob: https://www.googleapis.com https://content.googleapis.com https://*.googleusercontent.com https://drive.google.com",
-        // MAL serves posters from both `cdn.myanimelist.net` (CDN) and the bare
-      // `myanimelist.net` (legacy entries). The `*.myanimelist.net` wildcard
-      // does NOT match the apex domain in CSP, so the bare host has to be
-      // listed explicitly.
-      "img-src 'self' data: blob: https://*.googleusercontent.com https://*.google.com https://www.googleapis.com https://*.myanimelist.net https://myanimelist.net",
+        // Folder posters are served from Drive's image thumbnail CDN
+        // (lh3.googleusercontent.com et al). No third-party image hosts
+        // are needed now that MAL is out of the pipeline.
+        "img-src 'self' data: blob: https://*.googleusercontent.com https://*.google.com https://www.googleapis.com",
       ].join("; ") + ";",
   },
 });

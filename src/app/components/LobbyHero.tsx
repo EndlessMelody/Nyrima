@@ -2,15 +2,21 @@
  * LobbyHero — featured-video hero for the lobby.
  *
  * Backdrop image at 16:7, gradient overlay to navy on the left, content stack
- * with eyebrow, title, overview, meta row, and a Play button. The whole hero
- * is a single semantic button so screen readers don't see a nested
+ * with eyebrow, title, meta row, and a Play button. The whole hero is a
+ * single semantic button so screen readers don't see a nested
  * button-inside-a-button pattern; the visible Play pill is just a styled
  * highlight inside the same click target.
+ *
+ * Title source: the caller passes the *folder name* (the show / library
+ * name) — that's what the user wants to see for "what's featured", not the
+ * filename of the random episode the rotator picked. The filename's
+ * cleaned title is kept as a defensive fallback in case the folder name
+ * hasn't loaded yet.
  */
 
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import type { DriveFile, MovieMetadata } from "@shared/types";
+import type { DriveFile } from "@shared/types";
 import { normalizeMovieTitle } from "@shared/title-parser";
 import { formatRuntimeFromMillis } from "../services/formatters";
 import { HeroSkeleton } from "./HeroSkeleton";
@@ -18,12 +24,22 @@ import "./LobbyHero.scss";
 
 interface Props {
   file: DriveFile | null;
-  meta: MovieMetadata | null;
+  /** Folder cover poster URL (the user-placed `Poster.*` in the folder).
+   *  Used as the backdrop when the file has no Drive frame thumbnail. */
+  posterUrl?: string;
+  /** Display title — typically the folder / library name. */
+  title?: string;
   folderId: string;
   loading?: boolean;
 }
 
-export function LobbyHero({ file, meta, folderId, loading }: Props) {
+export function LobbyHero({
+  file,
+  posterUrl,
+  title,
+  folderId,
+  loading,
+}: Props) {
   const navigate = useNavigate();
 
   const cleaned = useMemo(
@@ -35,17 +51,13 @@ export function LobbyHero({ file, meta, folderId, loading }: Props) {
     return <HeroSkeleton />;
   }
 
-  const title = meta?.title || cleaned.title;
-  const year = meta?.year;
-  const overview = meta?.overview;
+  const displayTitle = title || cleaned.title;
   // Backdrop preference: Drive's actual frame from the featured episode
-  // (cinematic) > MAL backdrop (rare, Jikan doesn't return one) > MAL
-  // series poster (square but at least matched to the right show). The
-  // poster fallback ensures the hero never renders empty when Drive has
-  // no thumbnailLink for the picked file.
-  const backdrop =
-    file.thumbnailLink || meta?.backdropUrl || meta?.posterUrl;
-  const quality = meta?.quality || cleaned.quality;
+  // (cinematic) > the folder's Poster.* (square but matched to the show).
+  // The poster fallback ensures the hero never renders empty when Drive
+  // has no thumbnailLink for the picked file.
+  const backdrop = file.thumbnailLink || posterUrl;
+  const quality = cleaned.quality;
   const resolution = file.videoMediaMetadata
     ? `${file.videoMediaMetadata.width ?? "?"}×${file.videoMediaMetadata.height ?? "?"}`
     : undefined;
@@ -64,7 +76,7 @@ export function LobbyHero({ file, meta, folderId, loading }: Props) {
       type="button"
       className="ny-hero ny-focusable"
       onClick={handlePlay}
-      aria-label={`Play ${title}`}
+      aria-label={`Play ${displayTitle}`}
     >
       <div className="ny-hero__backdrop">
         {backdrop ? (
@@ -83,11 +95,9 @@ export function LobbyHero({ file, meta, folderId, loading }: Props) {
 
       <div className="ny-hero__content">
         <span className="ny-hero__eyebrow">NYRIMA · FEATURED</span>
-        <h2 className="ny-hero__title">{title}</h2>
-        {overview && <p className="ny-hero__overview">{overview}</p>}
+        <h2 className="ny-hero__title">{displayTitle}</h2>
 
         <div className="ny-hero__meta">
-          {year && <span>{year}</span>}
           {runtime && <span>{runtime}</span>}
           {quality && <span className="ny-hero__pill">{quality}</span>}
           {resolution && <span>{resolution}</span>}

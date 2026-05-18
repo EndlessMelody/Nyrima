@@ -7,7 +7,7 @@
  */
 
 import { useMemo } from "react";
-import type { DriveFile, MovieMetadata, PlaybackPosition } from "@shared/types";
+import type { DriveFile, PlaybackPosition } from "@shared/types";
 import { isInProgress } from "../services/storage";
 import { PosterCard } from "./PosterCard";
 import "./ContinueWatchingRow.scss";
@@ -16,15 +16,16 @@ interface Props {
   videos: DriveFile[];
   folderId?: string;
   positions: Record<string, PlaybackPosition>;
-  /** Optional bulk-resolved metadata keyed by fileId. */
-  metaByFileId?: Record<string, MovieMetadata>;
+  /** Folder-level poster URL — used as fallback art when a file has no
+   *  Drive frame thumbnail. */
+  seriesPosterUrl?: string;
 }
 
 export function ContinueWatchingRow({
   videos,
   folderId,
   positions,
-  metaByFileId,
+  seriesPosterUrl,
 }: Props) {
   const items = useMemo(() => {
     return videos
@@ -48,7 +49,7 @@ export function ContinueWatchingRow({
             file={file}
             folderId={folderId ?? pos.folderId}
             variant="backdrop"
-            meta={metaByFileId?.[file.id]}
+            seriesPosterUrl={seriesPosterUrl}
             playbackPosition={{
               positionSeconds: pos.positionSeconds,
               durationSeconds: pos.durationSeconds,

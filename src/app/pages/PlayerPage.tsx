@@ -72,7 +72,7 @@ import {
 } from "../services/playback-strategy";
 import { PlayerLayout } from "../components/PlayerLayout";
 import { PlaylistSidebar } from "../components/PlaylistSidebar";
-import { getManyCached } from "../services/metadata-cache";
+import { resolveFolderPoster } from "../services/folder-poster";
 import { debugLog } from "../services/debug-log";
 import { NyrimaMark } from "../components/NyrimaMark";
 import {
@@ -129,6 +129,17 @@ export function PlayerPage() {
 
   const blobUrlRef = useRef<string | null>(null);
   const lastSaveRef = useRef<number>(0);
+  /** Live <video> element handed up from DrivePlayer via `onVideoElement`.
+   *  Used by `handleScreenshot` to grab the current frame; we keep the ref
+   *  separate from the MSE-owning `onVideoRef` path so a future feature
+   *  toggling MSE doesn't blow away the screenshot capability. */
+  const videoElRef = useRef<HTMLVideoElement | null>(null);
+  /** Transient feedback for the screenshot button: shown for ~1.6s after a
+   *  click so the user gets confirmation (or a security-block hint) without
+   *  needing a toast system. */
+  const [screenshotStatus, setScreenshotStatus] = useState<
+    "idle" | "saved" | "blocked" | "error"
+  >("idle");
   const mseControllerRef = useRef<MkvMseController | null>(null);
   const mkvHeaderRef = useRef<{ buf: Uint8Array; fileSize: number } | null>(
     null,
@@ -249,6 +260,21 @@ export function PlayerPage() {
         if (cancelled) return;
         setFile(video);
         if (folder?.name) setFolderName(folder.name);
+
+        // Resume position MUST be set before `setStreamUrl` below — otherwise
+        // DrivePlayer mounts with `initialSeek=0`, its `loadedmetadata`
+        // handler captures that zero in a stable-closure `useEffect([])`,
+        // and the resume pill never fires even after `initialSeek` updates
+        // on a subsequent render. Skipped on `?restart=1` (the lobby's
+        // Restart button) and below the 5s minimum (too short to be worth
+        // resuming over the standard start-from-zero behavior).
+        if (!restartRequested && saved && saved.positionSeconds > 5) {
+          setInitialSeek(saved.positionSeconds);
+        } else {
+          // Explicit reset so an autoplay-next jump from a partially-watched
+          // episode to a fresh one doesn't carry the previous offset over.
+          setInitialSeek(0);
+        }
 
         // When the parent is a recognized season folder (Kan / Zoku /
         // Season 2 / …), the *show* name lives one level higher. Resolve it
@@ -529,17 +555,10 @@ export function PlayerPage() {
           });
         }
 
-        // Resume position (came in from the parallel fetch above). Skipped
-        // when the caller navigated here with `?restart=1` (the lobby's
-        // Restart button on the Continue Watching hero).
-        if (
-          !cancelled &&
-          !restartRequested &&
-          saved &&
-          saved.positionSeconds > 5
-        ) {
-          setInitialSeek(saved.positionSeconds);
-        }
+        // Resume position is set earlier in this effect — before
+        // `setStreamUrl` — so DrivePlayer mounts with the correct
+        // `initialSeek` and its loadedmetadata handler observes a non-zero
+        // value on the very first fire.
       } catch (e) {
         if (!cancelled) reportError(e);
       }
@@ -649,6 +668,14 @@ export function PlayerPage() {
   }, [file]);
 
   // Throttled playback-position persistence.
+  //
+  // `folderId`, `name`, and `mimeType` are persisted on every tick (not
+  // just on the watched/unwatched menu paths) so the *first* save for a
+  // freshly opened episode already carries enough context for the lobby's
+  // ContinueHero to build a valid `/play/<folderId>/<fileId>` URL.
+  // Without these, `savePlaybackPosition`'s merge has nothing to merge
+  // into and writes a row with `folderId: undefined`, which surfaced as
+  // `/play//<fileId>` and a router warning.
   const handleTimeUpdate = useCallback(
     (t: number, d: number) => {
       if (!file || !d) return;
@@ -660,9 +687,12 @@ export function PlayerPage() {
         positionSeconds: t,
         durationSeconds: d,
         updatedAt: now,
+        name: file.name,
+        folderId,
+        mimeType: file.mimeType,
       });
     },
-    [file],
+    [file, folderId],
   );
 
   // When the <video> emits an error, the most common cause is that the
@@ -771,33 +801,30 @@ export function PlayerPage() {
       ? folderVideos[currentIndex + 1]
       : null;
 
-  // Look up cached MAL metadata for the current + next episode in one cache
-  // walk. `currentPosterUrl` feeds the DrivePlayer's ambient bloom; the
-  // next-episode poster powers the Next-up card. Cache-only (no network) —
-  // populated by the library page on visit; cold player URLs just fall back
-  // to the filename.
-  const [currentPosterUrl, setCurrentPosterUrl] = useState<string | undefined>();
-  const [nextPosterUrl, setNextPosterUrl] = useState<string | undefined>();
+  // Folder cover poster — the user-placed `Poster.{jpg,png,…}` in this
+  // library, or the parent library's poster when this is a season subfolder
+  // with none of its own. Used for both the ambient bloom behind the
+  // current episode AND the Next-up card; since both episodes live in the
+  // same folder, the same poster is correct for both.
+  const [folderPosterUrl, setFolderPosterUrl] = useState<string | undefined>();
   useEffect(() => {
-    let cancelled = false;
-    const ids = [fileId, nextVideo?.id].filter(
-      (s): s is string => typeof s === "string" && s.length > 0,
-    );
-    if (ids.length === 0) {
-      setCurrentPosterUrl(undefined);
-      setNextPosterUrl(undefined);
+    if (!folderId) {
+      setFolderPosterUrl(undefined);
       return;
     }
+    let cancelled = false;
     void (async () => {
-      const map = await getManyCached(ids);
-      if (cancelled) return;
-      setCurrentPosterUrl(fileId ? map[fileId]?.posterUrl : undefined);
-      setNextPosterUrl(nextVideo ? map[nextVideo.id]?.posterUrl : undefined);
+      // The folder listing was already pulled at player boot, so this is a
+      // cache hit unless the user navigated past the cache TTL.
+      const poster = await resolveFolderPoster(folderId);
+      if (!cancelled) setFolderPosterUrl(poster?.url);
     })();
     return () => {
       cancelled = true;
     };
-  }, [fileId, nextVideo]);
+  }, [folderId]);
+  const currentPosterUrl = folderPosterUrl;
+  const nextPosterUrl = folderPosterUrl;
 
   const nextDisplayTitle = useMemo(() => {
     if (!nextVideo) return undefined;
@@ -990,6 +1017,81 @@ export function PlayerPage() {
     window.open(driveFileUrl(file.id), "_blank");
   }
 
+  /**
+   * Capture the current video frame and download it as a PNG.
+   *
+   * Implementation notes:
+   *   - We draw the live <video> element straight onto a canvas at native
+   *     `videoWidth × videoHeight`. No re-scaling, so a 1080p stream yields
+   *     a 1920×1080 PNG.
+   *   - Canvas reads throw `SecurityError` when the video bytes are
+   *     cross-origin without CORS — that's the native-stream-via-DNR path
+   *     (Drive's media endpoint doesn't send Access-Control-Allow-Origin,
+   *     and the DNR-injected Authorization header conflicts with a
+   *     `crossOrigin="anonymous"` attribute). We catch that explicitly and
+   *     surface a "blocked" badge rather than failing silently.
+   *   - MSE mode + blob fallback both feed <video> from same-origin URLs
+   *     (`MediaSource` and `blob:` URIs respectively), so screenshots work
+   *     in those paths even when native streaming can't.
+   */
+  function handleScreenshot() {
+    const v = videoElRef.current;
+    if (!v || !file) return;
+    const w = v.videoWidth;
+    const h = v.videoHeight;
+    if (w === 0 || h === 0) {
+      setScreenshotStatus("error");
+      window.setTimeout(() => setScreenshotStatus("idle"), 1600);
+      return;
+    }
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        setScreenshotStatus("error");
+        window.setTimeout(() => setScreenshotStatus("idle"), 1600);
+        return;
+      }
+      ctx.drawImage(v, 0, 0, w, h);
+      // toBlob is async; it's also where the canvas-tainted SecurityError
+      // surfaces on cross-origin video bytes. Use the callback form so the
+      // error handler reaches it; toDataURL would have thrown synchronously
+      // but is heavier on memory for high-res frames.
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          setScreenshotStatus("error");
+          window.setTimeout(() => setScreenshotStatus("idle"), 1600);
+          return;
+        }
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = buildScreenshotFilename(
+          displayTitle || file.name,
+          v.currentTime,
+        );
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        // Revoke after a tick so the browser has time to start the download.
+        window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+        setScreenshotStatus("saved");
+        window.setTimeout(() => setScreenshotStatus("idle"), 1600);
+      }, "image/png");
+    } catch (e) {
+      // Most likely the "tainted canvas" SecurityError thrown by drawImage
+      // on cross-origin video bytes. Surface a distinct "blocked" state so
+      // the user understands it's not a transient error.
+      const msg = e instanceof Error ? e.message : String(e);
+      const tainted =
+        msg.includes("Tainted") || msg.includes("SecurityError");
+      setScreenshotStatus(tainted ? "blocked" : "error");
+      window.setTimeout(() => setScreenshotStatus("idle"), 1600);
+    }
+  }
+
   return (
     <div className={`ny-player-page${theater ? " is-theater" : ""}`}>
       <PlayerLayout
@@ -1007,6 +1109,9 @@ export function PlayerPage() {
                 onVideoRef={
                   isMkvMse && !isMkvNative ? handleVideoRef : undefined
                 }
+                onVideoElement={(el) => {
+                  videoElRef.current = el;
+                }}
                 nextVideo={nextAdapter}
                 prevVideo={prevAdapter}
                 onNext={handleNext}
@@ -1082,6 +1187,25 @@ export function PlayerPage() {
                     onClick={handleCopyLink}
                   >
                     Copy link
+                  </button>
+                  <button
+                    type="button"
+                    className="ny-btn ny-btn--ghost"
+                    onClick={handleScreenshot}
+                    disabled={screenshotStatus !== "idle"}
+                    title={
+                      screenshotStatus === "blocked"
+                        ? "Browser blocked the capture (cross-origin video). Screenshots only work in MSE or blob playback modes."
+                        : "Save the current frame as a PNG"
+                    }
+                  >
+                    {screenshotStatus === "saved"
+                      ? "Saved ✓"
+                      : screenshotStatus === "blocked"
+                        ? "Blocked"
+                        : screenshotStatus === "error"
+                          ? "Couldn't capture"
+                          : "Screenshot"}
                   </button>
                   <button
                     type="button"
@@ -1208,6 +1332,35 @@ function subtitleFormatFromExtension(ext: string): SubtitleTrack["format"] {
     return ext;
   }
   return "text";
+}
+
+/**
+ * Build a download filename for a screenshot. Format: `<title> - <timecode>.png`,
+ * with the title stripped of any container extension and the timecode rendered
+ * with `h_mm_ss_ms3` so it sorts naturally and survives Windows path rules
+ * (no colons, no slashes). Returns an opaque "screenshot.png" fallback when
+ * the title is empty so the download never lands with a bare extension.
+ */
+function buildScreenshotFilename(title: string, currentTimeSec: number): string {
+  const stem = (title || "")
+    .replace(/\.[^./\\]+$/, "")
+    .replace(/[\\/:*?"<>|]+/g, " ")
+    .trim();
+  const tc = formatTimecodeForFilename(currentTimeSec);
+  if (!stem) return `screenshot-${tc}.png`;
+  return `${stem} - ${tc}.png`;
+}
+
+/** `1h05m30s` / `4m17s` / `42s` — colon-free so Windows accepts it. */
+function formatTimecodeForFilename(sec: number): string {
+  if (!Number.isFinite(sec) || sec < 0) return "0s";
+  const total = Math.floor(sec);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const mm = String(m).padStart(2, "0");
+  const ss = String(s).padStart(2, "0");
+  return h > 0 ? `${h}h${mm}m${ss}s` : m > 0 ? `${m}m${ss}s` : `${s}s`;
 }
 
 // ---------------------------------------------------------------------------

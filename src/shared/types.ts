@@ -31,10 +31,14 @@ export interface RecentFolder {
   runtimeMs?: number;
   /** Count of videos with playback past the watched threshold. */
   watchedCount?: number;
-  /** Best-known cover image (typically a MAL/Jikan poster) so library cards
-   *  on the lobby can render a backdrop instead of the initials fallback. */
+  /** Best-known cover image for this folder — sourced from the user-placed
+   *  `Poster.{jpg,jpeg,png,webp}` inside the folder on Drive (or the
+   *  parent folder's poster when none exists locally). The library card on
+   *  the lobby renders this; falls back to the initials tile when absent. */
   coverPosterUrl?: string;
-  /** Optional Drive thumbnail file id (older field, retained for legacy data). */
+  /** Drive file id of the matched `Poster.*` image. Persisted alongside the
+   *  URL so a later visit can re-mint a fresh `thumbnailLink` via the
+   *  metadata cache when the cached URL signature has expired. */
   coverFileId?: string;
   /** Epoch ms of the newest video file's modifiedTime in this library, as
    *  observed during the most recent enrichment pass. Compared against
@@ -75,42 +79,6 @@ export interface PlaybackPosition {
   /** Parent folder id — for routing back to the library. */
   folderId?: string;
   mimeType?: string;
-}
-
-/**
- * Anime / media metadata resolved from MyAnimeList (via Jikan v4).
- *
- * The type name is historical — it covers anime series, OVAs, films, and
- * specials, not just movies. Jikan doesn't expose backdrop art, so
- * `backdropUrl` is always undefined for now; PosterCard falls back to the
- * poster image when the variant needs a 16:9 surface.
- *
- * `status` semantics:
- *   - "ok"     → Jikan returned a match; poster + metadata are usable.
- *   - "miss"   → Jikan returned no results for this filename (cached 7 days).
- *   - "no-key" → kept for backwards compatibility with cache entries written
- *                by the old TMDB-key pipeline. Treated like "miss" by readers.
- */
-export interface MovieMetadata {
-  fileId: string;
-  title: string;
-  year?: number;
-  overview?: string;
-  posterUrl?: string;
-  backdropUrl?: string;
-  quality?: string;
-  /** MyAnimeList ID — links back to the anime page on myanimelist.net. */
-  malId?: number;
-  /** Average user score (0–10) from MAL. */
-  score?: number;
-  /** Total episode count when known. Movies are `1`; unknown leaves undefined. */
-  episodes?: number;
-  /** "TV" | "Movie" | "OVA" | "ONA" | "Special" | "Music" — Jikan's anime type. */
-  mediaType?: string;
-  /** Up to 3 genre names; trimmed to keep the cache compact. */
-  genres?: string[];
-  status: "ok" | "miss" | "no-key";
-  fetchedAt: number;
 }
 
 /** Built-in subtitle font presets the picker exposes. "custom" means the
@@ -242,8 +210,9 @@ export interface ShareEntry {
   /** Optional caption / commentary by the author. Plain text only — no
    *  HTML or markdown rendering for safety + simplicity. */
   caption?: string;
-  /** Optional poster URL, snapshotted so the recipient renders something
-   *  before doing its own MAL resolve. Sourced from MAL or Drive thumbnail. */
+  /** Optional poster URL, snapshotted at share time so the recipient
+   *  renders something immediately. Sourced from the folder's `Poster.*`
+   *  image on Drive (or the Drive frame thumbnail as fallback). */
   posterUrl?: string;
   /** Display title at share time. Lets the recipient render a card
    *  immediately without resolving titles themselves. */

@@ -34,7 +34,25 @@
     .ny-player-layout__aside {
       display: none;
     }
+
+    // CSS Grid tracks aren't reflowed by `display: none` on a child — the
+    // 360px sidebar column above would still consume its slot and leave a
+    // blank gap to the right of the player. Collapse the grid to a single
+    // column in theater mode so the player fills the full row width.
+    .ny-player-layout {
+      grid-template-columns: 1fr;
+    }
   }
+}
+
+// Let the player breathe past the standard 1280px page cap when theater
+// mode is on, so toggling theater actually makes the video bigger instead
+// of just hiding the sidebar in place. We can't reach `.dc-page` from a
+// descendant selector (it's an ancestor), so the body `:has()` selector
+// scopes the override to the player page only.
+body:has(.ny-player-page.is-theater) .dc-page {
+  max-width: min(1600px, 100vw - 48px);
+  transition: max-width 240ms ease;
 }
 
 // When theatre mode is on, the app-shell header (rendered outside this page)

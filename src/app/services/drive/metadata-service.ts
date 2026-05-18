@@ -13,8 +13,11 @@
  *
  * What's NOT cached here:
  *   - Media bytes (Phase 3 / segment cache, separate)
- *   - MAL/Jikan poster lookups (existing metadata-cache.ts, separate concern)
  *   - Playback positions (chrome.storage.local, never stale)
+ *
+ * Folder posters live in the user's Drive folders as `Poster.{jpg,png,…}`
+ * files; they're resolved by `services/folder-poster.ts` on top of the same
+ * folder-scan cache below, so no separate poster cache is needed.
  */
 
 import { idbGet, idbPut, idbDelete, STORES } from "./idb";

@@ -98,7 +98,7 @@ export async function clearUserProfile(): Promise<void> {
 // PlayerPage saves a position every ~4 seconds during playback. The naive
 // pattern (full chrome.storage `get` + full `set` per save) marshals the
 // entire PlaybackMap as JSON twice per tick; with dozens of positions that
-// adds up. Mirror the metadata-cache shape: keep one in-memory map and flush
+// adds up. We coalesce: keep one in-memory map and flush
 // to chrome.storage on a coalesced micro-task. Multiple writes inside the
 // same tick collapse to a single `set`. A storage-onChanged listener keeps
 // the in-memory copy honest if another tab (or UserCenter "Clear history")

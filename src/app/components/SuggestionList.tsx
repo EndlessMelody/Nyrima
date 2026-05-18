@@ -16,11 +16,10 @@ interface Props {
   excludeFileId?: string;
   folderId?: string;
   /** Parent-folder display name. Required so each card's title resolves to
-   *  "Series - EpNN" via the parser instead of MAL guessing at the bare
-   *  episode number — without this, `[GS]07.mkv` shows up as "07-Ghost". */
+   *  "Series - EpNN" via the parser instead of just the bare filename. */
   folderName?: string;
-  /** Series poster — same series as all suggestions, so feeding it through
-   *  saves a Jikan call per card. */
+  /** Folder-level poster — same library as every suggestion, so callers
+   *  pass it once and the cards share the same artwork. */
   seriesPosterUrl?: string;
 }
 

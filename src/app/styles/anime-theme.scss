@@ -241,17 +241,50 @@
     0 0 0 1px rgba(255, 79, 216, 0.12), 0 8px 32px -16px rgba(0, 0, 0, 0.6);
 }
 
-/* ───────────────────────── Page background + texture ───────────────────── */
+/* ───────────────────────── Page background + texture ─────────────────────
+ *
+ * Three layers, painted bottom-up:
+ *
+ *   1. body background-color  → the solid page tint (Midnight navy / Pearl).
+ *   2. body background-image  → techno honeycomb grid. A pointy-top hex
+ *                                tile drawn as cyan polygon outlines at very
+ *                                low alpha. Sits at the very bottom so the
+ *                                radial blooms above can wash colored light
+ *                                over it; reads as faint sci-fi HUD scanlines
+ *                                rather than a competing pattern.
+ *   3. body::before           → neon pink top-left + cyan bottom-right radial
+ *                                blooms. Same colors as before; they sit on
+ *                                top of the hex layer to tint it.
+ *
+ * The hex tile is sized so each tile contains two full hexes + three partial
+ * hexes at the bottom row; their out-of-tile vertices get clipped to viewBox
+ * and resume in the adjacent tile, producing seamless tiling. Stroke at 1
+ * user-unit + background-size at the SVG's natural size keeps the strokes at
+ * 1px regardless of viewport so the grid stays crisp at any zoom.
+ */
 
 body {
-  background: var(--page-background);
+  background-color: var(--page-background);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='48.5' height='42' viewBox='0 0 48.5 42'><g fill='none' stroke='%2322d3ee' stroke-width='1' stroke-opacity='0.075'><polygon points='12.12,0 24.25,7 24.25,21 12.12,28 0,21 0,7'/><polygon points='36.37,0 48.5,7 48.5,21 36.37,28 24.25,21 24.25,7'/><polygon points='0,21 12.12,28 12.12,42 0,49 -12.12,42 -12.12,28'/><polygon points='24.25,21 36.37,28 36.37,42 24.25,49 12.12,42 12.12,28'/><polygon points='48.5,21 60.62,28 60.62,42 48.5,49 36.37,42 36.37,28'/></g></svg>");
+  background-repeat: repeat;
   background-attachment: fixed;
+  background-size: 48.5px 42px;
+  background-position: center;
   font-family: var(--dc-font-body);
   font-feature-settings: "ss01", "cv11", "tnum";
   letter-spacing: -0.005em;
 }
 
-/* Two subtle radial blooms — neon pink top-left, neon blue bottom-right. */
+/* Light theme — pearl base needs a darker line color since cyan at 7% on
+ * icy blush nearly vanishes. We swap to a deeper accent stroke; same tile
+ * geometry, just a different fill. */
+:root[data-theme="light"] body,
+:root:not([data-theme="dark"]) body {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='48.5' height='42' viewBox='0 0 48.5 42'><g fill='none' stroke='%230369a1' stroke-width='1' stroke-opacity='0.06'><polygon points='12.12,0 24.25,7 24.25,21 12.12,28 0,21 0,7'/><polygon points='36.37,0 48.5,7 48.5,21 36.37,28 24.25,21 24.25,7'/><polygon points='0,21 12.12,28 12.12,42 0,49 -12.12,42 -12.12,28'/><polygon points='24.25,21 36.37,28 36.37,42 24.25,49 12.12,42 12.12,28'/><polygon points='48.5,21 60.62,28 60.62,42 48.5,49 36.37,42 36.37,28'/></g></svg>");
+}
+
+/* Two subtle radial blooms — neon pink top-left, neon blue bottom-right.
+ * Painted above the hex grid so the blooms tint the lattice. */
 body::before {
   content: "";
   position: fixed;
@@ -457,18 +490,76 @@ button[class*="primary"],
   box-shadow: 0 0 8px var(--danger-solid-strong);
 }
 
+/* ───────────────────────── Themed scrollbars ─────────────────────────────
+ *
+ * Applied globally so every overflow container picks up the brand look.
+ * The thumb is a 135deg pink → cyan gradient (matches the primary-button
+ * chord and the AppShell wordmark), pinched inside a transparent 2px
+ * border via `background-clip: padding-box` so the gradient sits in a
+ * neat inset rather than rubbing against the scrollbar edges. Hover and
+ * active intensify the same gradient and add a soft neon halo.
+ *
+ * Per-surface tightening (popup, dropdowns, playlist) overrides the
+ * scrollbar's *width* via `::-webkit-scrollbar { width: … }` but does
+ * NOT override the thumb's `background`, so the gradient still applies
+ * — a narrower rail of pink-cyan glow instead of a thicker one.
+ *
+ * Firefox: `scrollbar-color` accepts a single thumb colour, not a
+ * gradient, so we hand it the brand pink with reasonable alpha so the
+ * scrollbar still reads as themed (just without the cyan fade).
+ */
+
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--neutral-alpha-medium);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--brand-on-background-medium) 70%, transparent) 0%,
+    color-mix(in srgb, var(--accent-on-background-medium) 70%, transparent) 100%
+  );
   border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition:
+    box-shadow 200ms ease,
+    background 200ms ease;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--neutral-alpha-strong);
+  background: linear-gradient(
+    135deg,
+    var(--brand-on-background-medium) 0%,
+    var(--accent-on-background-medium) 100%
+  );
+  background-clip: padding-box;
+  box-shadow:
+    0 0 8px var(--brand-alpha-medium),
+    0 0 16px var(--accent-alpha-weak);
+}
+
+::-webkit-scrollbar-thumb:active {
+  background: linear-gradient(
+    135deg,
+    var(--brand-on-background-strong) 0%,
+    var(--accent-on-background-strong) 100%
+  );
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--brand-alpha-strong) transparent;
 }
 
 ::selection {
