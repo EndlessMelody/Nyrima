@@ -81,22 +81,13 @@ export function LandingPage() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
-  // --- Keyboard shortcuts (theme 5) ---------------------------------------
-  // `/` focuses the lobby search; `Esc` clears the query when focused.
+  // `/` is owned globally by the TopbarSearch — typing slash anywhere
+  // focuses the topbar pill, which performs the same library-name match
+  // (plus people + shares) and is reachable from any route. We still keep
+  // `Esc` here so blurring the lobby filter clears it.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const target = e.target as HTMLElement | null;
-      const inField =
-        target &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.isContentEditable);
-      if (e.key === "/" && !inField) {
-        e.preventDefault();
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
-        return;
-      }
       if (e.key === "Escape" && target === searchInputRef.current && query) {
         e.preventDefault();
         setQuery("");
@@ -200,6 +191,13 @@ export function LandingPage() {
     const todo = adaptedFolders.filter((f) => {
       if (enrichingRef.current.has(f.id)) return false;
       if (f.videoCount == null) return true;
+      // Missing poster → enrich. Catches the post-migration case where
+      // a stale bad match was evicted from both the metadata cache and
+      // the RecentFolder record. The resolver is cache-fronted, so a
+      // legitimately MAL-less library only pays one Jikan call across
+      // the next 7 days (the miss-cache TTL) — subsequent enrich passes
+      // hit the cached miss and write nothing.
+      if (f.coverPosterUrl == null) return true;
       // Re-check stale folders so newly added Drive files surface eventually.
       const lastTouched = f.lastOpenedAt ?? 0;
       return now - lastTouched > STALE_MS;

@@ -17,6 +17,7 @@
 
 import type { ShareEntry } from "@shared/types";
 import {
+  deleteFile,
   downloadJsonFile,
   findChildByName,
   updateJsonFile,
@@ -70,6 +71,19 @@ export async function readShareEntry(
   reqOpts: RequestOptions = {},
 ): Promise<ShareEntry> {
   return downloadJsonFile<ShareEntry>(fileId, reqOpts);
+}
+
+/**
+ * Trash the entry JSON. Called by the Social hub's unshare action AFTER the
+ * index has been rewritten with the entry removed — keeping the index as the
+ * source-of-truth means a partial failure leaves a stale file under
+ * `entries/` (invisible to followers) rather than a dangling index pointer.
+ */
+export async function deleteShareEntry(
+  fileId: string,
+  reqOpts: RequestOptions = {},
+): Promise<void> {
+  await deleteFile(fileId, reqOpts);
 }
 
 /**

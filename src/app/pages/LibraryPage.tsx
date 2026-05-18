@@ -65,6 +65,21 @@ export function LibraryPage() {
     refresh,
   } = useLibraryStore();
   const upsertRecent = useRecentStore((s) => s.upsert);
+  const recentFolders = useRecentStore((s) => s.folders);
+  const loadRecents = useRecentStore((s) => s.load);
+  // Hydrate the recent-folders cache on mount so subfolder tiles can render
+  // their stored poster + episode count without each tile fetching itself.
+  useEffect(() => {
+    void loadRecents();
+  }, [loadRecents]);
+  /** Folder-id → cached stats. Lets the SubfolderTile render a thumbnail +
+   *  "12 EPS" line for any subfolder the user has previously visited, while
+   *  staying graceful for never-opened siblings. */
+  const recentById = useMemo(() => {
+    const m = new Map<string, (typeof recentFolders)[number]>();
+    for (const r of recentFolders) m.set(r.id, r);
+    return m;
+  }, [recentFolders]);
   const settings = useSettingsStore((s) => s.settings);
   const patchSettings = useSettingsStore((s) => s.patch);
   const [setupOpen, setSetupOpen] = useState(false);
@@ -106,6 +121,13 @@ export function LibraryPage() {
       setQuery("");
       setCollapsedGroups(new Set());
       return;
+    }
+    // Reset scroll position so a new library always opens at its hero
+    // rather than wherever the previous library's scroll happened to be.
+    // `instant` avoids a smooth animation when the user is drilling
+    // through nested folders quickly.
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, left: 0, behavior: "instant" as ScrollBehavior });
     }
     let cancelled = false;
     void (async () => {
@@ -398,30 +420,58 @@ export function LibraryPage() {
       />
 
       {subfolders.length > 0 && (
-        // Subfolder chips moved out of the bottom-of-page "Folders" section
-        // on 2026-05-17 — when you're inside a series with seasons/specials,
-        // burying the only way to drill in at the bottom hides the navigation
-        // surface most likely to be the next click. Up top, the chips read as
-        // sibling routes alongside the title.
-        <nav className="ny-library__crumbs" aria-label="Subfolders">
-          <span className="dc-tracker ny-library__crumbs-label">
-            子フォルダ · OPEN
-          </span>
-          {subfolders.map((sf) => (
-            <button
-              key={sf.id}
-              type="button"
-              className="ny-folder-chip ny-folder-chip--crumb ny-focusable"
-              onClick={() =>
-                navigate(`/library/${encodeURIComponent(sf.id)}`)
-              }
-              aria-label={`Open subfolder ${sf.name}`}
-            >
-              <SubfolderIcon />
-              <span>{sf.name}</span>
-            </button>
-          ))}
-        </nav>
+        // Subfolders render as a tile grid (not chip strip) so the user
+        // gets a real hit target with poster + episode count when those
+        // are known. The header carries the kana caption + a count. Each
+        // tile pulls its stored stats from `recentById` — never-visited
+        // siblings still get a clean tile with just the folder name.
+        <section className="ny-library__folders" aria-label="Subfolders">
+          <header className="ny-library__folders-head">
+            <span className="ny-library__folders-kana">
+              子フォルダ · SUBFOLDERS
+            </span>
+            <span className="ny-library__folders-count">
+              {subfolders.length}{" "}
+              {subfolders.length === 1 ? "folder" : "folders"}
+            </span>
+          </header>
+          <div className="ny-library__folders-grid">
+            {subfolders.map((sf) => {
+              const cached = recentById.get(sf.id);
+              return (
+                <button
+                  key={sf.id}
+                  type="button"
+                  className="ny-subfolder-tile ny-focusable"
+                  onClick={() =>
+                    navigate(`/library/${encodeURIComponent(sf.id)}`)
+                  }
+                  aria-label={`Open subfolder ${sf.name}`}
+                >
+                  <div className="ny-subfolder-tile__thumb">
+                    {cached?.coverPosterUrl ? (
+                      <img
+                        src={cached.coverPosterUrl}
+                        alt=""
+                        loading="lazy"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <SubfolderGlyph />
+                    )}
+                  </div>
+                  <div className="ny-subfolder-tile__body">
+                    <span className="ny-subfolder-tile__name">{sf.name}</span>
+                    <span className="ny-subfolder-tile__meta">
+                      {formatSubfolderMeta(cached)}
+                    </span>
+                  </div>
+                  <ChevronOpenIcon />
+                </button>
+              );
+            })}
+          </div>
+        </section>
       )}
 
       <DriveStatusBanner
@@ -852,17 +902,93 @@ function ChevronLeftIcon() {
   );
 }
 
-function SubfolderIcon() {
+/**
+ * Subfolder glyph rendered on the tile when no cached poster is available.
+ * A gradient-filled folder with a subtle inset highlight — reads as a real
+ * navigation target rather than a wireframe stub. Each render gets a fresh
+ * gradient id so multiple instances on the page don't share <defs>.
+ */
+function SubfolderGlyph() {
+  const gid = `ny-subfolder-${useStableId()}`;
   return (
-    <svg viewBox="0 0 20 20" fill="none" aria-hidden width="16" height="16">
+    <svg viewBox="0 0 36 36" fill="none" aria-hidden width="40" height="40">
+      <defs>
+        <linearGradient id={gid} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="var(--brand-on-background-strong)" />
+          <stop offset="100%" stopColor="var(--accent-on-background-strong)" />
+        </linearGradient>
+        <linearGradient id={`${gid}-fill`} x1="0" y1="0" x2="0" y2="1">
+          <stop
+            offset="0%"
+            stopColor="color-mix(in srgb, var(--brand-background-medium) 30%, transparent)"
+          />
+          <stop offset="100%" stopColor="transparent" />
+        </linearGradient>
+      </defs>
       <path
-        d="M2.5 5.5A1.5 1.5 0 0 1 4 4h3.2a1.5 1.5 0 0 1 1.06.44L9.2 5.3a1 1 0 0 0 .7.3H16a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 16 15.6H4A1.5 1.5 0 0 1 2.5 14.1v-8.6Z"
+        d="M4 11.2A2.4 2.4 0 0 1 6.4 8.8h4.6a2.4 2.4 0 0 1 1.7.7l1.5 1.5a1.6 1.6 0 0 0 1.13.47H29.6A2.4 2.4 0 0 1 32 13.87V25.6a2.4 2.4 0 0 1-2.4 2.4H6.4A2.4 2.4 0 0 1 4 25.6V11.2Z"
+        fill={`url(#${gid}-fill)`}
+      />
+      <path
+        d="M4 11.2A2.4 2.4 0 0 1 6.4 8.8h4.6a2.4 2.4 0 0 1 1.7.7l1.5 1.5a1.6 1.6 0 0 0 1.13.47H29.6A2.4 2.4 0 0 1 32 13.87V25.6a2.4 2.4 0 0 1-2.4 2.4H6.4A2.4 2.4 0 0 1 4 25.6V11.2Z"
+        stroke={`url(#${gid})`}
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      {/* Sakura petal accent on the folder tab — subtle theme echo. */}
+      <circle cx="10" cy="12.5" r="1.4" fill="#ffb6c8" opacity="0.85" />
+    </svg>
+  );
+}
+
+/** Chevron pointing right — sits at the tile's right edge to advertise
+ *  "this is a navigation target", not just a card. */
+function ChevronOpenIcon() {
+  return (
+    <svg
+      className="ny-subfolder-tile__chevron"
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-hidden
+    >
+      <path
+        d="m6 4 4 4-4 4"
         stroke="currentColor"
-        strokeWidth="1.2"
+        strokeWidth="1.4"
+        strokeLinecap="round"
         strokeLinejoin="round"
       />
     </svg>
   );
+}
+
+/** Stable per-render id (used for SVG defs). Module-scoped counter so we
+ *  don't depend on useId from React 18+; works back-compat. */
+let __idCounter = 0;
+function useStableId(): string {
+  const ref = useRef<string>("");
+  if (!ref.current) ref.current = String(++__idCounter);
+  return ref.current;
+}
+
+/**
+ * Build the meta line shown under a subfolder name. Uses cached stats from
+ * the user's RecentFolder records when available; falls back to a soft
+ * "Open" affordance for never-visited siblings so the tile never looks
+ * empty.
+ */
+function formatSubfolderMeta(
+  cached: { videoCount?: number; runtimeMs?: number } | undefined,
+): string {
+  if (!cached || cached.videoCount == null) return "Open folder";
+  const parts: string[] = [];
+  parts.push(
+    `${cached.videoCount} ${cached.videoCount === 1 ? "ep" : "eps"}`,
+  );
+  if (cached.runtimeMs && cached.runtimeMs > 0) {
+    parts.push(formatRuntimeFromMillis(cached.runtimeMs));
+  }
+  return parts.join(" · ");
 }
 
 function LockIcon() {

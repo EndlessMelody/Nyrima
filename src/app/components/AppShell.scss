@@ -29,18 +29,41 @@
   margin: 0 auto;
   height: 64px;
 
-  background: color-mix(in srgb, var(--page-background) 88%, transparent);
-  backdrop-filter: blur(24px) saturate(140%);
-  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  /* Glass base: a layered translucent gradient + heavy backdrop blur. The
+   * gradient sits on top of the page-background tint so the bar reads as
+   * tinted glass rather than a flat fill. Two soft radial brushes
+   * (brand top-left, accent bottom-right) give a faint hue shift across
+   * the bar without competing with content for attention. */
+  background:
+    radial-gradient(
+      120% 220% at 0% 0%,
+      color-mix(in srgb, var(--brand-on-background-medium) 14%, transparent),
+      transparent 55%
+    ),
+    radial-gradient(
+      140% 220% at 100% 120%,
+      color-mix(in srgb, var(--accent-on-background-medium) 12%, transparent),
+      transparent 55%
+    ),
+    color-mix(in srgb, var(--page-background) 70%, transparent);
+  backdrop-filter: blur(32px) saturate(160%);
+  -webkit-backdrop-filter: blur(32px) saturate(160%);
   border-bottom: var(--dc-hairline);
   border-radius: 0;
   box-shadow: 0 0 0 0 transparent;
 
   display: grid;
-  grid-template-columns: 1fr auto;
+  /* brand | search-pill (flex) | nav. The middle column carries the
+   * topbar search; it stretches with the bar and shrinks when the bar
+   * collapses, since the bar's own max-width is the upstream constraint. */
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 16px;
   padding: 0 32px;
+  /* overflow stays visible so the search popover can extend below the bar.
+   * Sakura petals live in a dedicated `.dc-shell__sakura` child that clips
+   * them itself — that way we don't sacrifice the popover for the effect. */
+  overflow: visible;
 
   transition:
     max-width 320ms cubic-bezier(0.32, 0.72, 0, 1),
@@ -51,6 +74,28 @@
     border-bottom-color 220ms ease,
     box-shadow 280ms ease,
     background 220ms ease;
+}
+
+/* A subtle top-edge highlight to complete the glass illusion. Sits above
+ * the gradient bed but below the content. */
+.dc-shell__header::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, white 8%, transparent),
+    transparent 12%
+  );
+  z-index: 0;
+}
+
+/* Lift the direct children above the gradient + sakura layers without
+ * isolating the popover (which lives further down the tree). */
+.dc-shell__header > *:not(.dc-shell__sakura) {
+  position: relative;
+  z-index: 2;
 }
 
 /* --- Compact "anchored island" state -------------------------------------
@@ -173,11 +218,55 @@
   outline-offset: 2px;
 }
 
+.dc-shell__nav-btn.is-current {
+  color: var(--neutral-on-background-strong);
+  background: var(--neutral-alpha-weak);
+  border-color: var(--neutral-border-medium);
+}
+
 .dc-shell__nav-btn--icon {
   padding: 8px;
   width: 34px;
   height: 34px;
   justify-content: center;
+}
+
+/* Unread indicator on the Social button. Soft glow + numeric count so the
+ * user can tell "you have something" without opening the hub. The badge
+ * floats off the top-right of the button using absolute positioning so the
+ * compact icon-only state still shows it. */
+.dc-shell__nav-btn--social {
+  position: relative;
+}
+
+.dc-shell__nav-btn--social.has-unread {
+  color: var(--neutral-on-background-strong);
+  border-color: color-mix(in srgb, var(--brand-on-background-medium) 50%, transparent);
+}
+
+.dc-shell__nav-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: linear-gradient(
+    180deg,
+    var(--brand-solid-medium),
+    var(--accent-solid-medium)
+  );
+  color: var(--page-background);
+  font-family: var(--dc-font-mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  letter-spacing: 0.02em;
+  box-shadow:
+    0 0 0 1.5px var(--page-background),
+    0 0 10px color-mix(in srgb, var(--brand-solid-medium) 60%, transparent);
 }
 
 .dc-shell__nav-btn svg {
@@ -234,24 +323,119 @@
   gap: 4px;
 }
 
-.dc-shell__footer {
-  border-top: var(--dc-hairline);
-  padding: 24px 32px;
-  margin-top: 96px;
+/* Footer chrome lives in AppFooter.scss — see `.dc-footer`. */
 
-  display: flex;
-  align-items: center;
-  justify-content: center;
+/* ───────────────────────── Sakura petals (topbar-only) ─────────────────
+ *
+ * A small ambient layer of falling cherry petals confined to the header.
+ * Container is `position: absolute; inset: 0; overflow: hidden;` so the
+ * petals are clipped to the bar's bounding box even when the bar morphs
+ * into the compact pill — the rounded radius from `.is-compact` propagates
+ * via `inherit` and `border-radius: inherit` on the container itself.
+ *
+ * Each petal is a tiny background-imaged SVG (gradient-painted) with two
+ * stacked animations: a linear fall + a sinusoidal sway. We stagger 8
+ * petals across the bar with hand-picked left%, durations, and delays so
+ * the cadence reads as natural drift rather than a metronome.
+ *
+ * Honors `prefers-reduced-motion`: the whole container drops out in that
+ * mode so motion-sensitive users don't get an animated background.
+ */
 
-  font-family: var(--dc-font-mono);
-  font-size: 0.625rem;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--neutral-on-background-weak);
+.dc-shell__sakura {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  border-radius: inherit;
+  z-index: 1;
+  /* Soft mask so petals fade in at the top edge and dissolve before the
+   * border, instead of popping in and out at hard limits. */
+  mask-image: linear-gradient(
+    180deg,
+    transparent 0%,
+    black 14%,
+    black 86%,
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    180deg,
+    transparent 0%,
+    black 14%,
+    black 86%,
+    transparent 100%
+  );
 }
 
-@media (max-width: 720px) {
-  .dc-shell__footer {
-    padding: 20px;
+.ny-petal {
+  position: absolute;
+  top: -18px;
+  width: 14px;
+  height: 18px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 20'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0%25' stop-color='%23ffd6e3'/><stop offset='55%25' stop-color='%23ffa8c4'/><stop offset='100%25' stop-color='%23ff7aa6'/></linearGradient></defs><path d='M8 1 C 3 4 1 9 2 14 C 3 17 5 19 7 19 L 7 17 Q 8 16 9 17 L 9 19 C 11 19 13 17 14 14 C 15 9 13 4 8 1 Z' fill='url(%23g)'/></svg>");
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  opacity: 0;
+  /* Each petal exposes three custom props so the per-element rules below
+   * stay short. Defaults keep the keyframes valid when a petal omits one. */
+  --petal-left: 50%;
+  --petal-size: 14px;
+  --petal-fall-dur: 11s;
+  --petal-sway-dur: 4.6s;
+  --petal-delay: 0s;
+  --petal-tint: 0%;
+  left: var(--petal-left);
+  width: var(--petal-size);
+  height: calc(var(--petal-size) * 1.25);
+  filter: drop-shadow(0 0 4px color-mix(in srgb, #ff7aa6 var(--petal-tint, 0%), transparent));
+  animation:
+    ny-petal-fall var(--petal-fall-dur) linear infinite,
+    ny-petal-sway var(--petal-sway-dur) ease-in-out infinite alternate;
+  animation-delay: var(--petal-delay), calc(var(--petal-delay) * -0.6);
+  will-change: transform, opacity;
+}
+
+/* Hand-staggered petal cohort. Distribute across the bar so the eye sees
+ * petals coming from many starts; mix sizes + speeds so none clump. */
+.ny-petal--1 { --petal-left:  6%;  --petal-size: 12px; --petal-fall-dur: 10s;  --petal-sway-dur: 4.2s; --petal-delay: 0s;    --petal-tint: 35%; }
+.ny-petal--2 { --petal-left: 18%;  --petal-size: 9px;  --petal-fall-dur: 13s;  --petal-sway-dur: 5.4s; --petal-delay: 1.7s;  --petal-tint: 20%; }
+.ny-petal--3 { --petal-left: 32%;  --petal-size: 14px; --petal-fall-dur: 11.5s;--petal-sway-dur: 4.8s; --petal-delay: 3.4s;  --petal-tint: 45%; }
+.ny-petal--4 { --petal-left: 47%;  --petal-size: 10px; --petal-fall-dur: 14s;  --petal-sway-dur: 5.8s; --petal-delay: 0.6s;  --petal-tint: 25%; }
+.ny-petal--5 { --petal-left: 61%;  --petal-size: 11px; --petal-fall-dur: 12s;  --petal-sway-dur: 4.4s; --petal-delay: 5.2s;  --petal-tint: 30%; }
+.ny-petal--6 { --petal-left: 74%;  --petal-size: 13px; --petal-fall-dur: 10.5s;--petal-sway-dur: 5.0s; --petal-delay: 2.3s;  --petal-tint: 40%; }
+.ny-petal--7 { --petal-left: 86%;  --petal-size: 9px;  --petal-fall-dur: 13.5s;--petal-sway-dur: 5.6s; --petal-delay: 4.1s;  --petal-tint: 22%; }
+.ny-petal--8 { --petal-left: 94%;  --petal-size: 11px; --petal-fall-dur: 11s;  --petal-sway-dur: 4.2s; --petal-delay: 6.8s;  --petal-tint: 33%; }
+
+@keyframes ny-petal-fall {
+  0% {
+    transform: translate3d(0, -10%, 0) rotate(0deg);
+    opacity: 0;
+  }
+  8% {
+    opacity: var(--petal-tint, 0.35);
+  }
+  92% {
+    opacity: var(--petal-tint, 0.35);
+  }
+  100% {
+    /* Travels well past the bar height; the bar's overflow:hidden keeps
+     * the fall pinned to the bar regardless of the exact viewport size. */
+    transform: translate3d(0, 320%, 0) rotate(540deg);
+    opacity: 0;
+  }
+}
+
+@keyframes ny-petal-sway {
+  0% {
+    margin-left: -10px;
+  }
+  100% {
+    margin-left: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dc-shell__sakura {
+    display: none;
   }
 }

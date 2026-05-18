@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { LandingPage } from "./pages/LandingPage";
 import { LibraryPage } from "./pages/LibraryPage";
+import { SocialPage } from "./pages/SocialPage";
 import { AppShell } from "./components/AppShell";
 import { DriveDebugPanel } from "./components/DriveDebugPanel";
 import { SharingHost } from "./components/SharingHost";
@@ -26,6 +27,8 @@ export function App() {
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/library/:folderId" element={<LibraryPage />} />
+        <Route path="/social" element={<SocialPage />} />
+        <Route path="/social/:tab" element={<SocialPage />} />
         <Route
           path="/play/:folderId/:fileId"
           element={

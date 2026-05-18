@@ -24,6 +24,7 @@ export {
 export {
   writeShareEntry,
   readShareEntry,
+  deleteShareEntry,
   generateShareId,
   entryFilename,
 } from "./entry-store";

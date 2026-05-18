@@ -207,8 +207,16 @@ async function fetchJikan(
     //      returns wrong matches for short queries like "Bokutachi no Remake"
     //      — its index favours older/popular anime, so a query for a recent
     //      lesser-known series can land on something unrelated at index 0.
+    //
+    // Notably we do NOT fall back to `results[0]` when both picks miss: for
+    // niche queries Jikan's relevance ranking returns popular unrelated
+    // anime (e.g. "Gimai Seikatsu" → Doraemon), and a confidently wrong
+    // poster is worse than no poster — the library card's initials
+    // fallback (e.g. "GS") is honest and gets re-resolved later.
     const yearHit = year ? pickByYear(results, year) : null;
-    const hit = yearHit ?? pickBySimilarity(results, title) ?? results[0];
+    const simHit = pickBySimilarity(results, title);
+    const hit = yearHit ?? simHit;
+    if (!hit) return miss(file, title, quality);
     const displayTitle =
       hit.title_english?.trim() ||
       hit.title?.trim() ||

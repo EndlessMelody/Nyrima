@@ -11,10 +11,14 @@
  *   - The routed page sits in `.dc-page` (centered 1280px column) below.
  *   - A quiet footer band with a single mono status line + version stamp.
  *
- * Phase 4 (sharing layer) hooks: Inbox / Friends / Search / Share buttons
- * render as stubs today. They log a debug breadcrumb on click and carry
- * `aria-label` + `title` so the chrome is keyboard-accessible the moment
- * Phase 4 wires real actions in.
+ * Phase 4 (sharing layer) lives in the topbar as two affordances:
+ *   - Social → routes to `/social` (the hub: Inbox, My Shares, People,
+ *     Activity, Privacy). Renders an unread-count badge from the social
+ *     store.
+ *   - Share → opens the composer via the `nyrima:topbar` CustomEvent
+ *     (SharingHost listens). Stays in chrome because the composer is
+ *     page-contextual — fired from anywhere, the composer infers its
+ *     target from the current route.
  *
  * We sidestep Once UI's `Row`/`Heading`/`Button` chrome here because the
  * minimal-tech look needs precise hairline borders, monospace tracking, and
@@ -23,10 +27,13 @@
  */
 
 import { useEffect, useState, type ReactNode } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import cn from "classnames";
 import { NyrimaMark } from "./NyrimaMark";
 import { UserChip } from "./UserChip";
+import { TopbarSearch } from "./TopbarSearch";
+import { AppFooter } from "./AppFooter";
+import { useSocialStore } from "../stores/social-store";
 import { debugLog } from "../services/debug-log";
 import "./AppShell.scss";
 
@@ -35,7 +42,24 @@ const COMPACT_SCROLL_THRESHOLD = 24;
 
 export function AppShell({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const isCompact = useScrollPastThreshold(COMPACT_SCROLL_THRESHOLD);
+
+  // Topbar unread badge — pulls live from the social store. The store is a
+  // zero-cost subscription when nothing's followed (initial state).
+  const unreadCount = useSocialStore((s) => s.unreadCount);
+  const loadFollows = useSocialStore((s) => s.loadFollows);
+  const syncInbox = useSocialStore((s) => s.syncInbox);
+  useEffect(() => {
+    void loadFollows().then(() => {
+      // Only attempt a sync if there's anything to pull. The store gates
+      // internally too, but this avoids spinning up the Drive queue at all.
+      const { followedUsers } = useSocialStore.getState();
+      if (followedUsers.length > 0) void syncInbox();
+    });
+  }, [loadFollows, syncInbox]);
+
+  const onSocialRoute = location.pathname.startsWith("/social");
 
   return (
     <div className="dc-shell">
@@ -43,6 +67,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         className={cn("dc-shell__header", { "is-compact": isCompact })}
         data-compact={isCompact ? "1" : "0"}
       >
+        <Sakura />
+
         <Link to="/" className="dc-shell__brand" aria-label="Nyrima home">
           <NyrimaMark size="header" />
           <span className="dc-shell__wordmark">
@@ -52,10 +78,14 @@ export function AppShell({ children }: { children: ReactNode }) {
           </span>
         </Link>
 
+        <TopbarSearch isCompact={isCompact} />
+
         <nav className="dc-shell__nav" aria-label="Primary">
           <button
             type="button"
-            className="dc-shell__nav-btn"
+            className={cn("dc-shell__nav-btn", {
+              "is-current": location.pathname === "/" || location.pathname.startsWith("/library"),
+            })}
             onClick={() => navigate("/")}
             aria-label="Libraries"
             title="Libraries"
@@ -64,23 +94,30 @@ export function AppShell({ children }: { children: ReactNode }) {
             <span className="dc-shell__nav-btn-label">Libraries</span>
           </button>
 
-          <Phase4Button
-            icon={<SearchIcon />}
-            label="Search"
-            scope="search"
-          />
-          <Phase4Button
-            icon={<PeopleIcon />}
-            label="Friends"
-            scope="friends"
-          />
-          <Phase4Button icon={<InboxIcon />} label="Inbox" scope="inbox" />
-          <Phase4Button
-            icon={<ShareIcon />}
-            label="Share"
-            scope="share"
-            primary
-          />
+          <button
+            type="button"
+            className={cn("dc-shell__nav-btn", "dc-shell__nav-btn--social", {
+              "is-current": onSocialRoute,
+              "has-unread": unreadCount > 0,
+            })}
+            onClick={() => navigate("/social")}
+            aria-label={
+              unreadCount > 0
+                ? `Social (${unreadCount} unread)`
+                : "Social"
+            }
+            title="Social — Inbox, People, Privacy"
+          >
+            <SocialIcon />
+            <span className="dc-shell__nav-btn-label">Social</span>
+            {unreadCount > 0 && (
+              <span className="dc-shell__nav-badge" aria-hidden="true">
+                {unreadCount > 99 ? "99+" : unreadCount}
+              </span>
+            )}
+          </button>
+
+          <ShareButton />
 
           <UserChip />
         </nav>
@@ -88,13 +125,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <main className="dc-page">{children}</main>
 
-      <footer className="dc-shell__footer">
-        <span>SYS · READY</span>
-        <span className="dc-shell__footer-center">
-          nyrima · personal cinema for google drive
-        </span>
-        <span className="dc-shell__footer-right">BUILD 0.0.1 · NYRIMA</span>
-      </footer>
+      <AppFooter />
     </div>
   );
 }
@@ -135,48 +166,59 @@ function useScrollPastThreshold(thresholdPx: number): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 4 stub button.
+// Share button — primary CTA that opens the composer.
 //
-// Renders the chrome (icon + label + focus ring) so the topbar is visually
-// complete today. The click handler logs a breadcrumb and dispatches a
-// `nyrima:topbar` CustomEvent so Phase 4 work can attach a real handler
-// without touching AppShell. The `data-scope` attribute lets dev tools and
-// future analytics filter by which slot was activated.
+// Stays in chrome (rather than only in the Social hub) because it's
+// page-contextual: the composer infers its target from the current route,
+// so the user wants to fire it without a detour. SharingHost listens for
+// the `nyrima:topbar` CustomEvent and renders the dialog.
 // ---------------------------------------------------------------------------
 
-type Phase4Scope = "search" | "friends" | "inbox" | "share";
-
-function Phase4Button({
-  icon,
-  label,
-  scope,
-  primary,
-}: {
-  icon: ReactNode;
-  label: string;
-  scope: Phase4Scope;
-  primary?: boolean;
-}) {
+function ShareButton() {
   const handle = () => {
-    debugLog(`[topbar] ${scope} (Phase 4 — coming soon)`);
+    debugLog("[topbar] share");
     window.dispatchEvent(
-      new CustomEvent("nyrima:topbar", { detail: { scope } }),
+      new CustomEvent("nyrima:topbar", { detail: { scope: "share" } }),
     );
   };
   return (
     <button
       type="button"
-      className={cn("dc-shell__nav-btn", {
-        "dc-shell__nav-btn--primary": primary,
-      })}
+      className="dc-shell__nav-btn dc-shell__nav-btn--primary"
       onClick={handle}
-      aria-label={label}
-      title={`${label} — coming in Phase 4 (sharing layer)`}
-      data-scope={scope}
+      aria-label="Share"
+      title="Share the current page to your Shared/ folder"
+      data-scope="share"
     >
-      {icon}
-      <span className="dc-shell__nav-btn-label">{label}</span>
+      <ShareIcon />
+      <span className="dc-shell__nav-btn-label">Share</span>
     </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sakura — ambient falling petals, confined to the topbar.
+//
+// 8 absolutely-positioned spans, each a tiny gradient SVG painted into a
+// background-image. All motion is CSS keyframes; the React side is
+// presentational. `aria-hidden` because it's pure decoration. Honors
+// `prefers-reduced-motion` (the SCSS drops the container entirely there).
+// ---------------------------------------------------------------------------
+
+function Sakura() {
+  return (
+    <div className="dc-shell__sakura" aria-hidden="true">
+      {/* Eight petals — count matches the SCSS `.ny-petal--N` rules.
+       *  Adding/removing requires the matching SCSS edit. */}
+      <span className="ny-petal ny-petal--1" />
+      <span className="ny-petal ny-petal--2" />
+      <span className="ny-petal ny-petal--3" />
+      <span className="ny-petal ny-petal--4" />
+      <span className="ny-petal ny-petal--5" />
+      <span className="ny-petal ny-petal--6" />
+      <span className="ny-petal ny-petal--7" />
+      <span className="ny-petal ny-petal--8" />
+    </div>
   );
 }
 
@@ -198,64 +240,33 @@ function FolderIcon() {
   );
 }
 
-function SearchIcon() {
+function SocialIcon() {
+  // Two concentric people silhouettes — reads as "your circle" and stays
+  // legible at 14px. We render the front silhouette stronger so a partial
+  // glance still parses it as a person, not a generic blob.
   return (
     <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.2" />
+      <circle cx="6.2" cy="6.2" r="2.4" stroke="currentColor" strokeWidth="1.2" />
       <path
-        d="m10.5 10.5 3 3"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function PeopleIcon() {
-  return (
-    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <circle cx="6" cy="6" r="2.4" stroke="currentColor" strokeWidth="1.2" />
-      <path
-        d="M2 13.5c0-2.2 1.8-3.8 4-3.8s4 1.6 4 3.8"
+        d="M2 13.5c0-2.2 1.9-3.8 4.2-3.8s4.2 1.6 4.2 3.8"
         stroke="currentColor"
         strokeWidth="1.2"
         strokeLinecap="round"
       />
       <circle
         cx="11.5"
-        cy="6.5"
-        r="2"
+        cy="5.4"
+        r="1.8"
         stroke="currentColor"
         strokeWidth="1.2"
-        opacity="0.75"
+        opacity="0.7"
       />
       <path
-        d="M10.2 12.6c.2-1.4 1.5-2.5 3.05-2.5 .9 0 1.7.35 2.25.9"
+        d="M10.4 11.3c.4-1.1 1.7-1.9 3.05-1.9 .9 0 1.7.34 2.25.9"
         stroke="currentColor"
         strokeWidth="1.2"
         strokeLinecap="round"
-        opacity="0.75"
-      />
-    </svg>
-  );
-}
-
-function InboxIcon() {
-  return (
-    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path
-        d="M2.6 8.6 4 3.7A1.5 1.5 0 0 1 5.45 2.6h5.1A1.5 1.5 0 0 1 12 3.7l1.4 4.9"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
-      <path
-        d="M2.5 8.6h2.9l.85 1.7h3.5l.85-1.7h2.9v3.4a1.5 1.5 0 0 1-1.5 1.5h-8a1.5 1.5 0 0 1-1.5-1.5V8.6Z"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinejoin="round"
+        opacity="0.7"
       />
     </svg>
   );

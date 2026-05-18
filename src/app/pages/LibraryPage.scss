@@ -305,55 +305,156 @@
   gap: 10px;
 }
 
-.ny-library__crumbs {
+/* ───────────────────────── Subfolder section ──────────────────────────
+ *
+ * Replaces the older chip strip (`.ny-library__crumbs`). Each subfolder
+ * renders as a wider tile-button so the user has a real hit target with
+ * room for a poster thumbnail + episode count, not just a name.
+ *
+ * Responsive grid: 4 → 3 → 2 → 1 columns depending on width. The grid
+ * lives in `.ny-library__folders-grid`, the section heading + count in
+ * `.ny-library__folders-head`.
+ */
+
+.ny-library__folders {
+  margin: -4px 0 24px;
+  padding-bottom: 18px;
+  border-bottom: var(--dc-hairline);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ny-library__folders-head {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin: -8px 0 18px;
-  padding-bottom: 14px;
-  border-bottom: var(--dc-hairline);
+  justify-content: space-between;
+  gap: 12px;
 }
 
-.ny-library__crumbs-label {
-  margin-right: 4px;
+.ny-library__folders-kana {
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
   letter-spacing: 0.18em;
-  color: var(--neutral-on-background-medium);
-  font-size: 0.625rem;
+  text-transform: uppercase;
+  color: var(--neutral-on-background-weak);
 }
 
-.ny-folder-chip--crumb {
-  padding: 6px 12px;
-  font-size: 0.75rem;
+.ny-library__folders-count {
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--neutral-on-background-weak);
 }
 
-.ny-folder-chip {
+.ny-library__folders-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.ny-subfolder-tile {
+  appearance: none;
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: var(--dc-hairline);
+  border-radius: 12px;
+  background: linear-gradient(
+      180deg,
+      color-mix(in srgb, white 4%, transparent),
+      transparent 60%
+    ),
+    color-mix(in srgb, var(--page-background) 85%, transparent);
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  text-decoration: none;
+  font-family: var(--dc-font-body, var(--dc-font-display));
+  transition:
+    transform 200ms cubic-bezier(0.32, 0.72, 0, 1),
+    border-color 200ms ease,
+    background 200ms ease,
+    box-shadow 200ms ease;
+}
+
+.ny-subfolder-tile:hover {
+  border-color: color-mix(in srgb, var(--brand-on-background-medium) 50%, var(--neutral-border-strong));
+  background: linear-gradient(
+      180deg,
+      color-mix(in srgb, white 6%, transparent),
+      transparent 60%
+    ),
+    color-mix(in srgb, var(--brand-background-medium) 10%, var(--page-background));
+  transform: translateY(-1px);
+  box-shadow:
+    0 6px 20px -10px color-mix(in srgb, var(--brand-on-background-strong) 35%, transparent),
+    0 2px 6px -4px rgba(0, 0, 0, 0.4);
+}
+
+.ny-subfolder-tile:hover .ny-subfolder-tile__chevron {
+  transform: translateX(3px);
+  color: var(--brand-on-background-strong);
+}
+
+.ny-subfolder-tile__thumb {
+  width: 56px;
+  height: 56px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--neutral-background-medium) 50%, transparent);
+  border: 1px solid var(--neutral-border-weak);
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-  border: var(--dc-hairline);
-  border-radius: var(--ny-radius-sm);
-  background: var(--surface-background);
-  cursor: pointer;
-  font-family: var(--dc-font-body);
-  font-size: 0.8125rem;
-  color: var(--neutral-on-background-medium);
-  transition:
-    border-color 160ms ease,
-    background 160ms ease;
-}
-
-.ny-folder-chip:hover {
-  border-color: var(--brand-border-medium);
-  background: var(--surface-background-strong);
-}
-
-.ny-folder-chip svg {
-  width: 16px;
-  height: 16px;
+  justify-content: center;
   flex-shrink: 0;
-  color: var(--brand-on-background-medium);
+}
+
+.ny-subfolder-tile__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.ny-subfolder-tile__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ny-subfolder-tile__name {
+  font-family: var(--dc-font-display);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  color: var(--neutral-on-background-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ny-subfolder-tile__meta {
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--neutral-on-background-weak);
+}
+
+.ny-subfolder-tile__chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--neutral-on-background-weak);
+  transition:
+    transform 200ms cubic-bezier(0.32, 0.72, 0, 1),
+    color 200ms ease;
+  flex-shrink: 0;
 }
 
 .ny-library__empty {

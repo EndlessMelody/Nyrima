@@ -104,7 +104,7 @@ _Last touched: 2026-05-16_
 - [→] **P3.6** Multi-folder libraries — _deferred_ (data-model rewrite)
 
 ## Phase 4 — Sharing layer · **in progress**
-_Last touched: 2026-05-17_
+_Last touched: 2026-05-18_
 
 Drive-only social model. Each user gets a `Shared/` subfolder set to
 "Anyone with the link → Viewer". Inside: `index.json` manifest,
@@ -163,12 +163,35 @@ This sidesteps Drive's binary view/edit permission model.
     `setFolderPrivate`) added to drive-api.ts. `share-permissions.ts`
     wraps them with a chrome.storage cache so the composer reads the
     public state without burning a roundtrip per open.
-- [ ] **P4.2** Follow + pull — paste a friend's Shared/ URL, scan their
+- [x] **P4.UI** Social hub — `/social` route with five tabs (Inbox, My
+      Shares, People, Activity, Privacy). Nyaa-flavored dense table rows
+      filtered through the Atelier tokens; topbar collapses the old
+      Search/Friends/Inbox stubs into a single Social link with an
+      unread-count badge fed by `useSocialStore`. Share stays in chrome
+      because the composer is page-contextual.
+  - New: `pages/SocialPage`, `pages/SocialPage.scss`, `stores/social-store`,
+    `components/social/{SocialToolbar,SocialTabs,InboxList,MyShares,
+    PeopleSearch,ActivityFeed,PrivacyPanel}`.
+  - Drive: added `deleteFile` to `drive-api.ts` + `deleteShareEntry` to the
+    sharing barrel so unshare can prune index + entry file atomically.
+  - MyShares + PrivacyPanel are fully wired today (own index, public toggle).
+    Inbox and People are wired to the social-store follow/pull pipeline but
+    won't surface third-party data until **P4.2** ships discovery + sync UX
+    polish. Activity is a placeholder pending **P4.3**.
+- [~] **P4.2** Follow + pull — paste a friend's Shared/ URL, scan their
       index, populate the Inbox surface
+  - Core follow/pull/unfollow/mark-read landed inside the Social hub
+    alongside **P4.UI**: `useSocialStore.follow()` parses the URL, pulls
+    their `index.json`, dedupes, and computes per-follow unread counts.
+    Remaining 4.2 scope: error-state polish, suggested follows, "view
+    their shelf" deep-link to a read-only library view in Nyrima (today it
+    opens the Drive folder in a new tab).
 - [ ] **P4.3** Comments — append-only JSONL writer + owner aggregator
-      that reads followers' `Shared/comments/`
+      that reads followers' `Shared/comments/`. Renders in the Social
+      hub's Activity tab.
 - [ ] **P4.4** Bootstrap index — public opt-in directory of discoverable
-      users
+      users. Opt-in toggle lives in the Privacy tab; discovered users feed
+      a "Suggested" rail in the People tab.
 
 ## Phase 5 — Realtime + privacy · **not started**
 _Last touched: never_

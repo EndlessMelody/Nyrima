@@ -490,6 +490,38 @@ export async function updateJsonFile(
 }
 
 /**
+ * Trash a file by id (Drive `files.delete` actually moves to trash for
+ * standard items). Used by the unshare flow in the Social hub — removing
+ * an entry from `Shared/entries/` after pruning it from `index.json`.
+ *
+ * 204 No Content on success; the call is idempotent against an already-gone
+ * id (404 swallowed) so a retry after a partial unshare doesn't error out.
+ */
+export async function deleteFile(
+  fileId: string,
+  reqOpts: RequestOptions = {},
+): Promise<void> {
+  const url = `${API_BASE}/files/${encodeURIComponent(fileId)}?supportsAllDrives=true`;
+  try {
+    await authedFetch(
+      url,
+      { method: "DELETE", signal: reqOpts.signal },
+      {
+        kind: reqOpts.kind ?? "metadata",
+        priority: reqOpts.priority ?? "normal",
+        signal: reqOpts.signal,
+      },
+    );
+  } catch (e) {
+    // Re-issuing the unshare against an entry whose file is already gone
+    // should be a no-op, not a hard error.
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/\b404\b/.test(msg)) return;
+    throw e;
+  }
+}
+
+/**
  * Read + return the text content of a JSON file, parsed. Thin wrapper over
  * downloadTextFile that throws on parse failure with a clearer message.
  */
