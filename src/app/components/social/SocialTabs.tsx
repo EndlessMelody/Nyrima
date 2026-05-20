@@ -1,14 +1,33 @@
 /**
- * SocialTabs — the tab strip under the toolbar.
+ * Social tabs / section picker.
  *
- * Each tab renders an icon, a label, and an optional count chip. Counts have
- * two flavours: "badge" (Inbox unread → brand-tinted dot + number, pulled
- * toward the user's eye) and "muted" (everything else → quiet hairline pill).
+ * Two shapes share the same source-of-truth tab list:
  *
- * The strip itself is purely presentational — the page owns URL routing.
+ *   `SocialTabs`             — legacy horizontal strip (no longer mounted by
+ *                              SocialPage, kept as an export in case another
+ *                              surface wants a quick tabstrip).
+ *   `SocialSectionPicker`    — compact rail control: a single trigger button
+ *                              shows the current section; clicking opens a
+ *                              floating popover with all five rows.
+ *
+ * Counts have two flavours: "badge" (Inbox unread → brand-tinted) and
+ * "muted" (everything else → quiet hairline pill).
+ *
+ * Keyboard model for the picker:
+ *   - `g` (while on `/social`, not inside an input) opens it.
+ *   - ↑/↓ moves focus, Enter activates, Escape closes.
+ *   - Outside click closes.
  */
 
-import type { ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import cn from "classnames";
 
 export type SocialTabKey =
@@ -34,13 +53,13 @@ export const SOCIAL_TABS: TabDef[] = [
   { key: "privacy", label: "Privacy", icon: <ShieldIcon /> },
 ];
 
-interface Props {
+interface TabsProps {
   current: SocialTabKey;
   counts: Record<SocialTabKey, number>;
   onChange: (next: SocialTabKey) => void;
 }
 
-export function SocialTabs({ current, counts, onChange }: Props) {
+export function SocialTabs({ current, counts, onChange }: TabsProps) {
   return (
     <nav className="ny-social-tabs" role="tablist" aria-label="Social sections">
       {SOCIAL_TABS.map((t) => {
@@ -73,6 +92,234 @@ export function SocialTabs({ current, counts, onChange }: Props) {
         );
       })}
     </nav>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SocialSectionPicker — compact rail control.
+//
+// Pattern: one trigger button (current section + caret) opens a floating
+// popover anchored beneath it. The popover is absolutely positioned inside
+// the picker's relative wrapper, so it inherits the trigger's width by
+// default and scales with the rail. We keep focus management lightweight:
+// focusing the trigger after a selection (so the user can re-open with Enter)
+// and a `focusedKey` cursor inside the popover for arrow navigation.
+//
+// "g" shortcut: a window-level keydown listener that ignores typing surfaces
+// (inputs, textareas, contenteditable). When the user is anywhere on /social,
+// pressing g opens the picker. We don't preventDefault unless we're actually
+// triggering — leaves other "g" key handlers alone.
+// ---------------------------------------------------------------------------
+
+interface PickerProps {
+  current: SocialTabKey;
+  counts: Record<SocialTabKey, number>;
+  onChange: (next: SocialTabKey) => void;
+  /** Set false to disable the global `g` keybind (e.g., when a dialog steals
+   *  page-level focus). Defaults to enabled. */
+  shortcut?: boolean;
+}
+
+export function SocialSectionPicker({
+  current,
+  counts,
+  onChange,
+  shortcut = true,
+}: PickerProps) {
+  const [open, setOpen] = useState(false);
+  const [focusedKey, setFocusedKey] = useState<SocialTabKey>(current);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const popoverId = useId();
+
+  const currentTab = useMemo(
+    () => SOCIAL_TABS.find((t) => t.key === current) ?? SOCIAL_TABS[0],
+    [current],
+  );
+  const currentCount = counts[currentTab.key];
+
+  // Reset the focus cursor whenever the popover opens, so the highlight
+  // tracks the active section instead of the previous arrow-key landing.
+  useLayoutEffect(() => {
+    if (open) setFocusedKey(current);
+  }, [open, current]);
+
+  // Outside-click + Escape close. Bound only while open so we don't pay the
+  // listener cost on every render of the rail.
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (!rootRef.current) return;
+      if (!rootRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    }
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  // Global "g" keybind. Skip when the user is typing (inputs, textareas,
+  // contenteditable, select elements) — otherwise filling out the share
+  // composer would yank focus out from under them.
+  useEffect(() => {
+    if (!shortcut) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "g" && e.key !== "G") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (!t) return;
+      const tag = t.tagName;
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        t.isContentEditable
+      ) {
+        return;
+      }
+      e.preventDefault();
+      setOpen((v) => !v);
+      // Defer focus so the popover has a chance to mount before we shift
+      // focus into it on the next render.
+      requestAnimationFrame(() => triggerRef.current?.focus());
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [shortcut]);
+
+  function selectKey(next: SocialTabKey) {
+    onChange(next);
+    setOpen(false);
+    triggerRef.current?.focus();
+  }
+
+  function onPopoverKey(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      const i = SOCIAL_TABS.findIndex((t) => t.key === focusedKey);
+      setFocusedKey(SOCIAL_TABS[(i + 1) % SOCIAL_TABS.length].key);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      const i = SOCIAL_TABS.findIndex((t) => t.key === focusedKey);
+      setFocusedKey(
+        SOCIAL_TABS[(i - 1 + SOCIAL_TABS.length) % SOCIAL_TABS.length].key,
+      );
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      selectKey(focusedKey);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setFocusedKey(SOCIAL_TABS[0].key);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      setFocusedKey(SOCIAL_TABS[SOCIAL_TABS.length - 1].key);
+    }
+  }
+
+  return (
+    <div className="ny-section-picker" ref={rootRef}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="ny-section-picker__trigger"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={popoverId}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="ny-section-picker__trigger-icon" aria-hidden="true">
+          {currentTab.icon}
+        </span>
+        <span className="ny-section-picker__trigger-label">
+          {currentTab.label}
+        </span>
+        {currentCount > 0 && (
+          <span
+            className="ny-section-picker__trigger-chip"
+            aria-label={`${currentCount} ${currentCount === 1 ? "item" : "items"}`}
+          >
+            {currentCount > 99 ? "99+" : currentCount}
+          </span>
+        )}
+        <CaretIcon className="ny-section-picker__caret" />
+      </button>
+
+      {open && (
+        <div
+          id={popoverId}
+          role="listbox"
+          aria-label="Social sections"
+          tabIndex={-1}
+          className="ny-section-picker__popover"
+          onKeyDown={onPopoverKey}
+          /* Focus the listbox on mount so arrow keys work without a click. */
+          ref={(el) => el?.focus()}
+        >
+          {SOCIAL_TABS.map((t) => {
+            const count = counts[t.key];
+            const isCurrent = t.key === current;
+            const isFocused = t.key === focusedKey;
+            return (
+              <button
+                key={t.key}
+                type="button"
+                role="option"
+                aria-selected={isCurrent}
+                className={cn("ny-section-picker__item", {
+                  "is-current": isCurrent,
+                  "is-focused": isFocused,
+                })}
+                onMouseEnter={() => setFocusedKey(t.key)}
+                onClick={() => selectKey(t.key)}
+              >
+                <span
+                  className="ny-section-picker__item-icon"
+                  aria-hidden="true"
+                >
+                  {t.icon}
+                </span>
+                <span className="ny-section-picker__item-label">{t.label}</span>
+                {count > 0 && (
+                  <span
+                    className={cn("ny-section-picker__item-chip", {
+                      "is-badge": t.badge,
+                    })}
+                  >
+                    {count > 99 ? "99+" : count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+          <div className="ny-section-picker__hint" aria-hidden="true">
+            <span className="ny-section-picker__kbd">g</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CaretIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="m4 6 4 4 4-4"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 

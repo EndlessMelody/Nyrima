@@ -21,6 +21,7 @@ import {
   VIDEO_MIME_PATTERNS,
   REQUIRED_FOLDER_NAME,
 } from "@shared/constants";
+import { assertDriveId, escapeDriveQueryLiteral } from "@shared/drive-id";
 
 const API_BASE = "https://www.googleapis.com/drive/v3";
 const UPLOAD_API_BASE = "https://www.googleapis.com/upload/drive/v3";
@@ -35,6 +36,7 @@ const DEFAULT_FILE_FIELDS = [
   "md5Checksum",
   "thumbnailLink",
   "parents",
+  "capabilities(canCopy,canDownload)",
   "videoMediaMetadata(width,height,durationMillis)",
 ].join(",");
 
@@ -61,9 +63,10 @@ export function getFile(
   fields = DEFAULT_FILE_FIELDS,
   reqOpts: RequestOptions = {},
 ): Promise<DriveFile> {
-  const key = `file:metadata:${fileId}:${fields}`;
+  const safeFileId = assertDriveId(fileId, "Drive file ID");
+  const key = `file:metadata:${safeFileId}:${fields}`;
   return inflight(key, async () => {
-    const url = `${API_BASE}/files/${encodeURIComponent(fileId)}?fields=${encodeURIComponent(fields)}&supportsAllDrives=true`;
+    const url = `${API_BASE}/files/${encodeURIComponent(safeFileId)}?fields=${encodeURIComponent(fields)}&supportsAllDrives=true`;
     const res = await authedFetch(
       url,
       { signal: reqOpts.signal },
@@ -78,7 +81,9 @@ export function listFolder(
   opts: ListOptions = {},
   reqOpts: RequestOptions = {},
 ): Promise<ListResult> {
-  const q = [`'${folderId}' in parents`, "trashed = false", opts.q]
+  const safeFolderId = assertDriveId(folderId, "Drive folder ID");
+  const parentQuery = `'${escapeDriveQueryLiteral(safeFolderId)}' in parents`;
+  const q = [parentQuery, "trashed = false", opts.q]
     .filter(Boolean)
     .join(" and ");
   const params = new URLSearchParams({
@@ -93,7 +98,7 @@ export function listFolder(
 
   // Dedup key: same folder + same page = same request. We deliberately
   // include the page token so paginated calls don't collide.
-  const key = `folder:list:${folderId}:${opts.pageToken ?? ""}:${opts.q ?? ""}:${opts.orderBy ?? ""}`;
+  const key = `folder:list:${safeFolderId}:${opts.pageToken ?? ""}:${opts.q ?? ""}:${opts.orderBy ?? ""}`;
   return inflight(key, async () => {
     const res = await authedFetch(
       `${API_BASE}/files?${params}`,
@@ -147,7 +152,8 @@ export async function validateNyrimaRoot(
   folderId: string,
   reqOpts: RequestOptions = {},
 ): Promise<NyrimaRootProbe> {
-  const file = await getFile(folderId, "id,name,mimeType", reqOpts);
+  const safeFolderId = assertDriveId(folderId, "Drive folder ID");
+  const file = await getFile(safeFolderId, "id,name,mimeType", reqOpts);
   const isF = file.mimeType === "application/vnd.google-apps.folder";
   return { ok: isF, actualName: file.name, isFolder: isF };
 }
@@ -212,7 +218,8 @@ function stripExtension(name: string): string {
  * not playable without an Authorization header; pass it through fetch().
  */
 export function buildMediaUrl(fileId: string): string {
-  return `${API_BASE}/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`;
+  const safeFileId = assertDriveId(fileId, "Drive file ID");
+  return `${API_BASE}/files/${encodeURIComponent(safeFileId)}?alt=media&supportsAllDrives=true`;
 }
 
 /**
@@ -287,7 +294,8 @@ export async function downloadFile(
   fileId: string,
   reqOpts: RequestOptions = {},
 ): Promise<Blob> {
-  const key = `file:download:${fileId}`;
+  const safeFileId = assertDriveId(fileId, "Drive file ID");
+  const key = `file:download:${safeFileId}`;
   return inflight(key, async () => {
     const res = await authedFetch(
       buildMediaUrl(fileId),
@@ -336,9 +344,9 @@ export function findChildByName(
   name: string,
   reqOpts: RequestOptions = {},
 ): Promise<DriveFile | null> {
-  // Escape single quotes in the name per Drive's query syntax.
-  const safe = name.replace(/'/g, "\\'");
-  const q = `'${parentId}' in parents and name = '${safe}' and trashed = false`;
+  const safeParentId = assertDriveId(parentId, "Drive parent folder ID");
+  const safeName = escapeDriveQueryLiteral(name);
+  const q = `'${escapeDriveQueryLiteral(safeParentId)}' in parents and name = '${safeName}' and trashed = false`;
   const params = new URLSearchParams({
     q,
     fields: `files(${DEFAULT_FILE_FIELDS})`,
@@ -346,7 +354,7 @@ export function findChildByName(
     supportsAllDrives: "true",
     includeItemsFromAllDrives: "true",
   });
-  const key = `child:by-name:${parentId}:${name}`;
+  const key = `child:by-name:${safeParentId}:${name}`;
   return inflight(key, async () => {
     const res = await authedFetch(
       `${API_BASE}/files?${params}`,
@@ -373,11 +381,12 @@ export async function createFolder(
   name: string,
   reqOpts: RequestOptions = {},
 ): Promise<DriveFile> {
+  const safeParentId = assertDriveId(parentId, "Drive parent folder ID");
   const url = `${API_BASE}/files?fields=${encodeURIComponent(DEFAULT_FILE_FIELDS)}&supportsAllDrives=true`;
   const body = JSON.stringify({
     name,
     mimeType: FOLDER_MIME,
-    parents: [parentId],
+    parents: [safeParentId],
   });
   const res = await authedFetch(
     url,
@@ -397,9 +406,47 @@ export async function createFolder(
 }
 
 /**
+ * Server-side copy of an accessible Drive file into `parentId`.
+ *
+ * This is the core of the share-import flow: Drive performs the copy inside
+ * Google's backend, so the browser does not download the source bytes and
+ * re-upload them. The caller still needs read access to the source and write
+ * access to the destination, and owner-level copy restrictions still apply.
+ */
+export async function copyFileToFolder(
+  fileId: string,
+  opts: { parentId: string; name?: string },
+  reqOpts: RequestOptions = {},
+): Promise<DriveFile> {
+  const safeFileId = assertDriveId(fileId, "Drive file ID");
+  const safeParentId = assertDriveId(opts.parentId, "Drive parent folder ID");
+  const url =
+    `${API_BASE}/files/${encodeURIComponent(safeFileId)}/copy` +
+    `?fields=${encodeURIComponent(DEFAULT_FILE_FIELDS)}&supportsAllDrives=true`;
+  const res = await authedFetch(
+    url,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...(opts.name ? { name: opts.name } : {}),
+        parents: [safeParentId],
+      }),
+      signal: reqOpts.signal,
+    },
+    {
+      kind: reqOpts.kind ?? "metadata",
+      priority: reqOpts.priority ?? "normal",
+      signal: reqOpts.signal,
+    },
+  );
+  return (await res.json()) as DriveFile;
+}
+
+/**
  * Idempotent folder bootstrap: look up `name` inside `parentId`, create if
  * missing. The check + create is wrapped in `inflight` so a burst of parallel
- * calls (e.g., share-folder bootstrap + entries/ + comments/ all racing on
+ * calls (e.g., share-folder bootstrap racing with another sharing surface on
  * cold start) doesn't create duplicates.
  */
 export function findOrCreateChildFolder(
@@ -407,11 +454,12 @@ export function findOrCreateChildFolder(
   name: string,
   reqOpts: RequestOptions = {},
 ): Promise<DriveFile> {
-  const key = `folder:ensure:${parentId}:${name}`;
+  const safeParentId = assertDriveId(parentId, "Drive parent folder ID");
+  const key = `folder:ensure:${safeParentId}:${name}`;
   return inflight(key, async () => {
-    const existing = await findChildByName(parentId, name, reqOpts);
+    const existing = await findChildByName(safeParentId, name, reqOpts);
     if (existing && existing.mimeType === FOLDER_MIME) return existing;
-    return createFolder(parentId, name, reqOpts);
+    return createFolder(safeParentId, name, reqOpts);
   });
 }
 
@@ -429,10 +477,11 @@ export async function uploadJsonFile(
   data: unknown,
   reqOpts: RequestOptions = {},
 ): Promise<DriveFile> {
+  const safeParentId = assertDriveId(parentId, "Drive parent folder ID");
   const boundary = `nyrima-${Math.random().toString(36).slice(2)}`;
   const metadata = {
     name,
-    parents: [parentId],
+    parents: [safeParentId],
     mimeType: "application/json",
   };
   const body =
@@ -471,7 +520,8 @@ export async function updateJsonFile(
   data: unknown,
   reqOpts: RequestOptions = {},
 ): Promise<DriveFile> {
-  const url = `${UPLOAD_API_BASE}/files/${encodeURIComponent(fileId)}?uploadType=media&fields=${encodeURIComponent(DEFAULT_FILE_FIELDS)}&supportsAllDrives=true`;
+  const safeFileId = assertDriveId(fileId, "Drive file ID");
+  const url = `${UPLOAD_API_BASE}/files/${encodeURIComponent(safeFileId)}?uploadType=media&fields=${encodeURIComponent(DEFAULT_FILE_FIELDS)}&supportsAllDrives=true`;
   const res = await authedFetch(
     url,
     {
@@ -491,8 +541,8 @@ export async function updateJsonFile(
 
 /**
  * Trash a file by id (Drive `files.delete` actually moves to trash for
- * standard items). Used by the unshare flow in the Social hub — removing
- * an entry from `Shared/entries/` after pruning it from `index.json`.
+ * standard items). Kept as a general Drive helper for future sharing cleanup
+ * tasks and any app-created files that need to be removed.
  *
  * 204 No Content on success; the call is idempotent against an already-gone
  * id (404 swallowed) so a retry after a partial unshare doesn't error out.
@@ -501,7 +551,8 @@ export async function deleteFile(
   fileId: string,
   reqOpts: RequestOptions = {},
 ): Promise<void> {
-  const url = `${API_BASE}/files/${encodeURIComponent(fileId)}?supportsAllDrives=true`;
+  const safeFileId = assertDriveId(fileId, "Drive file ID");
+  const url = `${API_BASE}/files/${encodeURIComponent(safeFileId)}?supportsAllDrives=true`;
   try {
     await authedFetch(
       url,
@@ -519,6 +570,77 @@ export async function deleteFile(
     if (/\b404\b/.test(msg)) return;
     throw e;
   }
+}
+
+/**
+ * Multipart upload of a raw-text file (used for the comments JSONL stream).
+ * Same multipart envelope as `uploadJsonFile`, but the inner Content-Type
+ * is configurable so Drive's preview shows JSONL as plain text.
+ */
+export async function uploadTextFile(
+  parentId: string,
+  name: string,
+  text: string,
+  mime: string = "text/plain",
+  reqOpts: RequestOptions = {},
+): Promise<DriveFile> {
+  const safeParentId = assertDriveId(parentId, "Drive parent folder ID");
+  const boundary = `nyrima-${Math.random().toString(36).slice(2)}`;
+  const metadata = { name, parents: [safeParentId], mimeType: mime };
+  const body =
+    `--${boundary}\r\n` +
+    `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
+    `${JSON.stringify(metadata)}\r\n` +
+    `--${boundary}\r\n` +
+    `Content-Type: ${mime}; charset=UTF-8\r\n\r\n` +
+    `${text}\r\n` +
+    `--${boundary}--`;
+  const url = `${UPLOAD_API_BASE}/files?uploadType=multipart&fields=${encodeURIComponent(DEFAULT_FILE_FIELDS)}&supportsAllDrives=true`;
+  const res = await authedFetch(
+    url,
+    {
+      method: "POST",
+      headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
+      body,
+      signal: reqOpts.signal,
+    },
+    {
+      kind: reqOpts.kind ?? "metadata",
+      priority: reqOpts.priority ?? "normal",
+      signal: reqOpts.signal,
+    },
+  );
+  return (await res.json()) as DriveFile;
+}
+
+/**
+ * Overwrite the contents of an existing text file. Drive lacks a true
+ * append primitive, so callers wanting append semantics must
+ * download → mutate → updateTextFile in their own layer.
+ */
+export async function updateTextFile(
+  fileId: string,
+  text: string,
+  mime: string = "text/plain",
+  reqOpts: RequestOptions = {},
+): Promise<DriveFile> {
+  const safeFileId = assertDriveId(fileId, "Drive file ID");
+  const url = `${UPLOAD_API_BASE}/files/${encodeURIComponent(safeFileId)}?uploadType=media&fields=${encodeURIComponent(DEFAULT_FILE_FIELDS)}&supportsAllDrives=true`;
+  const res = await authedFetch(
+    url,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": `${mime}; charset=UTF-8` },
+      body: text,
+      signal: reqOpts.signal,
+    },
+    {
+      kind: reqOpts.kind ?? "metadata",
+      priority: reqOpts.priority ?? "normal",
+      signal: reqOpts.signal,
+    },
+  );
+  return (await res.json()) as DriveFile;
 }
 
 /**
@@ -567,8 +689,9 @@ export async function getFolderIsPublic(
   fileId: string,
   reqOpts: RequestOptions = {},
 ): Promise<boolean> {
+  const safeFileId = assertDriveId(fileId, "Drive folder ID");
   const url =
-    `${API_BASE}/files/${encodeURIComponent(fileId)}/permissions` +
+    `${API_BASE}/files/${encodeURIComponent(safeFileId)}/permissions` +
     `?fields=permissions(id,type,role,allowFileDiscovery)` +
     `&supportsAllDrives=true`;
   const res = await authedFetch(
@@ -599,8 +722,9 @@ export async function setFolderPublic(
   fileId: string,
   reqOpts: RequestOptions = {},
 ): Promise<void> {
+  const safeFileId = assertDriveId(fileId, "Drive folder ID");
   const url =
-    `${API_BASE}/files/${encodeURIComponent(fileId)}/permissions` +
+    `${API_BASE}/files/${encodeURIComponent(safeFileId)}/permissions` +
     `?supportsAllDrives=true&sendNotificationEmail=false`;
   await authedFetch(
     url,
@@ -630,8 +754,9 @@ export async function setFolderPrivate(
   fileId: string,
   reqOpts: RequestOptions = {},
 ): Promise<void> {
+  const safeFileId = assertDriveId(fileId, "Drive folder ID");
   const listUrl =
-    `${API_BASE}/files/${encodeURIComponent(fileId)}/permissions` +
+    `${API_BASE}/files/${encodeURIComponent(safeFileId)}/permissions` +
     `?fields=permissions(id,type)&supportsAllDrives=true`;
   const listRes = await authedFetch(
     listUrl,
@@ -646,7 +771,7 @@ export async function setFolderPrivate(
   const anyone = (data.permissions ?? []).find((p) => p.type === "anyone");
   if (!anyone) return;
   const delUrl =
-    `${API_BASE}/files/${encodeURIComponent(fileId)}/permissions/${encodeURIComponent(anyone.id)}` +
+    `${API_BASE}/files/${encodeURIComponent(safeFileId)}/permissions/${encodeURIComponent(anyone.id)}` +
     `?supportsAllDrives=true`;
   await authedFetch(
     delUrl,

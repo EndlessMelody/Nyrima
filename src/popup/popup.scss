@@ -15,6 +15,7 @@ body {
   font-family: var(--dc-font-display), -apple-system, BlinkMacSystemFont,
     "Segoe UI", Roboto, sans-serif;
   font-feature-settings: "ss01", "ss02";
+  overflow: hidden;
 }
 
 * {
@@ -34,8 +35,7 @@ button {
   flex-direction: column;
   gap: 14px;
   background: var(--page-background);
-  max-height: 560px;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 /* ─────────────────────────── Header ─────────────────────────── */
@@ -223,6 +223,19 @@ button {
   }
 }
 
+.dc-pop-cta-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.dc-pop-cta-row .dc-pop-cta {
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 10px;
+  height: 54px;
+  padding: 0 12px;
+}
+
 .dc-pop-cta__glyph {
   font-size: 11px;
   color: var(--brand-on-background-strong);
@@ -237,6 +250,7 @@ button {
   font-size: 0.875rem;
   font-weight: 500;
   letter-spacing: -0.01em;
+  min-width: 0;
 }
 
 .dc-pop-cta__sub {
@@ -254,7 +268,14 @@ button {
   min-width: 0;
 }
 
-.dc-pop-cta__resume-name {
+.dc-pop-cta--lobby .dc-pop-cta__label {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.dc-pop-cta__detail {
   display: inline-block;
   max-width: 100%;
   font-family: var(--dc-font-body);
@@ -557,12 +578,4 @@ button {
   &:hover {
     color: var(--brand-on-background-strong);
   }
-}
-
-/* The popup pulls in anime-theme.scss too, so the global themed scrollbar
- * (gradient thumb + neon glow) applies here automatically. Only the rail
- * width gets tightened — at 360px popup width a 6px rail keeps from
- * eating into the row layout. */
-.dc-pop::-webkit-scrollbar {
-  width: 6px;
 }

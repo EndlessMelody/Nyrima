@@ -62,9 +62,15 @@ export function AppProviders({ children }: { children: ReactNode }) {
   // …) once on boot so the player can read straight from the store. Lazy
   // import keeps the providers file's dependency graph thin.
   useEffect(() => {
-    void import("../stores/settings-store").then(({ useSettingsStore }) =>
-      useSettingsStore.getState().load(),
-    );
+    let cancelled = false;
+    void import("../stores/settings-store").then(async ({ useSettingsStore }) => {
+      const store = useSettingsStore.getState();
+      await store.load();
+      if (!cancelled) setMode(store.settings.theme);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Reflect resolved theme onto <html> so Once UI's CSS variables flip correctly.

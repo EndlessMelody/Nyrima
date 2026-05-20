@@ -11,7 +11,7 @@
   pointer-events: none;
   // libass draws with full alpha; keep the canvas above the <video> but below
   // any HUD element so timeline scrubs aren't blocked by subtitle glyphs.
-  z-index: 2;
+  z-index: 20;
   // Smooth scaling when the rendered canvas dimensions differ from the
   // display size (high-DPI displays, fullscreen transitions).
   image-rendering: auto;

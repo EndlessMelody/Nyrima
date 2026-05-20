@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
  * Generate extension toolbar icon PNGs (16/32/48/128) from the source image
- * at public/icons/Icon.png. Requires `sharp` for proper resizing; falls back
+ * at public/icons/extension-icon.png. Requires `sharp` for proper resizing; falls back
  * to a brand-coloured "N" placeholder when sharp is unavailable.
  *
- * NyrimaMark.tsx loads the unscaled Icon.png at runtime; this script only
- * produces the toolbar/manifest icons Chrome needs at fixed sizes.
+ * NyrimaMark.tsx loads app-icon.png at runtime; this script only produces
+ * the toolbar/manifest icons Chrome needs at fixed sizes.
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
@@ -15,7 +15,7 @@ const outDir = "public/icons";
 if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
 
 const SIZES = [16, 32, 48, 128];
-const SOURCE = join(outDir, "Icon.png");
+const SOURCE = join(outDir, "extension-icon.png");
 
 async function main() {
   // Try sharp first (best quality)
@@ -23,7 +23,7 @@ async function main() {
     const sharp = (await import("sharp")).default;
     const src = readFileSync(SOURCE);
     for (const s of SIZES) {
-      const file = join(outDir, `icon-${s}.png`);
+      const file = join(outDir, `extension-icon-${s}.png`);
       await sharp(src)
         .resize(s, s, {
           fit: "contain",
@@ -119,7 +119,7 @@ async function main() {
   }
 
   for (const s of SIZES) {
-    const file = join(outDir, `icon-${s}.png`);
+    const file = join(outDir, `extension-icon-${s}.png`);
     writeFileSync(file, makePng(s));
     console.log(`[icons] wrote ${file} (${s}x${s}) placeholder — install sharp for real icons`);
   }

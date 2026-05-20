@@ -167,13 +167,13 @@ export function parseAss(source: string): SubCue[] {
     if (fields.length < 10) continue;
     const start = assTimeToSec(fields[1].trim());
     const end = assTimeToSec(fields[2].trim());
-    const text = fields
-      .slice(9)
-      .join(",")
-      .replace(/\\N/g, "\n")
-      .replace(/\\n/g, "\n")
-      .replace(/\{[^}]*\}/g, "")
-      .trim();
+    const rawText = fields.slice(9).join(",");
+    // Drop cues the script itself wants hidden — e.g. fansub "your player
+    // doesn't support this" warnings tagged with \alpha&HFF& so libass
+    // renders them invisible. Stripping override tags below would otherwise
+    // turn that invisible warning into visible text under the CSS overlay.
+    if (isAssCueHidden(rawText)) continue;
+    const text = stripAssTags(rawText);
     if (!text) continue;
     const styles = extractAssStyles(fields[9]);
     cues.push({
@@ -187,8 +187,83 @@ export function parseAss(source: string): SubCue[] {
   return cues;
 }
 
+/**
+ * Detect cues that an ASS script has explicitly hidden via override tags.
+ * Libass renders these as transparent; the CSS fallback overlay strips
+ * overrides wholesale, so without this filter the hidden text shows up as
+ * bare visible content. Recognised hide patterns:
+ *
+ *   - `\alpha&HFF&`               — all four channels fully transparent
+ *   - `\1a&HFF&` + `\3a&HFF&`     — fill + border invisible (the two
+ *                                    channels that actually carry the glyph)
+ *   - `\fade(N, M, …)` with both  — keyframed fade that begins and ends at
+ *     N and M ≥ 250                  transparent (i.e. never appears)
+ *
+ * Note: positional hacks like `\pos(-9999, -9999)` aren't matched here —
+ * they're rare in modern fansubs and risk false positives on legitimate
+ * off-edge typesetting.
+ */
+export function isAssCueHidden(text: string): boolean {
+  const blocks = text.match(/\{[^}]*\}/g);
+  if (!blocks) return false;
+  for (const block of blocks) {
+    if (/\\alpha\s*&H[fF][fF]&/.test(block)) return true;
+    const a1 = /\\1a\s*&H[fF][fF]&/.test(block);
+    const a3 = /\\3a\s*&H[fF][fF]&/.test(block);
+    if (a1 && a3) return true;
+    const fade = block.match(/\\fade\(\s*(\d+)\s*,\s*(\d+)\s*,/);
+    if (fade && Number(fade[1]) >= 250 && Number(fade[2]) >= 250) return true;
+  }
+  return false;
+}
+
+/**
+ * Strip ASS/SSA override tags from a raw Dialogue text field, leaving only
+ * the renderable plain text. The CSS fallback overlay consumes the output —
+ * libass / JASSUB reads the raw script directly and never sees this.
+ *
+ * Handles the awkward cases that show up in real fansub scripts:
+ *
+ *   1. **Drawing mode** (`{\p1}m 0 0 l 100 100 b ...{\p0}` for typeset
+ *      signs and ribbons). Without special handling, the inner brace strip
+ *      would leave the bare path commands behind and the CSS overlay would
+ *      render `m 936 690 l 997 691 1003 723 ...` as plain text on screen
+ *      (which is what users saw in the Tonari no Alya BD release — the OP
+ *      title card uses drawing-mode masks). We snip the entire
+ *      `{\p1}…{\p0}` (or `{\p1}…EOL`) range first so no path data survives.
+ *
+ *   2. **Well-formed override blocks** (`{\b1}`, `{\an8}`, `{\c&H...&}`)
+ *      stripped by the simple `\{[^{}]*\}` pass.
+ *
+ *   3. **Sliced overrides** at the field boundaries when a comma inside
+ *      `\pos(x,y)` or `\fade(0,0,400,…)` mis-split the Dialogue row.
+ *
+ *   4. **ASS line-break escapes** (`\N`, `\n`, `\h`) converted to renderable
+ *      whitespace.
+ */
+export function stripAssTags(text: string): string {
+  let out = text;
+  // 1. Drawing-mode sections come first — once `{\p1}` is stripped, the
+  //    path data behind it (`m 936 690 l 997 691 …`) is indistinguishable
+  //    from real dialogue. Match `{...\pN...}` where N ≥ 1, then everything
+  //    up to either a closing `{\p0}` or EOL.
+  out = out.replace(
+    /\{[^{}]*\\p[1-9]\d*[^{}]*\}[\s\S]*?(?:\{[^{}]*\\p0[^{}]*\}|$)/g,
+    "",
+  );
+  // 2. Well-formed { ... } override blocks.
+  out = out.replace(/\{[^{}]*\}/g, "");
+  // 3. Sliced-override cleanups.
+  out = out.replace(/^[^{}]*?\\[a-zA-Z][^{}]*\}/, "");
+  out = out.replace(/\{[^{}]*$/, "");
+  return out
+    .replace(/\\N/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/\\h/g, " ")
+    .trim();
+}
+
 function extractAssStyles(textField: string): SubStyles | undefined {
-  // Very basic: look for {\c&HBBGGRR&} color tags and {\i1} italic
   const styles: SubStyles = {};
   const colorMatch = textField.match(/\\c&H([0-9A-Fa-f]{6})&/);
   if (colorMatch) {
@@ -202,12 +277,116 @@ function extractAssStyles(textField: string): SubStyles | undefined {
   if (/\\i1/.test(textField)) styles.italic = true;
   if (/\\b1/.test(textField)) styles.bold = true;
   if (/\\u1/.test(textField)) styles.underline = true;
-  // Intentionally drop ASS `\an` alignment from the parsed cue: the user
-  // wants dialogue centered regardless of what the script says, and the CSS
-  // overlay path can't honor positioned signs (`\pos`/`\move`) anyway — those
-  // go through JASSUB. Leaving `align` undefined here lets CueLine fall
-  // through to its `"center"` default in SubtitleOverlay.
+  // Honor explicit \an positioning so the CSS overlay can at least show
+  // top vs. bottom and align left/center/right while JASSUB is booting.
+  // libass on the JASSUB path re-parses the raw script anyway, so this
+  // costs nothing there.
+  const anMatch = textField.match(/\\an([1-9])/);
+  if (anMatch) {
+    const placement = alignmentToPlacement(parseInt(anMatch[1], 10));
+    if (placement) {
+      styles.align = placement.align;
+      styles.linePosition = placement.linePosition;
+    }
+  }
+  // \pos(x, y) — y is interpreted relative to PlayResY=1080 (the default the
+  // synthesised header uses); fansub scripts may declare a different PlayResY
+  // but the relative band (top / mid / bottom) is what the CSS overlay needs.
+  const posMatch = textField.match(/\\pos\(\s*[-\d.]+\s*,\s*([-\d.]+)\s*\)/);
+  if (posMatch) {
+    const y = parseFloat(posMatch[1]);
+    if (!Number.isNaN(y)) {
+      styles.linePosition = Math.max(0, Math.min(100, (y / 1080) * 100));
+    }
+  }
   return Object.keys(styles).length > 0 ? styles : undefined;
+}
+
+/**
+ * Map an ASS `\an{N}` / Style.Alignment value to a CSS-friendly placement.
+ *
+ *   1 bottom-left   2 bottom-center  3 bottom-right
+ *   4 middle-left   5 middle-center  6 middle-right
+ *   7 top-left      8 top-center     9 top-right
+ */
+export function alignmentToPlacement(
+  n: number,
+): { align: "left" | "center" | "right"; linePosition: number } | null {
+  if (!Number.isFinite(n) || n < 1 || n > 9) return null;
+  const horizontal = ((n - 1) % 3) as 0 | 1 | 2;
+  const vertical = Math.floor((n - 1) / 3); // 0 bottom, 1 middle, 2 top
+  const align: "left" | "center" | "right" =
+    horizontal === 0 ? "left" : horizontal === 1 ? "center" : "right";
+  const linePosition = vertical === 2 ? 10 : vertical === 1 ? 50 : 90;
+  return { align, linePosition };
+}
+
+/**
+ * Family name JASSUB registers the bundled fallback woff2 under. Kept in
+ * sync with `BUNDLED_FONT_FAMILY` in JassubOverlay.tsx — rewriting every
+ * Style.Fontname column to this exact value short-circuits libass's font
+ * lookup so it never fans out to the OS font catalogue or Google Fonts.
+ */
+export const BUNDLED_ASS_FONT_FAMILY = "liberation sans";
+
+/**
+ * Rewrite Fontname references in an ASS/SSA script header to the single
+ * bundled fallback face JASSUB ships with.
+ *
+ * Why: Nyrima intentionally does not load arbitrary fonts (no `queryFonts:
+ * "local"`, no attachment mounting). When the script references a Fontname
+ * the user doesn't have, libass would otherwise spend startup querying for
+ * the missing face. Forcing every Fontname to the bundled family lets libass
+ * resolve on the first try while every other style attribute (color, bold,
+ * italic, alignment, outline, karaoke) survives untouched.
+ *
+ * Only the `Fontname` column in `[V4 Styles]` / `[V4+ Styles]` Style rows is
+ * rewritten. Per-cue `\fn` overrides and Fontsize are left alone — we still
+ * honor sizing decisions even when we can't honor the typeface choice.
+ */
+export function stripAssFontReferences(source: string): string {
+  const lines = source.replace(/\r\n/g, "\n").split("\n");
+  let section: "styles" | "other" = "other";
+  let stylesFormat: string[] = [];
+  let stylesFontIdx = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (/^\[V4\+?\s*Styles\]$/i.test(trimmed)) {
+      section = "styles";
+      stylesFormat = [];
+      stylesFontIdx = -1;
+      continue;
+    }
+    if (/^\[[^\]]+\]$/.test(trimmed)) {
+      section = "other";
+      continue;
+    }
+    if (section === "styles" && /^Format\s*:/i.test(trimmed)) {
+      stylesFormat = trimmed
+        .slice(trimmed.indexOf(":") + 1)
+        .split(",")
+        .map((s) => s.trim().toLowerCase());
+      stylesFontIdx = stylesFormat.indexOf("fontname");
+      continue;
+    }
+    if (
+      section === "styles" &&
+      stylesFontIdx >= 0 &&
+      /^Style\s*:/i.test(trimmed)
+    ) {
+      const colonAt = lines[i].indexOf(":");
+      const head = lines[i].slice(0, colonAt + 1);
+      const fields = lines[i].slice(colonAt + 1).split(",");
+      if (stylesFontIdx < fields.length) {
+        const leading = fields[stylesFontIdx].match(/^\s*/)?.[0] ?? "";
+        fields[stylesFontIdx] = `${leading}${BUNDLED_ASS_FONT_FAMILY}`;
+        lines[i] = `${head}${fields.join(",")}`;
+      }
+    }
+  }
+  return lines.join("\n");
 }
 
 // ---------------------------------------------------------------------------

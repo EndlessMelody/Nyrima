@@ -33,6 +33,7 @@ export function App() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/library/:folderId" element={<LibraryPage />} />
         <Route path="/social" element={<SocialPage />} />
+        <Route path="/social/shelf/:folderId" element={<SocialPage />} />
         <Route path="/social/:tab" element={<SocialPage />} />
         <Route
           path="/play/:folderId/:fileId"

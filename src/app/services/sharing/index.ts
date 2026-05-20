@@ -3,8 +3,7 @@
  *
  * Keep the surface narrow — modules outside the sharing tree should pull
  * from this barrel, not reach into individual files. That gives us room
- * to reshape the internal layout (e.g., splitting entry-store into
- * reader/writer) without churning every call site.
+ * to reshape the internal layout without churning every call site.
  */
 
 export {
@@ -17,17 +16,11 @@ export {
 export {
   readShareIndex,
   writeShareIndex,
+  mutateShareIndex,
   prependIndexEntry,
   removeIndexEntry,
-} from "./index-store";
-
-export {
-  writeShareEntry,
-  readShareEntry,
-  deleteShareEntry,
   generateShareId,
-  entryFilename,
-} from "./entry-store";
+} from "./index-store";
 
 export {
   getShareProfile,
@@ -42,3 +35,26 @@ export {
   unpublishSharedFolder,
   clearSharedFolderPublicCache,
 } from "./share-permissions";
+
+export {
+  appendComment,
+  readComments,
+  aggregateComments,
+  parseCommentsJsonl,
+} from "./comments-store";
+
+export {
+  fetchDirectory,
+  getCachedDirectory,
+  clearDirectoryCache,
+} from "./directory";
+
+export {
+  DRIVE_IMPORTS_FOLDER_NAME,
+  buildImportFolderName,
+  importShareTargetToDrive,
+  sanitizeImportFolderName,
+  shouldCopyVideoCompanion,
+  type DriveImportFailure,
+  type DriveImportResult,
+} from "./drive-import";

@@ -15,6 +15,12 @@ export interface DriveFile {
     height?: number;
     durationMillis?: string;
   };
+  capabilities?: {
+    canCopy?: boolean;
+    canDownload?: boolean;
+    canReadRevisions?: boolean;
+    [key: string]: boolean | undefined;
+  };
   parents?: string[];
 }
 
@@ -85,15 +91,18 @@ export interface PlaybackPosition {
  *  user uploaded their own .woff2/.ttf — the file lives in
  *  `subtitleCustomFontDataUrl` and is registered via @font-face on load.
  *
- *  Renamed from the old `comic`/`geist` keys so the picker labels actually
- *  describe what the user sees: `anime-brush` is the fansub-flavored Comic
- *  Neue stack (the one the old "Comic Sans" preset really rendered as),
- *  `comic-dialogue` prefers the literal Comic Sans face when present, and
- *  `clean-sans` is the Geist Sans body stack. */
+ *  Each key now matches the bundled face it ships with so the picker label,
+ *  the @font-face family in fonts.scss, and the data shape stay in sync:
+ *
+ *    - `chinacat-teddybear` — Chinacat Teddybear (brush voice, was anime-brush)
+ *    - `cascadia`           — Cascadia Mono (dialogue voice, was comic-dialogue)
+ *    - `asap`               — Asap variable sans (was clean-sans)
+ *    - `system`             — platform UI default
+ *    - `custom`             — user-uploaded face from subtitleCustomFontDataUrl */
 export type SubtitleFontPreset =
-  | "anime-brush"
-  | "comic-dialogue"
-  | "clean-sans"
+  | "chinacat-teddybear"
+  | "cascadia"
+  | "asap"
   | "system"
   | "custom";
 
@@ -101,7 +110,6 @@ export type LibrarySortKey = "name" | "modified" | "size" | "duration";
 export type LibraryViewMode = "grouped" | "grid" | "list";
 
 export interface AppSettings {
-  preferredSubtitleLanguage: string; // e.g. "vi", "en"
   autoplayNext: boolean;
   defaultVolume: number; // 0..1
   theme: "system" | "light" | "dark";
@@ -145,17 +153,17 @@ export interface AppSettings {
 // Phase 4 — sharing layer
 //
 // Drive-only social model: every user gets a `Shared/` subfolder under their
-// Nyrima root, set to "Anyone with the link → Viewer". Their share entries
-// live as one JSON file per share inside `Shared/entries/`; an
-// `index.json` at the folder root manifests them so a recipient can pull a
-// slim list before downloading individual entry bytes.
+// Nyrima root, set to "Anyone with the link → Viewer". A single
+// `index.json` at the folder root manifests every share *inline* — the
+// schema v=2 collapses the old `entries/{id}.json` per-share files into the
+// index itself. Followers pull one file to render the whole feed.
 //
 // Comments are decentralized: each commenter writes to *their own*
-// `Shared/comments/{shareId}.jsonl` as append-only JSON-Lines. The share
-// owner reconstructs a thread by scanning every follower's Shared folder
-// for files matching their shareId. No user ever needs edit access to
-// anyone else's folder — Drive's binary view/edit permission model is the
-// reason we route comments through the commenter's own surface.
+// `Shared/comments.jsonl` as append-only JSON-Lines. The share owner
+// reconstructs threads by scanning each followed user's flat comments stream
+// and filtering by `{ sharedFolderId, shareId }`. No user ever needs edit
+// access to anyone else's folder — Drive's binary view/edit permission model
+// is the reason we route comments through the commenter's own surface.
 // ---------------------------------------------------------------------------
 
 /** Author profile snapshot stamped into every ShareEntry + ShareComment.
@@ -191,22 +199,22 @@ export interface ShareLibraryTarget {
 
 export type ShareTarget = ShareVideoTarget | ShareLibraryTarget;
 
-/** A single share entry — one JSON file at
- *  `Shared/entries/{id}.json` in the author's folder. */
+/** A single share entry. Inlined directly into `index.json` under v=2 —
+ *  there is no longer a separate `entries/{id}.json` file. Author is
+ *  implicit from the enclosing `ShareIndex.owner`. */
 export interface ShareEntry {
-  /** Stable random id (UUID-like). Used as the filename + cross-user
-   *  reference key (e.g., for routing comments back to the right thread). */
+  /** Stable random id (UUID-like). Cross-user reference key (e.g., for
+   *  routing comments back to the right thread). */
   id: string;
-  /** Schema version for forward-compat. Bumped if/when the shape changes. */
-  v: 1;
+  /** Schema version. v=2 = inlined in index.json; v=1 (legacy) had a
+   *  separate per-entry file and is no longer read. */
+  v: 2;
   /** ISO 8601 timestamp when the share was created. */
   sharedAt: string;
   /** ISO 8601 of last edit (caption change, re-share, etc.). */
   updatedAt: string;
   /** What's being shared — video file or whole library. */
   target: ShareTarget;
-  /** Author snapshot at share time. */
-  author: ShareAuthor;
   /** Optional caption / commentary by the author. Plain text only — no
    *  HTML or markdown rendering for safety + simplicity. */
   caption?: string;
@@ -219,39 +227,45 @@ export interface ShareEntry {
   title?: string;
 }
 
-/** Slim per-entry record in `index.json`. Just enough for a recipient to
- *  render a list card; full payload comes from the entry JSON file. */
-export interface ShareIndexEntry {
-  id: string;
-  sharedAt: string;
-  /** Drive file id of the entry JSON inside `Shared/entries/`. */
-  entryFileId: string;
-  kind: ShareTargetKind;
-  title?: string;
-  posterUrl?: string;
-}
-
 /** The `index.json` manifest at the root of every user's `Shared/` folder.
- *  Single source of truth for "what has this user shared and when". */
+ *  Single source of truth for "what has this user shared and when".
+ *
+ *  v=2: entries are full ShareEntry payloads inlined here. One Drive read
+ *  per follower yields the whole feed. v=1 indexes (pre-refactor) are
+ *  ignored — `readShareIndex` returns null for them and the next share
+ *  re-seeds a fresh v=2 manifest. */
 export interface ShareIndex {
-  v: 1;
+  v: 2;
   /** Owner profile — self-contained so following the index URL alone is
    *  enough to render attribution in the lobby. */
   owner: ShareAuthor;
   /** ISO 8601 of the last write to this index. */
   updatedAt: string;
   /** Newest-first. Soft-capped at MAX_SHARE_INDEX_ENTRIES; older entries
-   *  remain on Drive but stop being listed in the index. */
-  entries: ShareIndexEntry[];
+   *  fall off the manifest entirely under the inline model. */
+  entries: ShareEntry[];
 }
 
-/** A single comment, one per line inside
- *  `Shared/comments/{shareId}.jsonl`. */
+/** A single comment, written one per line inside the commenter's own
+ *  `Shared/comments.jsonl`. The file is a flat JSONL stream — all comments
+ *  the user has ever posted, regardless of which share they're on. The
+ *  share owner reconstructs threads on a given share by reading every
+ *  follower's `comments.jsonl` and filtering to entries where
+ *  `sharedFolderId` matches their own folder. */
 export interface ShareComment {
   v: 1;
+  /** Stable random id (UUID-ish). Lets the UI dedupe across re-reads and
+   *  gives a future "delete this comment" affordance something to target. */
+  id: string;
+  /** Drive folder id of the *share owner's* `Shared/` folder. Used by the
+   *  aggregator to filter a follower's flat comments file down to just the
+   *  comments that target this owner's shares. */
+  sharedFolderId: string;
+  /** Id of the specific share being commented on (`ShareEntry.id`). */
+  shareId: string;
   /** ISO 8601 timestamp of the comment. */
   at: string;
-  /** Commenter snapshot. */
+  /** Commenter snapshot — handle/name/avatar at write time. */
   author: ShareAuthor;
   /** Plain text. Capped at MAX_SHARE_COMMENT_CHARS. */
   text: string;
@@ -274,6 +288,33 @@ export interface FollowedUser {
   followedAt: string;
 }
 
+/** One row in the P4.4 bootstrap directory — a public, opt-in list of
+ *  discoverable users hosted as a single JSON file on GitHub. Each entry
+ *  carries enough to render a People → Discover suggestion card and
+ *  trigger a one-click follow. */
+export interface DirectoryEntry {
+  v: 1;
+  /** Same handle slug rules as ShareProfile.handle. Used as the
+   *  cross-entry dedup key. */
+  handle: string;
+  /** Display name. */
+  name?: string;
+  /** Drive folder id of the user's `Shared/` folder. Same primitive
+   *  PeopleSearch's paste-by-URL flow lands on, so following a directory
+   *  entry reuses the existing follow path with no extra plumbing. */
+  folderId: string;
+  /** Optional avatar URL — same source as ShareAuthor.avatarUrl. */
+  avatarUrl?: string;
+  /** Short bio rendered on the discover card. Plain text, no markdown. */
+  bio?: string;
+  /** Free-form interest tags ("anime", "studio-ghibli", "blu-ray"). Used
+   *  to filter the Discover rail in future iterations. */
+  tags?: string[];
+  /** ISO 8601 of the date the entry was added — drives a "fresh" pill on
+   *  recently-added cards. */
+  addedAt: string;
+}
+
 /** The user's own sharing profile. Stamped into every ShareEntry +
  *  ShareComment they write. Persisted under STORAGE_KEYS.SHARE_PROFILE. */
 export interface ShareProfile {
@@ -291,12 +332,11 @@ export interface ShareProfile {
 // ---------------------------------------------------------------------------
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  preferredSubtitleLanguage: "vi",
   autoplayNext: true,
   defaultVolume: 1.0,
   theme: "dark",
   subtitleScale: 1.0,
-  subtitleFont: "anime-brush",
+  subtitleFont: "chinacat-teddybear",
   subtitleWeight: 700,
   subtitleColor: "#e8e8e8",
   subtitleOutlineColor: "#000000",

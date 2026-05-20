@@ -41,6 +41,7 @@ import {
 } from "../subtitles";
 import type { DriveFile } from "@shared/types";
 import type { RequestOptions } from "./types";
+import { assertDriveId } from "@shared/drive-id";
 
 // ---------------------------------------------------------------------------
 // TTLs (ms)
@@ -157,6 +158,7 @@ export async function listFolder(
   folderId: string,
   opts: FolderListOptions = {},
 ): Promise<FolderListResult> {
+  const safeFolderId = assertDriveId(folderId, "Drive folder ID");
   // Apply dev-mode safety overrides. cacheOnly forces a pure cache read;
   // disablePrefetch is honored by skipping background revalidation below.
   const dev = useDevModeStore.getState();
@@ -166,7 +168,7 @@ export async function listFolder(
   };
   const cached = (await idbGet<FolderScanEntry>(
     STORES.FOLDER_SCAN,
-    folderId,
+    safeFolderId,
   )) ?? null;
 
   if (cached && !effective.forceRefresh) {
@@ -196,7 +198,7 @@ export async function listFolder(
     stats.folderStaleHits += 1;
     const shouldRevalidate = !dev.disablePrefetch && !isCoolingDown();
     if (shouldRevalidate) {
-      void revalidateFolder(folderId, opts).catch(() => {
+      void revalidateFolder(safeFolderId, opts).catch(() => {
         // The fetch failed; we already returned the stale snapshot, so
         // there's nothing for the caller to do here. The error will surface
         // on the next direct call.
@@ -221,14 +223,14 @@ export async function listFolder(
   }
 
   stats.folderMisses += 1;
-  const files = await rawListFolderAll(folderId, opts);
+  const files = await rawListFolderAll(safeFolderId, opts);
   const entry: FolderScanEntry = {
-    folderId,
+    folderId: safeFolderId,
     files,
     scannedAt: Date.now(),
   };
-  await idbPut(STORES.FOLDER_SCAN, folderId, entry);
-  emitFolderChange(folderId);
+  await idbPut(STORES.FOLDER_SCAN, safeFolderId, entry);
+  emitFolderChange(safeFolderId);
   return { files, fromCache: false, scannedAt: entry.scannedAt, revalidating: false };
 }
 
@@ -236,28 +238,30 @@ async function revalidateFolder(
   folderId: string,
   opts: FolderListOptions,
 ): Promise<void> {
-  if (revalidating.has(folderId)) return;
-  revalidating.add(folderId);
+  const safeFolderId = assertDriveId(folderId, "Drive folder ID");
+  if (revalidating.has(safeFolderId)) return;
+  revalidating.add(safeFolderId);
   stats.revalidations += 1;
   try {
-    const files = await rawListFolderAll(folderId, {
+    const files = await rawListFolderAll(safeFolderId, {
       ...opts,
       priority: opts.priority ?? "low",
     });
     const entry: FolderScanEntry = {
-      folderId,
+      folderId: safeFolderId,
       files,
       scannedAt: Date.now(),
     };
-    await idbPut(STORES.FOLDER_SCAN, folderId, entry);
-    emitFolderChange(folderId);
+    await idbPut(STORES.FOLDER_SCAN, safeFolderId, entry);
+    emitFolderChange(safeFolderId);
   } finally {
-    revalidating.delete(folderId);
+    revalidating.delete(safeFolderId);
   }
 }
 
 export async function invalidateFolder(folderId: string): Promise<void> {
-  await idbDelete(STORES.FOLDER_SCAN, folderId);
+  const safeFolderId = assertDriveId(folderId, "Drive folder ID");
+  await idbDelete(STORES.FOLDER_SCAN, safeFolderId);
 }
 
 // ---------------------------------------------------------------------------
@@ -273,9 +277,10 @@ export async function getFileMetadata(
   fileId: string,
   opts: FileOptions = {},
 ): Promise<DriveFile> {
+  const safeFileId = assertDriveId(fileId, "Drive file ID");
   const cached = (await idbGet<FileMetadataEntry>(
     STORES.FILE_METADATA,
-    fileId,
+    safeFileId,
   )) ?? null;
 
   const dev = useDevModeStore.getState();
@@ -293,7 +298,7 @@ export async function getFileMetadata(
     // than a fresh rate-limit hit.
     stats.fileStaleHits += 1;
     if (!dev.disablePrefetch && !isCoolingDown()) {
-      void revalidateFile(fileId, opts).catch(() => undefined);
+      void revalidateFile(safeFileId, opts).catch(() => undefined);
     }
     return cached.file;
   }
@@ -303,9 +308,9 @@ export async function getFileMetadata(
   }
 
   stats.fileMisses += 1;
-  const file = await rawGetFile(fileId, undefined, opts);
-  await idbPut(STORES.FILE_METADATA, fileId, {
-    fileId,
+  const file = await rawGetFile(safeFileId, undefined, opts);
+  await idbPut(STORES.FILE_METADATA, safeFileId, {
+    fileId: safeFileId,
     file,
     fetchedAt: Date.now(),
   });
@@ -316,13 +321,14 @@ async function revalidateFile(
   fileId: string,
   opts: FileOptions,
 ): Promise<void> {
+  const safeFileId = assertDriveId(fileId, "Drive file ID");
   stats.revalidations += 1;
-  const file = await rawGetFile(fileId, undefined, {
+  const file = await rawGetFile(safeFileId, undefined, {
     ...opts,
     priority: opts.priority ?? "low",
   });
-  await idbPut(STORES.FILE_METADATA, fileId, {
-    fileId,
+  await idbPut(STORES.FILE_METADATA, safeFileId, {
+    fileId: safeFileId,
     file,
     fetchedAt: Date.now(),
   });

@@ -23,16 +23,82 @@ import {
   readElement,
   readUint,
   MKV_ID,
+  TRACK_TYPE_AUDIO,
   TRACK_TYPE_SUBTITLE,
   type EbmlElement,
   type MkvTrack,
 } from "./ebml";
 import {
-  forceCenterDialogueInAss,
+  alignmentToPlacement,
+  isAssCueHidden,
+  stripAssFontReferences,
+  stripAssTags,
   type SubCue,
   type SubStyles,
 } from "./subtitles";
+import {
+  buildPgsCompositions,
+  type PgsBlock,
+  type PgsComposition,
+} from "./pgs-renderer";
 import { fetchRange } from "./drive-api";
+
+/**
+ * Audio-track metadata pulled from the same header parse that produces
+ * `ExtractedMkvSub[]`. Lets PlayerPage populate the SettingsPopover audio
+ * picker with the muxer-authored names (e.g. "Japanese 5.1", "English
+ * Commentary") instead of the empty strings Chrome returns via
+ * `HTMLVideoElement.audioTracks` for MKV. In MSE mode this list is also the
+ * source of truth — Chrome doesn't expose `audioTracks` at all for a
+ * MediaSource-driven `<video>`, so without this list the user has no way
+ * to switch dubs.
+ */
+export interface MkvAudioTrack {
+  /** MKV `TrackNumber`. Stable id we pass back to the MSE controller. */
+  number: number;
+  /** Raw Matroska CodecID — `A_AAC`, `A_FLAC`, `A_OPUS`, … */
+  codecId: string;
+  /** ISO 639-2/B language tag from the track. `"und"` when unspecified. */
+  language: string;
+  /** Free-form `Name` element. Empty when the muxer didn't author one. */
+  name: string;
+  /** Pre-rendered short label for the picker. Built from name → language → codec. */
+  label: string;
+  /** Channel count, when the muxer wrote one. */
+  channels?: number;
+  /**
+   * True when the codec is in the remux pipeline's whitelist (AAC/FLAC/Opus
+   * /AC-3). Tracks outside that set are non-switchable because Nyrima can't
+   * pack them into a fresh fMP4 init segment.
+   */
+  remuxable: boolean;
+  /**
+   * True when `MediaSource.isTypeSupported` accepts the muxed combination
+   * of this audio track's codec with the file's video codec OR when the
+   * external WebCodecs audio path can decode it. Even when `remuxable` is
+   * true the browser can still refuse a specific combo — Chrome notably
+   * blocks HEVC + AC-3 together in MSE even though each decodes individually.
+   * Populated by PlayerPage right after the header parse so the picker can
+   * disable rows that would silently fail.
+   *
+   * `undefined` means "not probed yet" (e.g. the audio list arrived before
+   * the support check ran). Callers should treat `undefined` as "let the
+   * user try" — only an explicit `false` disables the row.
+   */
+  browserSupported?: boolean;
+  /**
+   * True when the normal MSE/fMP4 lane accepts this track. When both this
+   * and `externalAudioSupported` are true, prefer MSE; the external lane is
+   * only a fallback for codecs/browser combos SourceBuffer refuses.
+   */
+  mseAudioSupported?: boolean;
+  /**
+   * True when Nyrima can bypass MSE audio and decode this track separately
+   * with WebCodecs + Web Audio. Used as a fallback for codecs/browser combos
+   * SourceBuffer refuses, currently FLAC and platform-supported AC-3.
+   */
+  externalAudioSupported?: boolean;
+}
 
 export interface ExtractedMkvSub {
   id: string;
@@ -54,6 +120,14 @@ export interface ExtractedMkvSub {
   assSourceComplete?: boolean;
   /** Internal immutable header used while appending streamed Dialogue lines. */
   assHeader?: string;
+  /**
+   * Decoded PGS compositions for `S_HDMV/PGS` tracks. Empty until finalize()
+   * has folded the streamed blocks; PgsOverlay reads this once the track
+   * becomes active. VobSub tracks stay null — we don't decode SPU yet.
+   */
+  pgsCompositions?: PgsComposition[];
+  /** True once `pgsCompositions` reflects every block in the file. */
+  pgsCompositionsComplete?: boolean;
 }
 
 export interface MkvExtractOptions {
@@ -85,6 +159,8 @@ export async function extractMkvSubtitles(
   opts: MkvExtractOptions = {},
 ): Promise<{
   subs: ExtractedMkvSub[];
+  /** Every audio track found in the header, in muxer order. */
+  audioTracks: MkvAudioTrack[];
   headerBuf: Uint8Array;
   fileSize: number;
   /**
@@ -119,7 +195,9 @@ export async function extractMkvSubtitles(
     headerBuf = new Uint8Array(await blob.arrayBuffer());
     fileSize = total;
   }
-  if (signal?.aborted) return { subs: [], headerBuf, fileSize, headerParsedTo: 0, feedChunk: null, finalize: null };
+  if (signal?.aborted) {
+    return emptyExtractResult(headerBuf, fileSize);
+  }
   opts.onHeader?.({ buf: headerBuf, fileSize });
 
   // 2. Parse header ---------------------------------------------------------
@@ -127,19 +205,26 @@ export async function extractMkvSubtitles(
   try {
     header = parseMkvHeader(headerBuf);
   } catch {
-    return { subs: [], headerBuf, fileSize, headerParsedTo: 0, feedChunk: null, finalize: null };
+    return emptyExtractResult(headerBuf, fileSize);
   }
-  if (!header.tracks) return { subs: [], headerBuf, fileSize, headerParsedTo: 0, feedChunk: null, finalize: null };
+  if (!header.tracks) return emptyExtractResult(headerBuf, fileSize);
 
+  // Audio tracks share the same header parse — we surface them so PlayerPage
+  // can populate the SettingsPopover picker without a second pass.
+  const audioTracks: MkvAudioTrack[] = header.tracks
+    .filter((t) => t.type === TRACK_TYPE_AUDIO)
+    .map(toMkvAudioTrack);
 
   const subTracks = header.tracks.filter((t) => t.type === TRACK_TYPE_SUBTITLE);
   // eslint-disable-next-line no-console
   console.info(
     `[subs] header parsed: fileSize=${fileSize} subTracks=${subTracks.length} ` +
-    `tracks=${subTracks.map((t) => `#${t.number}:${t.codecId}/${t.language}`).join(",")}`,
+    `audioTracks=${audioTracks.length} ` +
+    `tracks=${subTracks.map((t) => `#${t.number}:${t.codecId}/${t.language}`).join(",")} ` +
+    `audio=${audioTracks.map((a) => `#${a.number}:${a.codecId}/${a.language}`).join(",")}`,
   );
   if (subTracks.length === 0) {
-    return { subs: [], headerBuf, fileSize, headerParsedTo: 0, feedChunk: null, finalize: null };
+    return { ...emptyExtractResult(headerBuf, fileSize), audioTracks };
   }
 
   const timecodeScale = header.timecodeScale;
@@ -150,16 +235,36 @@ export async function extractMkvSubtitles(
     infoByTrack.set(t.number, parseAssTrackInfo(t.codecPrivate));
   }
   const assEventsByTrack = new Map<number, string[]>();
+  // Per-track dedupe sets keyed on the cue's deterministic id
+  // (`${startSec.toFixed(3)}-${text.slice(0, 20)}`). Some paths feed the same
+  // header bytes to feedChunk twice — e.g. MSE mode where the MSE controller
+  // pre-feeds [firstClusterOffset, headerBuf.length] for playback even though
+  // `parseRegionForCues` already walked that same region for the subtitle
+  // tracks. Without this guard, every cue in the first 4 MB of the file ends
+  // up duplicated and the libass script bloats by the same factor (visible
+  // as e.g. ~2000 cues for an Oregairu Zoku Blu-ray that actually has ~600).
+  const seenCueIdsByTrack = new Map<number, Set<string>>();
+  // Per-PGS-track raw block accumulator. We pile every Display Set's bytes
+  // here as clusters arrive, then run buildPgsCompositions once in
+  // finalize() so the overlay sees a stable sorted list. Decoding live
+  // (per cluster) would let users see PGS while streaming but risks
+  // emitting half-formed Display Sets — the all-at-once finalize keeps the
+  // composition pairing logic simple.
+  const pgsBlocksByTrack = new Map<number, PgsBlock[]>();
 
   const results: ExtractedMkvSub[] = subTracks.map((t) => {
     const normCodec = t.codecId.toUpperCase().replace(/\s/g, "");
-    const imageBased = normCodec === "S_VOBSUB" || normCodec === "S_HDMV/PGS";
+    const isPgs = normCodec === "S_HDMV/PGS";
+    const isVobSub = normCodec === "S_VOBSUB";
+    const imageBased = isPgs || isVobSub;
     const assInfo = infoByTrack.get(t.number) ?? EMPTY_TRACK_INFO;
     const assSource =
       isAssCodec(t.codecId) && assInfo.sourceHeader
         ? buildAssSource(assInfo.sourceHeader, [])
         : undefined;
     if (assSource) assEventsByTrack.set(t.number, []);
+    if (!imageBased) seenCueIdsByTrack.set(t.number, new Set());
+    if (isPgs) pgsBlocksByTrack.set(t.number, []);
     return {
       id: `mkv-${t.number}-${t.language}`,
       lang: t.language,
@@ -170,13 +275,25 @@ export async function extractMkvSubtitles(
       assSource,
       assSourceComplete: assSource ? false : undefined,
       assHeader: assInfo.sourceHeader ?? undefined,
+      pgsCompositions: isPgs ? [] : undefined,
+      pgsCompositionsComplete: isPgs ? false : undefined,
     };
   });
 
-  // If every subtitle track is image-based we have nothing to extract.
-  if (results.every((r) => r.imageBased)) {
+  // VobSub (S_VOBSUB) is still flagged image-based with no decoder path —
+  // bail out early when *every* track is in that bucket. PGS tracks no
+  // longer count toward this gate: we collect their blocks below.
+  if (results.every((r) => r.codecId.toUpperCase().replace(/\s/g, "") === "S_VOBSUB")) {
     opts.onProgress?.(results);
-    return { subs: results, headerBuf, fileSize, headerParsedTo: 0, feedChunk: null, finalize: null };
+    return {
+      subs: results,
+      audioTracks,
+      headerBuf,
+      fileSize,
+      headerParsedTo: 0,
+      feedChunk: null,
+      finalize: null,
+    };
   }
 
   // 4. Parse clusters present in the header buffer --------------------------
@@ -192,6 +309,8 @@ export async function extractMkvSubtitles(
     timecodeScale,
     infoByTrack,
     assEventsByTrack,
+    pgsBlocksByTrack,
+    seenCueIdsByTrack,
     results,
   );
   // eslint-disable-next-line no-console
@@ -253,6 +372,8 @@ export async function extractMkvSubtitles(
           timecodeScale,
           infoByTrack,
           assEventsByTrack,
+          pgsBlocksByTrack,
+          seenCueIdsByTrack,
           results,
         );
         if (added) cuesAdded = true;
@@ -280,6 +401,19 @@ export async function extractMkvSubtitles(
       if (r.assSource) {
         r.assSourceComplete = true;
       }
+      // PGS: turn the accumulated Display Set bytes into renderable
+      // compositions. Done once at the end so back-to-back cues that share
+      // a paletted-update get paired correctly. Sort key is the block
+      // timestamp, which buildPgsCompositions already preserves.
+      if (r.pgsCompositions != null) {
+        const trackNumber = parsePgsTrackNumberFromId(r.id);
+        const blocks = trackNumber != null ? pgsBlocksByTrack.get(trackNumber) : undefined;
+        if (blocks && blocks.length > 0) {
+          blocks.sort((a, b) => a.start - b.start);
+          r.pgsCompositions = buildPgsCompositions(blocks);
+        }
+        r.pgsCompositionsComplete = true;
+      }
     }
     // eslint-disable-next-line no-console
     console.info(
@@ -289,7 +423,109 @@ export async function extractMkvSubtitles(
     opts.onProgress?.(results);
   };
 
-  return { subs: results, headerBuf, fileSize, headerParsedTo, feedChunk, finalize };
+  return {
+    subs: results,
+    audioTracks,
+    headerBuf,
+    fileSize,
+    headerParsedTo,
+    feedChunk,
+    finalize,
+  };
+}
+
+function emptyExtractResult(
+  headerBuf: Uint8Array,
+  fileSize: number,
+): {
+  subs: ExtractedMkvSub[];
+  audioTracks: MkvAudioTrack[];
+  headerBuf: Uint8Array;
+  fileSize: number;
+  headerParsedTo: number;
+  feedChunk: ((data: Uint8Array) => boolean) | null;
+  finalize: (() => void) | null;
+} {
+  return {
+    subs: [],
+    audioTracks: [],
+    headerBuf,
+    fileSize,
+    headerParsedTo: 0,
+    feedChunk: null,
+    finalize: null,
+  };
+}
+
+/** Project an MKV audio TrackEntry onto the picker-friendly shape. */
+function toMkvAudioTrack(t: MkvTrack): MkvAudioTrack {
+  const codecId = t.codecId;
+  const normCodec = codecId.toUpperCase().replace(/\s/g, "");
+  // Keep this list in sync with the codecs that mp4-generator.ts knows how to
+  // pack into an init segment. Anything outside this set falls back to native
+  // playback for the muxer-default track only — we can't switch INTO it
+  // because we can't build a fresh fMP4 with it baked in.
+  const remuxable =
+    normCodec.startsWith("A_AAC") ||
+    normCodec === "A_FLAC" ||
+    normCodec === "A_OPUS" ||
+    normCodec === "A_AC3";
+  return {
+    number: t.number,
+    codecId,
+    language: t.language || "und",
+    name: t.name || "",
+    label: buildAudioTrackLabel(t),
+    channels: t.audioChannels,
+    remuxable,
+  };
+}
+
+/**
+ * Pretty label for the SettingsPopover audio picker.
+ *
+ *   "Japanese 5.1 (FLAC)"          ← when `Name` carries the descriptive bit
+ *   "English · Commentary (AAC)"   ← `Name` with channels embedded
+ *   "JPN · 2.0 (Opus)"             ← fallback when `Name` is empty
+ *
+ * Codec is always parenthesised so the user can tell why a track may be
+ * MSE-unsupported (HE-AAC / DTS / TrueHD / AC-3 / etc.) — those tracks still
+ * appear in the picker so the user knows they exist even though Nyrima can't
+ * remux them.
+ */
+function buildAudioTrackLabel(t: MkvTrack): string {
+  const lang = (t.language || "und").toUpperCase();
+  const codec = audioCodecLabel(t.codecId);
+  const chans = t.audioChannels ? formatChannelCount(t.audioChannels) : null;
+  const base = t.name
+    ? chans && !t.name.includes(chans)
+      ? `${t.name} · ${chans}`
+      : t.name
+    : chans
+      ? `${lang} · ${chans}`
+      : lang;
+  return `${base} (${codec})`;
+}
+
+function audioCodecLabel(codecId: string): string {
+  const norm = codecId.toUpperCase().replace(/\s/g, "");
+  if (norm.startsWith("A_AAC")) return "AAC";
+  if (norm === "A_FLAC") return "FLAC";
+  if (norm === "A_OPUS") return "Opus";
+  if (norm === "A_AC3") return "AC-3";
+  if (norm === "A_EAC3") return "E-AC-3";
+  if (norm === "A_DTS") return "DTS";
+  if (norm === "A_TRUEHD") return "TrueHD";
+  if (norm.startsWith("A_MPEG/L3")) return "MP3";
+  return codecId.replace(/^A_/, "");
+}
+
+function formatChannelCount(n: number): string {
+  if (n === 1) return "Mono";
+  if (n === 2) return "2.0";
+  if (n === 6) return "5.1";
+  if (n === 8) return "7.1";
+  return `${n}ch`;
 }
 
 function concatU8(a: Uint8Array, b: Uint8Array): Uint8Array {
@@ -320,6 +556,8 @@ function parseRegionForCues(
   timecodeScale: number,
   infoByTrack: Map<number, AssTrackInfo>,
   assEventsByTrack: Map<number, string[]>,
+  pgsBlocksByTrack: Map<number, PgsBlock[]>,
+  seenCueIdsByTrack: Map<number, Set<string>>,
   results: ExtractedMkvSub[],
 ): number {
   let offset = start;
@@ -349,6 +587,8 @@ function parseRegionForCues(
         timecodeScale,
         infoByTrack,
         assEventsByTrack,
+        pgsBlocksByTrack,
+        seenCueIdsByTrack,
         results,
       );
     }
@@ -369,6 +609,8 @@ function parseClusterForCues(
   timecodeScale: number,
   infoByTrack: Map<number, AssTrackInfo>,
   assEventsByTrack: Map<number, string[]>,
+  pgsBlocksByTrack: Map<number, PgsBlock[]>,
+  seenCueIdsByTrack: Map<number, Set<string>>,
   results: ExtractedMkvSub[],
 ): boolean {
   let clusterTimeTicks = 0;
@@ -387,6 +629,17 @@ function parseClusterForCues(
       const block = parseSimpleBlock(buf, child.dataOffset, child.dataLength);
       const track = findTrack(subTracks, block.trackNumber);
       if (!track) continue;
+      if (isPgsTrack(track.codecId)) {
+        appendPgsBlock(
+          pgsBlocksByTrack,
+          track.number,
+          block.data,
+          clusterTimeTicks + block.timecode,
+          timecodeScale,
+        );
+        added = true;
+        continue;
+      }
       const decoded = blockToCue(
         block.data,
         track.codecId,
@@ -396,8 +649,14 @@ function parseClusterForCues(
         infoByTrack.get(track.number) ?? EMPTY_TRACK_INFO,
       );
       if (decoded) {
-        appendCue(results, track.number, decoded, assEventsByTrack);
-        added = true;
+        const appended = appendCue(
+          results,
+          track.number,
+          decoded,
+          assEventsByTrack,
+          seenCueIdsByTrack,
+        );
+        if (appended) added = true;
       }
       continue;
     }
@@ -426,6 +685,17 @@ function parseClusterForCues(
       );
       const track = findTrack(subTracks, block.trackNumber);
       if (!track) continue;
+      if (isPgsTrack(track.codecId)) {
+        appendPgsBlock(
+          pgsBlocksByTrack,
+          track.number,
+          block.data,
+          clusterTimeTicks + block.timecode,
+          timecodeScale,
+        );
+        added = true;
+        continue;
+      }
       const durationSec =
         blockDurationTicks !== null
           ? ticksToSec(blockDurationTicks, timecodeScale)
@@ -439,13 +709,49 @@ function parseClusterForCues(
         infoByTrack.get(track.number) ?? EMPTY_TRACK_INFO,
       );
       if (decoded) {
-        appendCue(results, track.number, decoded, assEventsByTrack);
-        added = true;
+        const appended = appendCue(
+          results,
+          track.number,
+          decoded,
+          assEventsByTrack,
+          seenCueIdsByTrack,
+        );
+        if (appended) added = true;
       }
     }
   }
 
   return added;
+}
+
+function isPgsTrack(codecId: string): boolean {
+  return codecId.toUpperCase().replace(/\s/g, "") === "S_HDMV/PGS";
+}
+
+function appendPgsBlock(
+  pgsBlocksByTrack: Map<number, PgsBlock[]>,
+  trackNumber: number,
+  data: Uint8Array,
+  timeTicks: number,
+  timecodeScale: number,
+): void {
+  const list = pgsBlocksByTrack.get(trackNumber);
+  if (!list) return;
+  // Trim trailing nulls — some muxers pad the block to align cluster sizes.
+  let end = data.length;
+  while (end > 0 && data[end - 1] === 0) end--;
+  if (end === 0) return;
+  list.push({
+    start: ticksToSec(timeTicks, timecodeScale),
+    bytes: data.subarray(0, end).slice(),
+  });
+}
+
+function parsePgsTrackNumberFromId(id: string): number | null {
+  // ExtractedMkvSub.id is `mkv-${trackNumber}-${language}`. We need the
+  // middle field to look the track up in pgsBlocksByTrack during finalize.
+  const m = id.match(/^mkv-(\d+)-/);
+  return m ? Number(m[1]) : null;
 }
 
 function findTrack(
@@ -463,10 +769,19 @@ function appendCue(
   trackNumber: number,
   decoded: DecodedCue,
   assEventsByTrack: Map<number, string[]>,
-): void {
+  seenCueIdsByTrack: Map<number, Set<string>>,
+): boolean {
+  // Track number is encoded into the id: `mkv-${number}-${lang}`.
+  const seen = seenCueIdsByTrack.get(trackNumber);
+  // Cue id is deterministic (`${startSec.toFixed(3)}-${text.slice(0, 20)}`),
+  // so any second feed of the same block — most commonly the MSE controller
+  // re-handing the header's cluster region to onRawChunk after
+  // parseRegionForCues already walked it — hits the dedup set here.
+  if (seen && seen.has(decoded.cue.id)) return false;
+
   for (const r of results) {
-    // Track number is encoded into the id: `mkv-${number}-${lang}`
     if (r.id.startsWith(`mkv-${trackNumber}-`)) {
+      seen?.add(decoded.cue.id);
       r.cues.push(decoded.cue);
       if (decoded.assDialogue && r.assSource) {
         const events = assEventsByTrack.get(trackNumber);
@@ -475,9 +790,10 @@ function appendCue(
           r.assSource = buildAssSource(r.assHeader ?? r.assSource, events);
         }
       }
-      return;
+      return true;
     }
   }
+  return false;
 }
 
 function ticksToSec(ticks: number, timecodeScale: number): number {
@@ -566,8 +882,8 @@ function parseAssTrackInfo(codecPrivate?: Uint8Array): AssTrackInfo {
 /**
  * Minimal but valid ASS v4+ script header. Used when CodecPrivate is missing
  * or empty so the JASSUB renderer always has a parseable script. Style values
- * are conservative defaults; per-cue overrides from the script still apply,
- * and forceCenterDialogueInAss will fix Alignment to 2 at build time.
+ * are conservative defaults — including Alignment=2 (bottom-center) — and
+ * per-cue overrides from the script still apply on top.
  */
 function synthesizeMinimalAssHeader(): string {
   return [
@@ -597,19 +913,14 @@ function stripAssDialogueRows(source: string): string {
 }
 
 function buildAssSource(header: string, dialogueLines: string[]): string {
-  const normalized = header.replace(/\r\n/g, "\n").trim();
+  const normalized = stripAssFontReferences(header.replace(/\r\n/g, "\n").trim());
   const hasEvents = /\[Events\]/i.test(normalized);
   const withEvents = hasEvents
     ? normalized
     : `${normalized}\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text`;
-  const joined =
-    dialogueLines.length === 0
-      ? `${withEvents}\n`
-      : `${withEvents}\n${dialogueLines.join("\n")}\n`;
-  // Force every dialogue line + Default-style row to bottom-center before
-  // handing the script to libass. Positioned signs (anything with \pos / \move)
-  // are intentionally left alone.
-  return forceCenterDialogueInAss(joined);
+  return dialogueLines.length === 0
+    ? `${withEvents}\n`
+    : `${withEvents}\n${dialogueLines.join("\n")}\n`;
 }
 
 function parseAssStylesSection(text: string): AssStyleMap {
@@ -649,9 +960,14 @@ function parseAssStylesSection(text: string): AssStyleMap {
         const c = parseAssColor(val);
         if (c) style.color = c;
       }
-      // Alignment intentionally dropped: dialogue is forced to bottom-center
-      // by the player, and positioned signs go through JASSUB (which honors
-      // \pos / \move directly). See forceCenterDialogueInAss in subtitles.ts.
+      if (col === "alignment") {
+        const an = parseInt(val, 10);
+        const placement = alignmentToPlacement(an);
+        if (placement) {
+          style.align = placement.align;
+          style.linePosition = placement.linePosition;
+        }
+      }
     }
     if (name) styles[name] = style;
   }
@@ -833,6 +1149,12 @@ function decodeBlockText(
     }
 
     const dialogueText = parts.slice(textIdx).join(",").trim();
+    // Cues that the script hides via \alpha&HFF& or \fade(255,255,…) are
+    // libass-only warnings (Arid-style "your player doesn't support this"
+    // lines). We render through CSS during streaming, which strips the
+    // hide-tag, so without this gate the warning becomes visible bare text.
+    // Libass itself parses the raw ASS source — it doesn't use this list.
+    if (isAssCueHidden(dialogueText)) return null;
     return { text: stripAssTags(dialogueText), styleName };
   }
 
@@ -901,26 +1223,4 @@ function secToAssTime(sec: number): string {
   const m = totalMinutes % 60;
   const h = Math.floor(totalMinutes / 60);
   return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(cs).padStart(2, "0")}`;
-}
-
-function stripAssTags(text: string): string {
-  let out = text;
-  // Strip well-formed { ... } override blocks first.
-  out = out.replace(/\{[^{}]*\}/g, "");
-  // Defensive: if we sliced the Text field mid-override (e.g. commas inside
-  // `\pos(x,y)` or `\fade(...,400)` mis-aligned the field split), we'll see a
-  // leading orphan fragment that ends with `}` but never opened with `{`.
-  // Match `<garbage that contains \ overrides>}` and drop everything up to
-  // and including that `}`.
-  out = out.replace(/^[^{}]*?\\[a-zA-Z][^{}]*\}/, "");
-  // Equivalent guard for a trailing `{...` with no closing brace.
-  out = out.replace(/\{[^{}]*$/, "");
-  // Drawing commands (`\p1 m 0 0 ...\p0`) leave vector path data behind once
-  // the brace strip is gone; collapse those to nothing as well.
-  out = out.replace(/\\p\d+[^\\]*?(?=\\p\d|$)/g, "");
-  return out
-    .replace(/\\N/g, "\n")
-    .replace(/\\n/g, "\n")
-    .replace(/\\h/g, " ")
-    .trim();
 }

@@ -8,7 +8,8 @@
  *                        chrome.storage.local under FOLLOWED_USERS.
  *   - `inboxItems`     — flattened, newest-first list of share-index entries
  *                        from every followed user, with author + sourceFolderId
- *                        stamped on each row. Recomputed by `syncInbox()`.
+ *                        stamped on each row. Recomputed by `syncInbox()`
+ *                        and cached so reloads keep the last good feed.
  *   - `unreadCount`    — entries newer than each follow's `lastSeenEntryId`.
  *                        Surfaced as a badge on the topbar Social icon.
  *   - `myIndex`        — the user's own `index.json`, cached for the
@@ -27,28 +28,39 @@
 
 import { create } from "zustand";
 import type {
+  DirectoryEntry,
   FollowedUser,
   ShareAuthor,
+  ShareComment,
+  ShareEntry,
   ShareIndex,
-  ShareIndexEntry,
+  ShareTarget,
 } from "@shared/types";
 import { STORAGE_KEYS } from "@shared/constants";
 import { extractFolderId } from "@shared/parse-folder-url";
 import {
-  deleteShareEntry,
+  aggregateComments,
+  appendComment,
+  fetchDirectory,
+  generateShareId,
+  importShareTargetToDrive,
+  getCachedDirectory,
+  mutateShareIndex,
+  profileToAuthor,
+  readComments,
   readShareIndex,
   removeIndexEntry,
-  writeShareIndex,
+  type DriveImportResult,
 } from "../services/sharing";
 import { getCachedShareFolders } from "../services/sharing/share-folder";
 import { useSharingStore } from "./sharing-store";
 
-/** A row rendered in the Inbox tab — one ShareIndexEntry from a followed
- *  user, with author + source folder stamped so the UI can render attribution
- *  + a "view on Drive" link without re-resolving anything. */
+/** A row rendered in the Inbox tab — one inlined ShareEntry from a
+ *  followed user, with author + source folder stamped so the UI can render
+ *  attribution + a "view on Drive" link without re-resolving anything. */
 export interface InboxItem {
-  /** The slim manifest entry (id, sharedAt, entryFileId, kind, title, poster). */
-  entry: ShareIndexEntry;
+  /** The inlined entry payload (id, sharedAt, target, title, poster, …). */
+  entry: ShareEntry;
   /** Author profile snapshot from the followed user's `ShareIndex.owner`. */
   author: ShareAuthor;
   /** Drive folder id of the author's `Shared/` folder. */
@@ -56,6 +68,12 @@ export interface InboxItem {
   /** True when this entry is newer than the follow's `lastSeenEntryId`.
    *  Used to drive the unread badge + visual "NEW" pill on the row. */
   isUnread: boolean;
+}
+
+interface InboxCache {
+  v: 1;
+  items: InboxItem[];
+  lastSyncedAt: number | null;
 }
 
 /** Per-follow sync state surfaced to the People + Inbox tabs so a paused or
@@ -84,6 +102,25 @@ interface SocialState {
   syncStates: Record<string, FollowSyncState>;
   lastSyncedAt: number | null;
 
+  /** Curated directory entries from the P4.4 bootstrap registry.
+   *  Refreshed by `loadDirectory()` (cached 24h). */
+  directoryEntries: DirectoryEntry[];
+  directoryLoaded: boolean;
+  directoryLoading: boolean;
+
+  /** Comments left on the user's *own* shares, aggregated from every
+   *  followed user's `comments.jsonl` and bucketed by `shareId`. Refreshed
+   *  by `loadReceivedComments()`. */
+  receivedComments: Record<string, ShareComment[]>;
+  /** Comments the user has written themselves, sorted newest-first.
+   *  Refreshed by `loadMyComments()`. */
+  myComments: ShareComment[];
+  commentsLoading: boolean;
+  commentsError: string | null;
+  /** Wall-clock of the last successful comments aggregate. Drives the
+   *  "Synced N ago" line on the Activity tab. */
+  lastCommentsSyncedAt: number | null;
+
   // ---- follow management ----
   loadFollows: () => Promise<void>;
   follow: (input: { url: string }) => Promise<FollowedUser>;
@@ -91,12 +128,37 @@ interface SocialState {
 
   // ---- inbox ----
   syncInbox: () => Promise<void>;
+  importShareTarget: (input: {
+    target: ShareTarget;
+    title?: string;
+  }) => Promise<DriveImportResult>;
   markAllRead: () => Promise<void>;
   markFollowRead: (sharedFolderId: string) => Promise<void>;
 
   // ---- my shares ----
   loadMyIndex: (opts?: { force?: boolean }) => Promise<ShareIndex | null>;
   unshare: (entryId: string) => Promise<void>;
+
+// ---- directory ----
+  /** Hydrate `directoryEntries` from the cached copy (instant) then refresh
+   *  from the network if the TTL has lapsed. Safe to call repeatedly —
+   *  the in-store flag dedupes concurrent fetches. */
+  loadDirectory: (opts?: { force?: boolean }) => Promise<void>;
+
+  // ---- comments ----
+  /** Append a comment to the user's own `comments.jsonl` targeting the
+   *  share at `{sharedFolderId, shareId}`. Re-reads the local stream so
+   *  `myComments` reflects the new entry on resolve. */
+  postComment: (input: {
+    sharedFolderId: string;
+    shareId: string;
+    text: string;
+  }) => Promise<ShareComment>;
+  /** Refresh `myComments` from the user's own `comments.jsonl`. */
+  loadMyComments: (opts?: { force?: boolean }) => Promise<void>;
+  /** Walk every followed user's `comments.jsonl`, filter to comments
+   *  targeting the user's own shares, group by shareId. */
+  loadReceivedComments: () => Promise<void>;
 }
 
 const MAX_CONCURRENT_PULLS = 4;
@@ -118,16 +180,38 @@ export const useSocialStore = create<SocialState>((set, get) => ({
   syncStates: {},
   lastSyncedAt: null,
 
+  directoryEntries: [],
+  directoryLoaded: false,
+  directoryLoading: false,
+
+  receivedComments: {},
+  myComments: [],
+  commentsLoading: false,
+  commentsError: null,
+  lastCommentsSyncedAt: null,
+
   loadFollows: async () => {
     if (get().followsLoaded) return;
-    const obj = await chrome.storage.local.get(STORAGE_KEYS.FOLLOWED_USERS);
+    const obj = await chrome.storage.local.get([
+      STORAGE_KEYS.FOLLOWED_USERS,
+      STORAGE_KEYS.SOCIAL_INBOX_CACHE,
+    ]);
     const raw = obj[STORAGE_KEYS.FOLLOWED_USERS];
     const followedUsers: FollowedUser[] = Array.isArray(raw)
       ? (raw as FollowedUser[])
       : [];
-    set({ followedUsers, followsLoaded: true });
-    // Re-derive inbox state from cached entries if a previous session
-    // persisted any. For now the inbox is recomputed at sync time only.
+    const cachedInbox = parseInboxCache(obj[STORAGE_KEYS.SOCIAL_INBOX_CACHE]);
+    set({
+      followedUsers,
+      followsLoaded: true,
+      ...(cachedInbox
+        ? {
+            inboxItems: cachedInbox.items,
+            unreadCount: countUnread(cachedInbox.items),
+            lastSyncedAt: cachedInbox.lastSyncedAt,
+          }
+        : {}),
+    });
   },
 
   follow: async ({ url }) => {
@@ -195,6 +279,7 @@ export const useSocialStore = create<SocialState>((set, get) => ({
       (i) => i.sourceFolderId !== sharedFolderId,
     );
     set({ inboxItems: inbox, unreadCount: countUnread(inbox) });
+    await persistInbox(inbox, get().lastSyncedAt);
   },
 
   syncInbox: async () => {
@@ -210,6 +295,7 @@ export const useSocialStore = create<SocialState>((set, get) => ({
         lastSyncedAt: Date.now(),
         syncStates: {},
       });
+      await persistInbox([], Date.now());
       return;
     }
     set({
@@ -254,6 +340,13 @@ export const useSocialStore = create<SocialState>((set, get) => ({
         states[follow.sharedFolderId] = { status: "error", error };
         // Keep the existing follow record on error so we don't lose track.
         refreshedFollows.push(follow);
+        // Keep the previous rows from this follow visible. An offline blip
+        // should mark the source as stale, not blank out their shelf.
+        items.push(
+          ...get().inboxItems.filter(
+            (i) => i.sourceFolderId === follow.sharedFolderId,
+          ),
+        );
         continue;
       }
       states[follow.sharedFolderId] = {
@@ -277,15 +370,17 @@ export const useSocialStore = create<SocialState>((set, get) => ({
 
     items.sort((a, b) => (a.entry.sharedAt < b.entry.sharedAt ? 1 : -1));
 
+    const lastSyncedAt = Date.now();
     set({
       inboxItems: items,
       unreadCount: countUnread(items),
       followedUsers: refreshedFollows,
       syncing: false,
       syncStates: states,
-      lastSyncedAt: Date.now(),
+      lastSyncedAt,
     });
     await persistFollows(refreshedFollows);
+    await persistInbox(items, lastSyncedAt);
   },
 
   markAllRead: async () => {
@@ -297,12 +392,20 @@ export const useSocialStore = create<SocialState>((set, get) => ({
       );
       return newest ? { ...f, lastSeenEntryId: newest.entry.id } : f;
     });
+    const inbox = get().inboxItems.map((i) => ({ ...i, isUnread: false }));
     set({
       followedUsers: next,
-      inboxItems: get().inboxItems.map((i) => ({ ...i, isUnread: false })),
+      inboxItems: inbox,
       unreadCount: 0,
     });
     await persistFollows(next);
+    await persistInbox(inbox, get().lastSyncedAt);
+  },
+
+  importShareTarget: async ({ target, title }) => {
+    return await importShareTargetToDrive(target, title, {
+      priority: "normal",
+    });
   },
 
   markFollowRead: async (sharedFolderId) => {
@@ -324,6 +427,7 @@ export const useSocialStore = create<SocialState>((set, get) => ({
       unreadCount: countUnread(inbox),
     });
     await persistFollows(next);
+    await persistInbox(inbox, get().lastSyncedAt);
   },
 
   loadMyIndex: async (opts) => {
@@ -351,21 +455,153 @@ export const useSocialStore = create<SocialState>((set, get) => ({
   unshare: async (entryId) => {
     const current = get().myIndex;
     if (!current) throw new Error("Load your shares before unsharing.");
-    const target = current.entries.find((e) => e.id === entryId);
-    if (!target) return;
+    if (!current.entries.some((e) => e.id === entryId)) return;
     const folders =
       (await getCachedShareFolders()) ??
       (await useSharingStore.getState().ensureFolders());
-    // Index-first: a partial failure leaves the entry file orphaned (a
-    // missing pointer is worse than a missing payload for followers).
-    const next = removeIndexEntry(current, entryId);
-    await writeShareIndex(folders.root, next);
+    // One queued Drive mutation removes the inlined entry from the manifest;
+    // followers stop seeing it on their next sync.
+    const next = await mutateShareIndex(folders.root, (latest) => {
+      const base = latest ?? current;
+      if (!base.entries.some((e) => e.id === entryId)) return base;
+      return removeIndexEntry(base, entryId);
+    });
     set({ myIndex: next });
+  },
+
+  loadDirectory: async (opts) => {
+    if (get().directoryLoading) return;
+    // First paint: surface whatever's in the cache immediately so the
+    // Discover rail doesn't flash an empty state during the network call.
+    if (!get().directoryLoaded) {
+      const cached = await getCachedDirectory();
+      set({ directoryEntries: cached, directoryLoaded: true });
+    }
+    set({ directoryLoading: true });
     try {
-      await deleteShareEntry(target.entryFileId);
+      const fresh = await fetchDirectory({ force: opts?.force });
+      set({
+        directoryEntries: fresh,
+        directoryLoaded: true,
+        directoryLoading: false,
+      });
     } catch {
-      // Best-effort. The index no longer points at it — orphan stays
-      // private inside `Shared/entries/` until a future cleanup pass.
+      set({ directoryLoading: false });
+    }
+  },
+
+  postComment: async ({ sharedFolderId, shareId, text }) => {
+    const trimmed = text.trim();
+    if (!trimmed) throw new Error("Comment can't be empty.");
+    const sharing = useSharingStore.getState();
+    const profile = sharing.profile;
+    if (!profile) {
+      throw new Error("Pick a share handle before commenting.");
+    }
+    const folders =
+      (await getCachedShareFolders()) ?? (await sharing.ensureFolders());
+    const author = profileToAuthor(profile);
+    const comment: ShareComment = {
+      v: 1,
+      id: generateShareId(),
+      sharedFolderId,
+      shareId,
+      at: new Date().toISOString(),
+      author,
+      text: trimmed,
+    };
+    await appendComment(folders.root, comment);
+    // Optimistic local insertion — saves an extra Drive read for the
+    // common "post and look at it" path. A subsequent loadMyComments()
+    // will reconcile if anything drifted.
+    set({ myComments: [comment, ...get().myComments] });
+    return comment;
+  },
+
+  loadMyComments: async (opts) => {
+    if (get().commentsLoading) return;
+    const sharing = useSharingStore.getState();
+    set({ commentsLoading: true, commentsError: null });
+    try {
+      const folders =
+        (await getCachedShareFolders()) ?? (await sharing.ensureFolders());
+      const list = await readComments(folders.root);
+      // Drive returns whatever order; sort newest-first here so the UI
+      // doesn't have to think about it.
+      list.sort((a, b) => (a.at < b.at ? 1 : -1));
+      set({
+        myComments: list,
+        commentsLoading: false,
+        commentsError: null,
+      });
+      void opts; // reserved for future incremental refresh logic
+    } catch (e) {
+      set({
+        commentsLoading: false,
+        commentsError:
+          e instanceof Error ? e.message : "Couldn't read your comments.",
+      });
+    }
+  },
+
+  loadReceivedComments: async () => {
+    if (get().commentsLoading) return;
+    if (!get().followsLoaded) await get().loadFollows();
+    const follows = get().followedUsers;
+    if (follows.length === 0) {
+      set({
+        receivedComments: {},
+        commentsLoading: false,
+        commentsError: null,
+        lastCommentsSyncedAt: Date.now(),
+      });
+      return;
+    }
+    const sharing = useSharingStore.getState();
+    set({ commentsLoading: true, commentsError: null });
+    try {
+      const folders =
+        (await getCachedShareFolders()) ?? (await sharing.ensureFolders());
+      const { comments, errors } = await aggregateComments(
+        follows.map((f) => f.sharedFolderId),
+      );
+      // Keep only comments targeting *my* shares — followers' streams
+      // contain everything they've ever posted, including comments on
+      // people who aren't me.
+      const onMyShares = comments.filter(
+        (c) => c.sharedFolderId === folders.root,
+      );
+      // Dedupe by id (two reads might double up if a worker re-ran).
+      const seen = new Set<string>();
+      const deduped: ShareComment[] = [];
+      for (const c of onMyShares) {
+        if (seen.has(c.id)) continue;
+        seen.add(c.id);
+        deduped.push(c);
+      }
+      // Bucket by shareId; newest-first within each bucket.
+      const buckets: Record<string, ShareComment[]> = {};
+      for (const c of deduped) {
+        (buckets[c.shareId] ??= []).push(c);
+      }
+      for (const list of Object.values(buckets)) {
+        list.sort((a, b) => (a.at < b.at ? 1 : -1));
+      }
+      set({
+        receivedComments: buckets,
+        commentsLoading: false,
+        commentsError:
+          errors.length > 0
+            ? `${errors.length} follower${errors.length === 1 ? "" : "s"} couldn't be read.`
+            : null,
+        lastCommentsSyncedAt: Date.now(),
+      });
+    } catch (e) {
+      set({
+        commentsLoading: false,
+        commentsError:
+          e instanceof Error ? e.message : "Couldn't aggregate comments.",
+      });
     }
   },
 }));
@@ -378,6 +614,49 @@ async function persistFollows(followedUsers: FollowedUser[]): Promise<void> {
   await chrome.storage.local.set({
     [STORAGE_KEYS.FOLLOWED_USERS]: followedUsers,
   });
+}
+
+async function persistInbox(
+  items: InboxItem[],
+  lastSyncedAt: number | null,
+): Promise<void> {
+  const cache: InboxCache = { v: 1, items, lastSyncedAt };
+  await chrome.storage.local.set({
+    [STORAGE_KEYS.SOCIAL_INBOX_CACHE]: cache,
+  });
+}
+
+function parseInboxCache(raw: unknown): InboxCache | null {
+  if (
+    !raw ||
+    typeof raw !== "object" ||
+    (raw as { v?: unknown }).v !== 1 ||
+    !Array.isArray((raw as { items?: unknown }).items)
+  ) {
+    return null;
+  }
+  const cache = raw as Partial<InboxCache>;
+  const items = (cache.items ?? []).filter(isInboxItem);
+  return {
+    v: 1,
+    items,
+    lastSyncedAt:
+      typeof cache.lastSyncedAt === "number" ? cache.lastSyncedAt : null,
+  };
+}
+
+function isInboxItem(value: unknown): value is InboxItem {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Partial<InboxItem>;
+  return (
+    !!item.entry &&
+    typeof item.entry.id === "string" &&
+    item.entry.v === 2 &&
+    !!item.author &&
+    typeof item.author.handle === "string" &&
+    typeof item.sourceFolderId === "string" &&
+    typeof item.isUnread === "boolean"
+  );
 }
 
 function countUnread(items: InboxItem[]): number {
@@ -396,8 +675,8 @@ function countUnread(items: InboxItem[]): number {
  * a 200-entry backlog the moment they hit follow.
  */
 function isEntryUnread(
-  entry: ShareIndexEntry,
-  feed: ShareIndexEntry[],
+  entry: ShareEntry,
+  feed: ShareEntry[],
   lastSeenEntryId: string | undefined,
 ): boolean {
   if (!lastSeenEntryId) return false;
@@ -410,4 +689,3 @@ function isEntryUnread(
   const entryIdx = feed.indexOf(entry);
   return entryIdx > -1 && entryIdx < seenIdx;
 }
-

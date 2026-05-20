@@ -1,7 +1,7 @@
 {
   "name": "nyrima",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "A personal video cinema that lives on Google Drive. Built as a Chrome Extension.",
   "type": "module",
   "scripts": {
@@ -32,18 +32,25 @@
     "zustand": "^4.5.5"
   },
   "overrides": {
-    "sharp": "^0.34.5"
+    "sharp": "^0.34.5",
+    "@crxjs/vite-plugin": {
+      "rollup": "2.80.0"
+    },
+    "vite": {
+      "rollup": "^4.60.3"
+    },
+    "postcss": "^8.5.14"
   },
   "devDependencies": {
-    "@crxjs/vite-plugin": "^2.0.0-beta.28",
+    "@crxjs/vite-plugin": "2.4.0",
     "@types/chrome": "^0.0.270",
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
-    "@vitejs/plugin-react": "^4.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
     "sass": "^1.79.3",
     "sharp": "^0.34.5",
     "typescript": "^5.6.2",
-    "vite": "^5.4.6",
+    "vite": "^6.4.2",
     "vitest": "^4.1.6"
   }
 }

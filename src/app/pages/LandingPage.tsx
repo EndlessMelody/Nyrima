@@ -33,7 +33,7 @@ import { LibraryHealthCard } from "../components/LibraryHealthCard";
 import { OnboardingStrip } from "../components/OnboardingStrip";
 import { SetupAccessDialog } from "../components/SetupAccessDialog";
 import { NyrimaRootDialog } from "../components/NyrimaRootDialog";
-import { WelcomeBlock } from "../components/WelcomeBlock";
+import { LoginScreen } from "../components/LoginScreen";
 import { useNavigate } from "react-router-dom";
 import { hasApiKey } from "../services/api-key";
 import { isVideoFile } from "../services/drive-api";
@@ -451,6 +451,18 @@ export function LandingPage() {
     return shuffle(others).slice(0, 4);
   }, [others]);
 
+  // folderId → user-placed poster URL, for the Continue Watching row. The
+  // lobby's row mixes items from many libraries; each card looks up its own
+  // folder so a missing Drive frame thumbnail falls back to that library's
+  // cover art instead of the empty NyrimaMark tile.
+  const postersByFolder = useMemo<Record<string, string | undefined>>(() => {
+    const map: Record<string, string | undefined> = {};
+    for (const f of adaptedFolders) {
+      if (f.coverPosterUrl) map[f.id] = f.coverPosterUrl;
+    }
+    return map;
+  }, [adaptedFolders]);
+
   const hasRoot = !!root;
   const hasLibraries = libraries.length > 0;
   const showFullOnboarding = !keyConfigured || !hasRoot;
@@ -476,24 +488,18 @@ export function LandingPage() {
   };
 
   // --- Render --------------------------------------------------------------
-  // No API key OR no Nyrima root → welcome surface + dialogs.
+  // No API key OR no Nyrima root → unified LoginScreen. Replaces the prior
+  // WelcomeBlock + SetupAccessDialog + NyrimaRootDialog handoff: every step
+  // lives on one surface so the user never wonders which button maps to
+  // which side of "Drive access".
   if (showFullOnboarding) {
     return (
       <div className="ny-landing">
-        <WelcomeBlock
-          keyConfigured={keyConfigured}
+        <LoginScreen
+          keyConfigured={!!keyConfigured}
           rootPaired={hasRoot}
           rootName={root?.name ?? null}
-          onPickRoot={() => setRootDialogOpen(true)}
-          onOpenSetup={() => setSetupOpen(true)}
-        />
-
-        <DashboardDialogs
-          rootDialogOpen={rootDialogOpen}
-          setRootDialogOpen={setRootDialogOpen}
-          setupOpen={setupOpen}
-          handleCloseSetup={handleCloseSetup}
-          setKeyConfigured={setKeyConfigured}
+          onKeySaved={() => setKeyConfigured(true)}
         />
       </div>
     );
@@ -559,7 +565,11 @@ export function LandingPage() {
       <div className="ny-dashboard__grid">
         <div className="ny-dashboard__main">
           {watchedAnything && (
-            <ContinueWatchingRow videos={continueFiles} positions={positions} />
+            <ContinueWatchingRow
+              videos={continueFiles}
+              positions={positions}
+              postersByFolder={postersByFolder}
+            />
           )}
 
           {pinned.length > 0 && (

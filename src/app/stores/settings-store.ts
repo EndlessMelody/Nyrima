@@ -29,6 +29,7 @@ interface SettingsState {
   setCustomFont: (name: string, dataUrl: string) => Promise<void>;
   clearCustomFont: () => Promise<void>;
   setSkipSeconds: (s: AppSettings["skipSeconds"]) => Promise<void>;
+  setDefaultVolume: (volume: number) => Promise<void>;
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -68,7 +69,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   clearCustomFont: async () => {
     await get().patch({
-      subtitleFont: "anime-brush",
+      subtitleFont: "chinacat-teddybear",
       subtitleCustomFontName: undefined,
       subtitleCustomFontDataUrl: undefined,
     });
@@ -76,5 +77,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   setSkipSeconds: async (s) => {
     await get().patch({ skipSeconds: s });
+  },
+
+  setDefaultVolume: async (volume) => {
+    const clamped = Math.max(0, Math.min(1, volume));
+    await get().patch({ defaultVolume: clamped });
   },
 }));

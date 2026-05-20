@@ -32,6 +32,7 @@ import workerUrl from "jassub/dist/wasm/jassub-worker.js?url";
 import wasmUrl from "jassub/dist/wasm/jassub-worker.wasm?url";
 import modernWasmUrl from "jassub/dist/wasm/jassub-worker-modern.wasm?url";
 import defaultFontUrl from "jassub/dist/default.woff2?url";
+import { BUNDLED_ASS_FONT_FAMILY } from "../services/subtitles";
 import "./JassubOverlay.scss";
 
 interface Props {
@@ -108,13 +109,16 @@ export function JassubOverlay({
           workerUrl,
           wasmUrl,
           modernWasmUrl,
-          // Bundled fallback font so libass has something to render when an
-          // .ass file references a font family the user doesn't have.
-          fonts: [defaultFontUrl],
-          // Let libass query the user's installed fonts so CJK/JP titles
-          // pick up locally-installed faces (Noto Sans CJK, Klee, etc.) before
-          // falling back to the bundled woff2.
-          queryFonts: "local",
+          // Single registered family. `stripAssFontReferences` rewrites every
+          // Style.Fontname column to BUNDLED_ASS_FONT_FAMILY so libass
+          // resolves on the first lookup — no OS query, no Google Fonts.
+          availableFonts: { [BUNDLED_ASS_FONT_FAMILY]: defaultFontUrl },
+          defaultFont: BUNDLED_ASS_FONT_FAMILY,
+          // Skip the local-font query entirely. The user opted out of OS font
+          // matching — we still honor every other ASS style (positioning,
+          // color, italic, bold, karaoke, fades), but render every glyph in
+          // the bundled fallback face.
+          queryFonts: false,
           timeOffset,
         });
         instanceRef.current = inst;
@@ -153,29 +157,36 @@ export function JassubOverlay({
   }, [videoRef]);
 
   // Script reload — push new ASS source into the existing worker.
+  //
+  // While an embedded MKV is still streaming, `subContent` grows as each
+  // cluster contributes new Dialogue rows. Calling setTrack synchronously on
+  // every change would re-parse the script on the libass worker tens of times
+  // per second and produce a visible blink. Debouncing collapses runs of
+  // updates into one setTrack call per quiet window — the user sees the
+  // latest cues within ~250 ms of the last cluster arriving, with no
+  // perceptible churn.
   useEffect(() => {
     const inst = instanceRef.current;
     if (!inst) return;
     let cancelled = false;
-    void (async () => {
-      try {
-        // JASSUB exposes track swaps on the remote worker renderer. Await
-        // `ready` first so the IPC proxy exists, then force a repaint so the
-        // new track's PlayResX/Y is honored.
-        await inst.ready;
-        if (cancelled) return;
-        await inst.renderer.setTrack(subContent);
-        await inst.resize(true);
-      } catch (err) {
-        if (!cancelled) {
-          // eslint-disable-next-line no-console
-          console.warn("[JASSUB] setTrack failed:", err);
-          onErrorRef.current?.(err);
+    const handle = window.setTimeout(() => {
+      void (async () => {
+        try {
+          await inst.ready;
+          if (cancelled) return;
+          await inst.renderer.setTrack(subContent);
+        } catch (err) {
+          if (!cancelled) {
+            // eslint-disable-next-line no-console
+            console.warn("[JASSUB] setTrack failed:", err);
+            onErrorRef.current?.(err);
+          }
         }
-      }
-    })();
+      })();
+    }, 250);
     return () => {
       cancelled = true;
+      window.clearTimeout(handle);
     };
   }, [subContent]);
 

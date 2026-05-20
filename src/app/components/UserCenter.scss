@@ -320,6 +320,48 @@
   background: color-mix(in srgb, var(--brand-on-background-weak) 14%, transparent);
 }
 
+.dc-uc__range-control {
+  display: grid;
+  grid-template-columns: minmax(104px, 1fr) 36px;
+  align-items: center;
+  gap: 8px;
+  min-width: 150px;
+}
+
+.dc-uc__range {
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background:
+    linear-gradient(
+      90deg,
+      var(--brand-on-background-medium) 0%,
+      var(--brand-on-background-medium) var(--pct, 100%),
+      var(--neutral-alpha-medium) var(--pct, 100%),
+      var(--neutral-alpha-medium) 100%
+    );
+  cursor: pointer;
+}
+
+.dc-uc__range::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: 2px solid var(--page-background);
+  background: var(--brand-on-background-strong);
+  box-shadow: 0 0 0 1px var(--brand-border-medium);
+}
+
+.dc-uc__range-value {
+  font-family: var(--dc-font-mono);
+  font-size: 0.5625rem;
+  letter-spacing: 0.06em;
+  color: var(--neutral-on-background-weak);
+  text-align: right;
+}
+
 /* ── Actions ───────────────────────────────────────────────────── */
 .dc-uc__actions {
   display: flex;

@@ -2,26 +2,21 @@
  * PeopleSearch — find + follow + manage the people whose libraries you're
  * watching.
  *
- * Top half: a single-input "paste their Shared/ URL" form. The store does
- * the URL parse + first pull + dedup; this surface is just the affordance
- * and the inline error pill.
- *
- * Bottom half: the follow list. Each card has the author's avatar/initials,
- * handle, display name, last-sync state (from `syncStates`), a "View their
- * shelf" link (opens their Shared/ folder on Drive), and an Unfollow control.
- *
- * Future hook: P4.4 ships a discoverable bootstrap index — when present the
- * "Suggested" rail renders inline above the follow list.
+ * Top: the paste-by-URL form. Below that, when the P4.4 directory has
+ * entries the user isn't already following, the Discover rail renders
+ * suggestion cards with one-click follow. Bottom: the active follow list
+ * with View shelf / Drive / Unfollow per card.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import cn from "classnames";
+import { Link } from "react-router-dom";
 import {
   EmptyState,
   formatAgo,
 } from "./InboxList";
 import { useSocialStore } from "../../stores/social-store";
-import type { FollowedUser } from "@shared/types";
+import type { DirectoryEntry, FollowedUser } from "@shared/types";
 
 export function PeopleSearch() {
   const followed = useSocialStore((s) => s.followedUsers);
@@ -29,11 +24,24 @@ export function PeopleSearch() {
   const unfollow = useSocialStore((s) => s.unfollow);
   const syncStates = useSocialStore((s) => s.syncStates);
   const syncInbox = useSocialStore((s) => s.syncInbox);
+  const globalSyncing = useSocialStore((s) => s.syncing);
+  const directoryEntries = useSocialStore((s) => s.directoryEntries);
+  const directoryLoading = useSocialStore((s) => s.directoryLoading);
+  const directoryLoaded = useSocialStore((s) => s.directoryLoaded);
+  const loadDirectory = useSocialStore((s) => s.loadDirectory);
+
+  useEffect(() => {
+    void loadDirectory();
+  }, [loadDirectory]);
 
   const [url, setUrl] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
+
+  const suggestions = directoryEntries.filter(
+    (e) => !followed.some((f) => f.sharedFolderId === e.folderId),
+  );
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -87,6 +95,22 @@ export function PeopleSearch() {
         {okMsg && <p className="ny-social-followform__ok">{okMsg}</p>}
       </form>
 
+      <DiscoverRail
+        suggestions={suggestions}
+        loading={directoryLoading}
+        loaded={directoryLoaded}
+        directoryHasAny={directoryEntries.length > 0}
+        onFollow={async (entry) => {
+          // Reuse the same path as paste-by-URL — the folderId becomes
+          // a synthetic Drive URL the store can parse.
+          await follow({
+            url: `https://drive.google.com/drive/folders/${entry.folderId}`,
+          });
+          void syncInbox();
+        }}
+        onRefresh={() => void loadDirectory({ force: true })}
+      />
+
       <header className="ny-social-section-head">
         <h3 className="ny-shelf__title">Following</h3>
         <span className="ny-shelf__count">
@@ -97,7 +121,7 @@ export function PeopleSearch() {
       {followed.length === 0 ? (
         <EmptyState
           title="No follows yet."
-          sub="Paste a Shared/ folder URL above to start. Or wait for the bootstrap directory in P4.4 — you'll be able to discover users without a link."
+          sub="Paste a Shared/ folder URL above, or follow a suggested user from the Discover rail."
         />
       ) : (
         <div className="ny-social-people-grid">
@@ -106,7 +130,9 @@ export function PeopleSearch() {
               key={f.sharedFolderId}
               user={f}
               syncState={syncStates[f.sharedFolderId]}
+              syncing={globalSyncing}
               onUnfollow={() => void unfollow(f.sharedFolderId)}
+              onRetry={() => void syncInbox()}
             />
           ))}
         </div>
@@ -118,15 +144,21 @@ export function PeopleSearch() {
 function FollowCard({
   user,
   syncState,
+  syncing,
   onUnfollow,
+  onRetry,
 }: {
   user: FollowedUser;
   syncState?: import("../../stores/social-store").FollowSyncState;
+  syncing: boolean;
   onUnfollow: () => void;
+  onRetry: () => void;
 }) {
   const [armed, setArmed] = useState(false);
   const driveUrl = `https://drive.google.com/drive/folders/${user.sharedFolderId}`;
+  const shelfRoute = `/social/shelf/${user.sharedFolderId}`;
   const status = syncState?.status ?? "idle";
+  const isError = status === "error";
 
   return (
     <article className={cn("ny-follow-card", `is-${status}`)}>
@@ -153,7 +185,7 @@ function FollowCard({
         <span
           className={cn("ny-follow-card__pulse", `is-${status}`)}
           title={
-            status === "error"
+            isError
               ? syncState?.error ?? "Last pull failed"
               : status === "syncing"
                 ? "Pulling…"
@@ -175,14 +207,38 @@ function FollowCard({
         </div>
       </dl>
 
+      {isError && (
+        <div className="ny-follow-card__error">
+          <span className="ny-follow-card__error-text">
+            {syncState?.error ?? "Last pull failed."}
+          </span>
+          <button
+            type="button"
+            className="ny-share-row__btn"
+            onClick={onRetry}
+            disabled={syncing}
+          >
+            {syncing ? "Retrying…" : "Retry"}
+          </button>
+        </div>
+      )}
+
       <div className="ny-follow-card__actions">
+        <Link
+          to={shelfRoute}
+          className="ny-share-row__btn"
+          title="Browse their shares inside Nyrima"
+        >
+          View shelf
+        </Link>
         <a
           href={driveUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="ny-share-row__btn"
+          className="ny-share-row__btn ny-share-row__btn--ghost"
+          title="Open their Shared/ folder on Drive"
         >
-          View shelf
+          Drive
         </a>
         <button
           type="button"
@@ -203,4 +259,151 @@ function FollowCard({
       </div>
     </article>
   );
+}
+
+function DiscoverRail({
+  suggestions,
+  loading,
+  loaded,
+  directoryHasAny,
+  onFollow,
+  onRefresh,
+}: {
+  suggestions: DirectoryEntry[];
+  loading: boolean;
+  loaded: boolean;
+  /** Did the directory have any entries at all, even if all are already
+   *  followed? Lets us distinguish "directory empty" from "all caught up". */
+  directoryHasAny: boolean;
+  onFollow: (entry: DirectoryEntry) => Promise<void>;
+  onRefresh: () => void;
+}) {
+  if (!loaded && !loading) return null;
+  return (
+    <section className="ny-discover" aria-label="Suggested follows">
+      <header className="ny-social-section-head">
+        <h3 className="ny-shelf__title">Discover</h3>
+        <div className="ny-discover__head-actions">
+          <span className="ny-shelf__count">
+            {loading && suggestions.length === 0
+              ? "Loading…"
+              : suggestions.length === 0
+                ? directoryHasAny
+                  ? "All caught up"
+                  : "Directory empty"
+                : `${suggestions.length} suggested`}
+          </span>
+          <button
+            type="button"
+            className="ny-btn ny-btn--ghost"
+            onClick={onRefresh}
+            disabled={loading}
+          >
+            {loading ? "Refreshing…" : "Refresh"}
+          </button>
+        </div>
+      </header>
+      {suggestions.length === 0 ? (
+        <p className="ny-discover__empty">
+          {directoryHasAny
+            ? "You're already following every listed user. New entries land here as the directory grows."
+            : "The Nyrima directory hasn't published any entries yet. Paste a Shared/ folder URL above to follow someone, or request your own listing from the Privacy tab."}
+        </p>
+      ) : (
+        <div className="ny-discover__grid">
+          {suggestions.map((e) => (
+            <DiscoverCard key={e.handle} entry={e} onFollow={onFollow} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DiscoverCard({
+  entry,
+  onFollow,
+}: {
+  entry: DirectoryEntry;
+  onFollow: (entry: DirectoryEntry) => Promise<void>;
+}) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const fresh = isFresh(entry.addedAt);
+
+  async function doFollow() {
+    setPending(true);
+    setError(null);
+    try {
+      await onFollow(entry);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't follow.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <article className={cn("ny-discover-card", { "is-fresh": fresh })}>
+      <div className="ny-follow-card__head">
+        <div className="ny-follow-card__avatar">
+          {entry.avatarUrl ? (
+            <img src={entry.avatarUrl} alt="" referrerPolicy="no-referrer" />
+          ) : (
+            <span className="ny-follow-card__monogram">
+              {(entry.name ?? entry.handle)[0]?.toUpperCase() ?? "?"}
+            </span>
+          )}
+        </div>
+        <div className="ny-follow-card__id">
+          <span className="ny-follow-card__name">
+            {entry.name ?? entry.handle}
+          </span>
+          <span className="ny-follow-card__handle">@{entry.handle}</span>
+        </div>
+        {fresh && <span className="ny-discover-card__fresh">NEW</span>}
+      </div>
+
+      {entry.bio && <p className="ny-discover-card__bio">{entry.bio}</p>}
+
+      {entry.tags && entry.tags.length > 0 && (
+        <div className="ny-discover-card__tags">
+          {entry.tags.slice(0, 4).map((t) => (
+            <span key={t} className="ny-discover-card__tag">
+              {t}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {error && <p className="ny-social-followform__error">{error}</p>}
+
+      <div className="ny-follow-card__actions">
+        <button
+          type="button"
+          className="ny-share-row__btn"
+          onClick={() => void doFollow()}
+          disabled={pending}
+        >
+          {pending ? "Following…" : "Follow"}
+        </button>
+        <a
+          href={`https://drive.google.com/drive/folders/${entry.folderId}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="ny-share-row__btn ny-share-row__btn--ghost"
+        >
+          Preview
+        </a>
+      </div>
+    </article>
+  );
+}
+
+/** A directory entry counts as "fresh" if it was added in the last 14
+ *  days. Drives the NEW pill on the discover card. */
+function isFresh(addedAt: string): boolean {
+  const ts = Date.parse(addedAt);
+  if (!Number.isFinite(ts)) return false;
+  return Date.now() - ts < 14 * 24 * 60 * 60 * 1000;
 }

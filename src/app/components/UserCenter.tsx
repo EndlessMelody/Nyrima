@@ -4,7 +4,7 @@
  * Sections:
  *   A. Identity   — avatar, name, email, sign-out
  *   B. Appearance — theme toggle (dark/light/system)
- *   C. Playback   — auto-play next, skip duration, preferred subtitle lang
+ *   C. Playback   — auto-play next, default volume, skip duration
  *   D. Storage    — clear watch history, clear cache
  *   E. About      — version, API key status
  */
@@ -24,13 +24,6 @@ import type { UserProfile, AppSettings } from "@shared/types";
 import "./UserCenter.scss";
 
 const SKIP_OPTIONS: AppSettings["skipSeconds"][] = [5, 10, 15, 30];
-const LANG_OPTIONS = [
-  { code: "vi", label: "Tiếng Việt" },
-  { code: "en", label: "English" },
-  { code: "ja", label: "日本語" },
-  { code: "ko", label: "한국어" },
-  { code: "zh", label: "中文" },
-];
 
 interface Props {
   profile: UserProfile | null;
@@ -39,11 +32,13 @@ interface Props {
 }
 
 export function UserCenter({ profile, onClose, onProfileChange }: Props) {
-  const { resolved, setMode } = useTheme();
+  const { mode, setMode } = useTheme();
   const settings = useSettingsStore((s) => s.settings);
   const patch = useSettingsStore((s) => s.patch);
+  const setDefaultVolume = useSettingsStore((s) => s.setDefaultVolume);
   const [clearing, setClearing] = useState(false);
   const [view, setView] = useState<"main" | "subtitles" | "api">("main");
+  const defaultVolumePct = Math.round(settings.defaultVolume * 100);
 
   const handleSignOut = useCallback(async () => {
     await signOut();
@@ -169,9 +164,9 @@ export function UserCenter({ profile, onClose, onProfileChange }: Props) {
             <button
               type="button"
               key={m}
-              className={cn("dc-uc__pill", { "is-active": resolved === m || (m === "system" && settings.theme === "system") })}
+              className={cn("dc-uc__pill", { "is-active": mode === m })}
               onClick={() => {
-                setMode(m === "system" ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : m);
+                setMode(m);
                 void patch({ theme: m });
               }}
             >
@@ -203,6 +198,28 @@ export function UserCenter({ profile, onClose, onProfileChange }: Props) {
         </div>
 
         <div className="dc-uc__row">
+          <span className="dc-uc__row-label">Default volume</span>
+          <div className="dc-uc__range-control">
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              value={defaultVolumePct}
+              onChange={(e) =>
+                void setDefaultVolume(Number(e.target.value) / 100)
+              }
+              className="dc-uc__range"
+              style={{
+                ["--pct" as never]: `${defaultVolumePct}%`,
+              }}
+              aria-label="Default volume"
+            />
+            <span className="dc-uc__range-value">{defaultVolumePct}%</span>
+          </div>
+        </div>
+
+        <div className="dc-uc__row">
           <span className="dc-uc__row-label">Skip duration</span>
           <div className="dc-uc__mini-pills">
             {SKIP_OPTIONS.map((s) => (
@@ -215,26 +232,6 @@ export function UserCenter({ profile, onClose, onProfileChange }: Props) {
                 onClick={() => void patch({ skipSeconds: s })}
               >
                 {s}s
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="dc-uc__row">
-          <span className="dc-uc__row-label">Subtitle language</span>
-          <div className="dc-uc__mini-pills">
-            {LANG_OPTIONS.map((l) => (
-              <button
-                type="button"
-                key={l.code}
-                className={cn("dc-uc__mini-pill", {
-                  "is-active": settings.preferredSubtitleLanguage === l.code,
-                })}
-                onClick={() =>
-                  void patch({ preferredSubtitleLanguage: l.code })
-                }
-              >
-                {l.label}
               </button>
             ))}
           </div>

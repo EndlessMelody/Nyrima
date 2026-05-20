@@ -25,10 +25,13 @@ _Last touched: 2026-05-16_
 - [x] Storage layer (recents, playback positions, settings)
 - [x] First clean `npm run build` (Once UI alias + stubs in vite.config.ts)
 - [x] OAuth client setup docs (`docs/oauth-setup.md`)
-- [x] Replace placeholder PNG icons with the SVG-derived export
-  - `scripts/make-icons.mjs` resamples `public/icons/Icon.png` via `sharp` into
-    16/32/48/128 PNGs. The SVG path is kept as fallback documentation.
-- [ ] End-to-end smoke test on a real shared folder, recorded somewhere
+- [x] Replace placeholder PNG icons with the managed extension icon export
+  - `scripts/make-icons.mjs` resamples `public/icons/extension-icon.png` via `sharp` into
+    16/32/48/128 PNGs for the Chrome extension manifest and toolbar action.
+- [x] End-to-end smoke test playbook for the sharing layer
+  - `docs/sharing-smoke-test.md` covers the fast loopback (own `Shared/` →
+    self-follow) and a two-account variant. Used to validate P4.1–P4.5
+    before each release tag.
 
 ## Phase 2 — Real player · **shipped**
 _Last touched: 2026-05-16_
@@ -50,10 +53,15 @@ _Last touched: 2026-05-16_
   - On-demand hover frame preview ships from a hidden preview video where a
     direct media `src` exists; MSE still falls back to time-only.
   - Sprite generation + IndexedDB cache moved to cross-cutting backlog.
-- [→] **P2.4** Audio-track selector for MKVs — _deferred to backlog_
-  - MSE pipeline only; needs demuxer to expose all audio tracks, MSE
-    controller to support track switching (re-init audio SourceBuffer),
-    plus UI. Native-mode `videoEl.audioTracks` is too patchy to lean on.
+- [x] **P2.4** Audio-track selector for MKVs — _shipped 2026-05-20_
+  - Split video + audio SourceBuffers on one MediaSource. New
+    `controller.switchAudio(trackNumber)` re-parses the cached Tracks
+    element, runs `changeType` on the audio SourceBuffer, appends the
+    new audio init segment, and back-fills from `currentTime − 0.5 s`
+    without touching the video pipe — picture never blinks during
+    dub swap. Surfaced via `handlePickAudioTrackNumber` in PlayerPage
+    with the route-reload-with-`?audio=N` path retained as fallback
+    for native MKV mode. Backlog F.9 closed.
 - [→] **P2.5** Smarter MKV header sniff — _deferred to backlog_
   - Bandwidth optimization (3–4 MB saved per video open). No user-observable
     defect today; 4 MB also seeds the MSE cluster prelude for fast first
@@ -103,34 +111,37 @@ _Last touched: 2026-05-16_
     episodes / total runtime / watched count across the collection.
 - [→] **P3.6** Multi-folder libraries — _deferred_ (data-model rewrite)
 
-## Phase 4 — Sharing layer · **in progress**
-_Last touched: 2026-05-18_
+## Phase 4 — Sharing layer · **shipped**
+_Last touched: 2026-05-20_
 
 Drive-only social model. Each user gets a `Shared/` subfolder set to
-"Anyone with the link → Viewer". Inside: `index.json` manifest,
-`entries/{id}.json` per share, `comments/{shareId}.jsonl` for the user's
-own comments on other users' shares. Comments are decentralized — each
-commenter writes to their own folder; the share owner reconstructs threads
-by scanning followers' Shared folders for matching `{shareId}.jsonl`.
-This sidesteps Drive's binary view/edit permission model.
+"Anyone with the link → Viewer". Inside (flat, no subfolders):
+`index.json` (schema v=2 inlines the full share-entry payloads — one
+Drive read yields the whole feed for a follower) and `comments.jsonl`
+(single JSONL stream of every comment the user has ever posted, each
+line tagged with `sharedFolderId` + `shareId` so the owner can filter to
+their own shares). Comments are decentralized — each commenter writes
+to their own folder; the share owner reconstructs threads by reading
+followers' single `comments.jsonl` files and filtering. This sidesteps
+Drive's binary view/edit permission model.
 
 - [x] **P4.0** Foundation — schema + Shared/ bootstrap + Drive write helpers
-  - Types: `ShareEntry`, `ShareIndex`, `ShareIndexEntry`, `ShareComment`,
+  - Types: `ShareEntry`, `ShareIndex`, `ShareComment`,
     `ShareAuthor`, `ShareTarget`, `FollowedUser`, `ShareProfile` in
     `@shared/types`.
-  - Constants: `SHARED_FOLDER_NAME` / `SHARED_ENTRIES_SUBFOLDER` /
-    `SHARED_COMMENTS_SUBFOLDER` / `SHARED_INDEX_FILENAME`, caps
-    (`MAX_SHARE_INDEX_ENTRIES`, comment + caption char limits),
-    `SHARE_HANDLE_PATTERN`. Storage keys: `SHARE_PROFILE`,
-    `SHARED_FOLDER_ID`, `SHARED_SUBFOLDER_IDS`, `FOLLOWED_USERS`.
+  - Constants: `SHARED_FOLDER_NAME` / `SHARED_INDEX_FILENAME` /
+    `SHARED_COMMENTS_FILENAME`, caps (`MAX_SHARE_INDEX_ENTRIES`, comment +
+    caption char limits), `SHARE_HANDLE_PATTERN`. Storage keys:
+    `SHARE_PROFILE`, `SHARED_FOLDER_ID`, `FOLLOWED_USERS`
+    (`SHARED_SUBFOLDER_IDS` remains only as a legacy cache key to clear).
   - Drive write helpers added to `drive-api.ts`: `createFolder`,
     `findChildByName`, `findOrCreateChildFolder`, `uploadJsonFile`,
     `updateJsonFile`, `downloadJsonFile`. All route through the existing
     `authedFetch` queue/retry/cooldown pipeline.
   - Sharing service module at `src/app/services/sharing/`:
-    `share-folder.ts` (idempotent bootstrap of Shared/, entries/,
-    comments/), `index-store.ts` (read/write `index.json`),
-    `entry-store.ts` (read/write entry JSONs + id generation),
+    `share-folder.ts` (idempotent bootstrap of flat `Shared/`),
+    `index-store.ts` (read/write inline `index.json` + id generation),
+    `comments-store.ts` (flat `comments.jsonl` append/read/aggregate),
     `share-profile.ts` (handle picker + author projection).
   - OAuth: scope set expanded to include `drive.file` (narrowest write
     scope — only files the app creates). Existing users need to
@@ -156,9 +167,11 @@ This sidesteps Drive's binary view/edit permission model.
     checkbox the first time (gated on probed permission state). Success
     state surfaces the Drive folder URL with a copy-to-clipboard button.
   - `useSharingStore.submitShare()` is the integration seam: ensureFolders
-    → readShareIndex → writeShareEntry → prependIndexEntry → writeShareIndex
-    → (optional) publishSharedFolder, all in one transaction. Errors
-    surface via `lastError` so the composer can inline-render them.
+    → readShareIndex → prependIndexEntry → writeShareIndex → (optional)
+    publishSharedFolder, all in one transaction. Errors surface via
+    `lastError` so the composer can inline-render them. Manifest mutations
+    are locally queued per `Shared/` folder to avoid same-context overwrite
+    races.
   - Drive permissions API helpers (`getFolderIsPublic`, `setFolderPublic`,
     `setFolderPrivate`) added to drive-api.ts. `share-permissions.ts`
     wraps them with a chrome.storage cache so the composer reads the
@@ -172,26 +185,137 @@ This sidesteps Drive's binary view/edit permission model.
   - New: `pages/SocialPage`, `pages/SocialPage.scss`, `stores/social-store`,
     `components/social/{SocialToolbar,SocialTabs,InboxList,MyShares,
     PeopleSearch,ActivityFeed,PrivacyPanel}`.
-  - Drive: added `deleteFile` to `drive-api.ts` + `deleteShareEntry` to the
-    sharing barrel so unshare can prune index + entry file atomically.
-  - MyShares + PrivacyPanel are fully wired today (own index, public toggle).
-    Inbox and People are wired to the social-store follow/pull pipeline but
-    won't surface third-party data until **P4.2** ships discovery + sync UX
-    polish. Activity is a placeholder pending **P4.3**.
-- [~] **P4.2** Follow + pull — paste a friend's Shared/ URL, scan their
-      index, populate the Inbox surface
+  - Unshare now prunes the inline entry from `Shared/index.json`; followers
+    stop seeing it on their next sync.
+  - MyShares + PrivacyPanel are fully wired (own index, public toggle). Inbox
+    and People read through the social-store follow/pull pipeline. Activity
+    renders the P4.3 comment strands.
+- [x] **P4.2** Follow + pull — paste a friend's Shared/ URL, scan their
+      index, populate the Inbox surface — _completed 2026-05-19_
   - Core follow/pull/unfollow/mark-read landed inside the Social hub
     alongside **P4.UI**: `useSocialStore.follow()` parses the URL, pulls
     their `index.json`, dedupes, and computes per-follow unread counts.
-    Remaining 4.2 scope: error-state polish, suggested follows, "view
-    their shelf" deep-link to a read-only library view in Nyrima (today it
-    opens the Drive folder in a new tab).
-- [ ] **P4.3** Comments — append-only JSONL writer + owner aggregator
-      that reads followers' `Shared/comments/`. Renders in the Social
-      hub's Activity tab.
-- [ ] **P4.4** Bootstrap index — public opt-in directory of discoverable
-      users. Opt-in toggle lives in the Privacy tab; discovered users feed
-      a "Suggested" rail in the People tab.
+  - **View their shelf**: new `/social/shelf/:folderId` route + read-only
+    `FollowedShelf` view. Owner header (avatar / handle / share count /
+    last pull), filter input, table of their inlined entries with the
+    same Open / Comment / Copy row affordances as the inbox. The People
+    tab's "View shelf" now stays in Nyrima instead of bouncing to Drive.
+  - **Error-state polish**: errored follow cards render an inline pill
+    with the failure message + a per-card Retry button (calls `syncInbox`
+    so all follows refresh together — bounded-concurrency already gates
+    the pull). The Drive-folder link survives as a secondary action.
+  - Last-good inbox rows are cached in chrome.storage, so `/social` can
+    render the previous feed immediately and keep stale rows visible when
+    a single followed folder fails to sync.
+  - Suggested follows now arrive through the P4.4 bootstrap directory.
+- [x] **P4.2a** Inline-entries refactor (schema v=2) — _2026-05-19_
+  - `ShareIndex.entries` now carries full `ShareEntry` payloads instead
+    of slim `ShareIndexEntry` pointers; `Shared/entries/{id}.json` is
+    gone. One Drive read = full feed per follower. `readShareIndex`
+    returns null for legacy v=1 manifests (treated as "fresh user" —
+    no migration code; pre-release, OK to break).
+  - Open/Copy actions now point at the *target* Drive URL (the video file
+    or library folder) instead of the manifest file. The user lands on
+    the thing they want, not its metadata.
+  - **ShelfLinkCard** mounted above the tab strip on `/social`: avatar +
+    handle + Drive URL with Copy/Open + clickable Public/Private chip.
+    Auto-ensures the `Shared/` folder once a profile exists so the URL
+    is available without sharing first.
+- [x] **P4.3** Comments — append + aggregate, rendered on Activity tab —
+      _2026-05-19_
+  - Single flat `Shared/comments.jsonl` per user (no per-shareId files,
+    no `comments/` subfolder). Each line carries the share owner's
+    `sharedFolderId` + the target `shareId`, so the aggregator filters
+    one stream per follower instead of fanning out to N files.
+  - `comments-store.ts` ships `appendComment` (read-modify-write JSONL),
+    `readComments` (parse + skip malformed lines), and
+    `aggregateComments` (bounded-concurrency pull across followers).
+    Comment appends are locally queued per writer `Shared/` folder to avoid
+    dropping lines when two comment dialogs submit close together.
+  - `useSocialStore` gains `receivedComments` (bucketed by `shareId`,
+    only counts comments from people I follow targeting my own folder),
+    `myComments` (own stream), and the actions `postComment` /
+    `loadMyComments` / `loadReceivedComments`.
+  - UI: `CommentComposerDialog` opens from a "Comment" button on every
+    inbox row; `ActivityFeed` shows Received vs Sent strands with chip
+    switcher + refresh control, grouped by share. Tab badge counts
+    received-comment volume.
+  - Discovery caveat: only people the owner follows can surface here —
+    Drive's flat permission model doesn't give us "this stranger commented
+    on you" without an owner-side list of folders to scan.
+- [x] **P4.4** Bootstrap index — public opt-in directory of discoverable
+      users — _2026-05-19_
+  - **Source**: single JSON array hosted at
+    `raw.githubusercontent.com/nyrima/directory/main/users.json` (URL
+    constants in `@shared/constants`). Cached in chrome.storage on a 24h
+    TTL; 404s degrade gracefully to "empty directory" so the rail still
+    renders before the registry repo is published.
+  - **Schema**: `DirectoryEntry` (v=1) carries handle, name, folderId,
+    avatarUrl, optional bio + tags + addedAt. Sanitized on read to drop
+    malformed entries silently.
+  - **Service**: `src/app/services/sharing/directory.ts` —
+    `fetchDirectory`, `getCachedDirectory`, `clearDirectoryCache`. Pulls
+    once per session by default; force-refresh available from the
+    Discover rail's Refresh button.
+  - **Discover rail**: People tab's `DiscoverRail` filters directory
+    entries down to people the user isn't already following, surfaces
+    cards with avatar / bio / tag chips / "NEW" pill (14-day window),
+    one-click Follow that reuses the existing paste-by-URL path with a
+    synthetic Drive URL.
+  - **Opt-in**: `RequestListingDialog` (mounted from PrivacyPanel)
+    pre-fills a `DirectoryEntry` JSON from the user's profile + folder
+    id, lets them tweak bio + tags, and produces both a copy-paste
+    snippet and a one-click GitHub-issue link (title + body pre-filled
+    via URL params). Manual PR-style moderation is the spam filter.
+    Gated on having a profile AND the Shared/ folder being public.
+- [x] **P4.5** Drive-to-Drive import — _2026-05-20_
+  - Inbox and followed-shelf rows now have **Import**. It creates
+    `Nyrima/Imports/<share title - timestamp>/` and copies the shared
+    target into the recipient's own Drive using Drive's server-side
+    `files.copy` endpoint.
+  - Video imports copy the source video plus same-folder companions:
+    `Poster.{jpg,jpeg,png,webp}` and subtitles whose basename matches the
+    video. Library imports recursively mirror folder structure and files.
+  - Import is Drive-native, not BitTorrent/P2P: no browser download/re-upload,
+    but it still respects source access and owner copy/download restrictions.
+    Partial library failures are collected so copy-blocked files do not abort
+    the entire folder.
+
+## Pre-launch hardening · **shipped**
+_Last touched: 2026-05-20_
+
+Cleanup pass run on the road to v0.1.0. No new product surface — this
+section is the evidence that the extension is shippable today.
+
+- [x] **L.1** Version bump: `0.0.1` → `0.1.0` (manifest follows
+  automatically via `pkg.version`).
+- [x] **L.2** `.gitignore` covers local-only scratch (`example/` test
+  MKVs, `.playwright-mcp/` debug logs, `NOTES_*.txt`, `.mcp.json`).
+  Nothing personal can be accidentally committed.
+- [x] **L.3** Security pass:
+  - `npm audit --production`: 0 vulnerabilities.
+  - OAuth tokens never logged; the only string-templated `Bearer ${…}`
+    sites are the DNR rule and `authedFetch` Authorization header.
+  - `innerHTML` used once (the content-script FAB), bound to a constant
+    label — no user input reaches it.
+  - CSP locked down: `script-src 'self' 'wasm-unsafe-eval'`, no inline.
+    `connect-src` / `media-src` / `img-src` enumerate only Drive,
+    `googleapis.com`, `raw.githubusercontent.com`,
+    `avatars.githubusercontent.com`, `googleusercontent.com`.
+  - DNR auth rule scoped to extension-initiated requests against
+    `googleapis.com/drive/v3/files/` (`initiatorDomains: [runtime.id]`).
+  - BYOK OAuth + 24 h interactive consent ceiling caps stolen-device
+    blast radius (`NEEDS_RECONSENT` resurfaces the consent screen).
+- [x] **L.4** Keyboard shortcut audit: cheatsheet matches the bound
+  handler 1:1 (Playback, Audio & View, Subtitles, Playlist groups). No
+  conflicts with browser-default chords; modifier keys deliberately
+  bypass the digit-jump handler so `Ctrl+0..9` still works.
+- [x] **L.5** Docs refresh: README / architecture / plan / PHASES all
+  reflect the shipped Phase 4 + folder-poster pivot. Stale references
+  to MAL/Jikan and `METADATA_CACHE.v2` removed.
+- [x] **L.6** TSC + Vitest green: `tsc --noEmit` exits 0, 87 tests
+  pass across 11 files (parser, subtitle converters, MKV remux, EBML,
+  sharing services).
 
 ## Phase 5 — Realtime + privacy · **not started**
 _Last touched: never_
@@ -224,8 +348,10 @@ _Last touched: 2026-05-16_
       `@once-ui-system/core` once verified to work under Vite
 - [ ] **F.8** Timeline thumbnail sprite cache (was P2.3) — generate a sprite
       sheet on first hover, persist in IndexedDB, reuse across sessions
-- [ ] **F.9** MKV audio-track selector (was P2.4) — surface all audio tracks
-      from demuxer, support switching in MSE pipeline
+- [x] **F.9** MKV audio-track selector (was P2.4) — _shipped 2026-05-20_
+  - Closed by the P2.4 rework: split SourceBuffers + `switchAudio()`
+    + cluster-indexed catch-up fetch. See PHASES P2.4 for the gotchas
+    list (hev1, trun field order, decode-order sort, lacing, dfLa).
 - [ ] **F.10** Smarter MKV header sniff (was P2.5) — SeekHead-following
       Range fetches instead of the fixed 4 MB prelude
 - [ ] **F.11** Timeline chapter markers — parse EBML Chapters → render ticks

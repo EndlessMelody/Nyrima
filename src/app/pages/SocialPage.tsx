@@ -1,8 +1,13 @@
 /**
  * SocialPage — the Phase 4 social hub.
  *
- * One route, five tabs. URL-driven (`/social/:tab`) so deep links stay stable
- * and the topbar's unread badge can jump straight to Inbox. Tabs:
+ * Layout: a 2-column rail/pane grid sized to the viewport so the page itself
+ * never scrolls — the pane owns its own overflow. The rail (left, 320px)
+ * holds identity + section picker + sync controls; the pane (right) renders
+ * the active section.
+ *
+ * One route, five sections. URL-driven (`/social/:tab`) so deep links stay
+ * stable and the topbar's unread badge can jump straight to Inbox. Sections:
  *
  *   inbox    → new shares from people you follow + access requests
  *   mine     → manage your own published shares
@@ -10,42 +15,59 @@
  *   activity → comment threads (placeholder until P4.3 lands)
  *   privacy  → public/private toggle for Shared/, block list
  *
+ * Section switching uses the SocialSectionPicker (compact trigger →
+ * floating popover), not a horizontal tabstrip — keeps the rail dense and
+ * leaves the eye on the pane content.
+ *
  * Design language: dense, instrument-tape, hairline borders + monospace
  * captions — the same Atelier system the lobby uses. The information density
  * is nyaa.si-flavored (table rows, category badges, sort + filter chrome)
  * filtered through Nyrima's existing tokens; we don't introduce a new palette
  * or font stack.
- *
- * The page mounts a sticky toolbar (kana caption + tab strip + global search
- * + sync state). Each tab renders into the same content slot — keeps the
- * layout grid identical between tabs so switching feels weightless.
  */
 
 import { useEffect, useMemo } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useSharingStore } from "../stores/sharing-store";
 import { useSocialStore } from "../stores/social-store";
-import { SocialToolbar } from "../components/social/SocialToolbar";
-import { SocialTabs, type SocialTabKey, SOCIAL_TABS } from "../components/social/SocialTabs";
+import { SocialToolbar, SyncControls } from "../components/social/SocialToolbar";
+import { ShelfLinkCard } from "../components/social/ShelfLinkCard";
+import {
+  SocialSectionPicker,
+  type SocialTabKey,
+  SOCIAL_TABS,
+} from "../components/social/SocialTabs";
 import { InboxList } from "../components/social/InboxList";
 import { MyShares } from "../components/social/MyShares";
 import { PeopleSearch } from "../components/social/PeopleSearch";
 import { ActivityFeed } from "../components/social/ActivityFeed";
 import { PrivacyPanel } from "../components/social/PrivacyPanel";
+import { FollowedShelf } from "../components/social/FollowedShelf";
 import "./SocialPage.scss";
 
 const DEFAULT_TAB: SocialTabKey = "inbox";
 
 export function SocialPage() {
   const navigate = useNavigate();
-  const params = useParams<{ tab?: string }>();
+  const params = useParams<{ tab?: string; folderId?: string }>();
+  const location = useLocation();
+
+  // `/social/shelf/:folderId` matches a different route definition than the
+  // tabbed routes, so we use the path prefix rather than params.tab to
+  // detect shelf mode — `params.folderId` is only populated on the shelf
+  // route and `params.tab` on the tab routes.
+  const shelfFolderId = location.pathname.startsWith("/social/shelf/")
+    ? params.folderId
+    : undefined;
+  const isShelf = !!shelfFolderId;
 
   const tabKey: SocialTabKey = useMemo(() => {
+    if (isShelf) return "people"; // highlight People tab when drilling into a shelf
     const raw = params.tab ?? DEFAULT_TAB;
     return SOCIAL_TABS.some((t) => t.key === raw)
       ? (raw as SocialTabKey)
       : DEFAULT_TAB;
-  }, [params.tab]);
+  }, [params.tab, isShelf]);
 
   // ---- store wiring -------------------------------------------------------
 
@@ -63,6 +85,8 @@ export function SocialPage() {
   const myIndex = useSocialStore((s) => s.myIndex);
   const myIndexLoaded = useSocialStore((s) => s.myIndexLoaded);
   const loadMyIndex = useSocialStore((s) => s.loadMyIndex);
+
+  const receivedComments = useSocialStore((s) => s.receivedComments);
 
   // Hydrate the profile + follow list on first mount. Cheap (one
   // chrome.storage read each) and decoupled — neither blocks the other.
@@ -92,37 +116,61 @@ export function SocialPage() {
     navigate(next === DEFAULT_TAB ? "/social" : `/social/${next}`);
   };
 
+  const activityCount = useMemo(
+    () =>
+      Object.values(receivedComments).reduce((n, list) => n + list.length, 0),
+    [receivedComments],
+  );
+
   const tabCounts = useMemo(
     () => ({
       inbox: unreadCount,
       mine: myIndex?.entries.length ?? 0,
       people: followedUsers.length,
-      activity: 0,
+      activity: activityCount,
       privacy: 0,
     }),
-    [unreadCount, myIndex, followedUsers.length],
+    [unreadCount, myIndex, followedUsers.length, activityCount],
   );
 
   return (
     <div className="ny-social">
-      <SocialToolbar
-        profile={profile}
-        profileLoaded={profileLoaded}
-        syncing={syncing}
-        lastSyncedAt={lastSyncedAt}
-        followsCount={followedUsers.length}
-        onSync={() => void syncInbox()}
-      />
+      <aside className="ny-social__rail" aria-label="Social rail">
+        <SocialToolbar />
 
-      <SocialTabs current={tabKey} counts={tabCounts} onChange={goToTab} />
+        <ShelfLinkCard ready={profileLoaded} />
 
-      <div className="ny-social__content">
-        {tabKey === "inbox" && <InboxList />}
-        {tabKey === "mine" && <MyShares />}
-        {tabKey === "people" && <PeopleSearch />}
-        {tabKey === "activity" && <ActivityFeed />}
-        {tabKey === "privacy" && <PrivacyPanel />}
-      </div>
+        <SocialSectionPicker
+          current={tabKey}
+          counts={tabCounts}
+          onChange={goToTab}
+        />
+
+        <div className="ny-social__rail-sep" aria-hidden="true" />
+
+        <SyncControls
+          profile={profile}
+          profileLoaded={profileLoaded}
+          syncing={syncing}
+          lastSyncedAt={lastSyncedAt}
+          followsCount={followedUsers.length}
+          onSync={() => void syncInbox()}
+        />
+      </aside>
+
+      <section className="ny-social__pane" aria-label="Social content">
+        {isShelf ? (
+          <FollowedShelf folderId={shelfFolderId!} />
+        ) : (
+          <>
+            {tabKey === "inbox" && <InboxList />}
+            {tabKey === "mine" && <MyShares />}
+            {tabKey === "people" && <PeopleSearch />}
+            {tabKey === "activity" && <ActivityFeed />}
+            {tabKey === "privacy" && <PrivacyPanel />}
+          </>
+        )}
+      </section>
     </div>
   );
 }

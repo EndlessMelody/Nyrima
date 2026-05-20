@@ -27,11 +27,17 @@ export default defineManifest({
   description:
     "Professional video player & personal cinema that lives on Google Drive.",
   version: pkg.version,
-  version_name: `${pkg.version}-dev`,
+  version_name: pkg.version,
 
   action: {
     default_title: "Nyrima",
     default_popup: "src/popup/index.html",
+    default_icon: {
+      "16": "icons/extension-icon-16.png",
+      "32": "icons/extension-icon-32.png",
+      "48": "icons/extension-icon-48.png",
+      "128": "icons/extension-icon-128.png",
+    },
   },
 
   background: {
@@ -56,12 +62,19 @@ export default defineManifest({
     // to googleapis.com so OAuth users get native streaming instead of the
     // multi-GB blob prefetch. Scoped to existing host_permissions.
     "declarativeNetRequestWithHostAccess",
+    // Periodic silent-refresh of the 1h OAuth token so the user stays
+    // signed in for the full 24h interactive window without a re-consent
+    // round-trip on the first Drive call after expiry.
+    "alarms",
   ],
 
   host_permissions: [
     "https://drive.google.com/*",
     "https://www.googleapis.com/*",
     "https://content.googleapis.com/*",
+    // Phase 4.4 — bootstrap directory hosted as a public JSON on GitHub.
+    // Anonymous read-only fetch; no token leaves the extension.
+    "https://raw.githubusercontent.com/*",
   ],
 
   // `oauth2` is intentionally not declared. BYOK auth runs through
@@ -70,18 +83,11 @@ export default defineManifest({
   // manifest.oauth2) is no longer called. See service-worker.ts.
 
   icons: {
-    "16": "icons/icon-16.png",
-    "32": "icons/icon-32.png",
-    "48": "icons/icon-48.png",
-    "128": "icons/icon-128.png",
+    "16": "icons/extension-icon-16.png",
+    "32": "icons/extension-icon-32.png",
+    "48": "icons/extension-icon-48.png",
+    "128": "icons/extension-icon-128.png",
   },
-
-  web_accessible_resources: [
-    {
-      resources: ["src/app/index.html", "icons/*", "assets/*"],
-      matches: ["https://drive.google.com/*"],
-    },
-  ],
 
   // Content Security Policy.
   //   - script-src + object-src locked down per MV3 requirements.
@@ -96,7 +102,7 @@ export default defineManifest({
       [
         "script-src 'self' 'wasm-unsafe-eval'",
         "object-src 'self'",
-        "connect-src 'self' https://www.googleapis.com https://content.googleapis.com https://oauth2.googleapis.com",
+        "connect-src 'self' https://www.googleapis.com https://content.googleapis.com https://oauth2.googleapis.com https://raw.githubusercontent.com",
         // Drive occasionally redirects ranged media requests to googleusercontent
         // or drive.google.com mirrors; allow them under media-src to avoid silent
         // CSP blocks during playback.
@@ -104,7 +110,10 @@ export default defineManifest({
         // Folder posters are served from Drive's image thumbnail CDN
         // (lh3.googleusercontent.com et al). No third-party image hosts
         // are needed now that MAL is out of the pipeline.
-        "img-src 'self' data: blob: https://*.googleusercontent.com https://*.google.com https://www.googleapis.com",
+        // `avatars.githubusercontent.com` covers directory-entry avatars
+        // sourced from GitHub profile pictures (a common case when the
+        // user's only public avatar is their GitHub one).
+        "img-src 'self' data: blob: https://*.googleusercontent.com https://*.google.com https://www.googleapis.com https://*.githubusercontent.com",
       ].join("; ") + ";",
   },
 });

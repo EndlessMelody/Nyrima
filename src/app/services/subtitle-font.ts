@@ -32,44 +32,46 @@ export function ensureCustomFontRegistered(dataUrl: string): void {
 
 /** Map a SubtitleFontPreset to a CSS font-family value.
  *
- *  `anime-brush` is the fansub-flavored stack — Comic Neue (bundled, FOSS
- *  Comic Sans clone) first so cross-OS users see the same brushed lettering
- *  Windows users used to get from the system Comic Sans MS. `comic-dialogue`
- *  prefers the literal Comic Sans face where the OS ships it, falling
- *  through to Comic Neue. `clean-sans` reuses the body Geist Sans stack and
- *  `system` defers to the platform UI font. */
+ *  Every preset now leads with a locally-bundled face (declared in
+ *  fonts.scss) so the picker looks the same on every OS:
+ *
+ *    - `chinacat-teddybear` — brush voice, Chinacat → Comic Neue → Comic Sans
+ *    - `cascadia`           — dialogue / mono voice, Cascadia Mono → Cascadia Code
+ *    - `asap`               — clean modern sans, Asap variable
+ *    - `system`             — platform UI default
+ *    - `custom`             — user-uploaded face, falls through to Chinacat */
 export function fontStackFor(
-  preset: "anime-brush" | "comic-dialogue" | "clean-sans" | "system" | "custom",
+  preset: "chinacat-teddybear" | "cascadia" | "asap" | "system" | "custom",
 ): string {
   switch (preset) {
-    case "anime-brush":
+    case "chinacat-teddybear":
       // "Itim" carries Vietnamese-range glyphs via its unicode-range-scoped
       // @font-face (imported in main.tsx). Placing it before system-ui means
       // accented Vietnamese characters (`ế ữ ợ ầ ạ ẩ`) stay in a brush face
       // instead of falling through to the OS default sans.
-      return '"Comic Neue", "Comic Sans MS", "Chalkboard SE", "Marker Felt", "Itim", system-ui, sans-serif';
-    case "comic-dialogue":
-      return '"Comic Sans MS", "Chalkboard SE", "Marker Felt", "Comic Neue", "Itim", system-ui, sans-serif';
-    case "clean-sans":
-      return "var(--dc-font-body)";
+      return '"Chinacat Teddybear", "Comic Neue", "Comic Sans MS", "Chalkboard SE", "Marker Felt", "Itim", system-ui, sans-serif';
+    case "cascadia":
+      return '"Cascadia Mono", "Cascadia Code", "Consolas", "SFMono-Regular", ui-monospace, monospace';
+    case "asap":
+      return '"Asap", "Inter", system-ui, sans-serif';
     case "system":
       return '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
     case "custom":
-      return `"${CUSTOM_FONT_FAMILY}", "Comic Neue", "Itim", system-ui, sans-serif`;
+      return `"${CUSTOM_FONT_FAMILY}", "Chinacat Teddybear", "Itim", system-ui, sans-serif`;
   }
 }
 
 /** Short marketing label used in the picker pills + preview row. */
 export function fontLabelFor(
-  preset: "anime-brush" | "comic-dialogue" | "clean-sans" | "system" | "custom",
+  preset: "chinacat-teddybear" | "cascadia" | "asap" | "system" | "custom",
 ): string {
   switch (preset) {
-    case "anime-brush":
-      return "Anime Brush";
-    case "comic-dialogue":
-      return "Comic Dialogue";
-    case "clean-sans":
-      return "Clean Sans";
+    case "chinacat-teddybear":
+      return "Chinacat Teddybear";
+    case "cascadia":
+      return "Cascadia";
+    case "asap":
+      return "Asap";
     case "system":
       return "System UI";
     case "custom":

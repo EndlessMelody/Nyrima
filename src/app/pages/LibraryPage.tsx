@@ -43,13 +43,17 @@ import {
 } from "../services/library-view";
 import { useSettingsStore } from "../stores/settings-store";
 import { driveFolderUrl } from "@shared/drive-urls";
+import { isDriveId } from "@shared/drive-id";
 import type { DriveAccessReason } from "../services/errors";
 import type { LibrarySortKey, LibraryViewMode } from "@shared/types";
 import { formatBytes, formatRuntimeFromMillis } from "../services/formatters";
 import "./LibraryPage.scss";
 
 export function LibraryPage() {
-  const { folderId = "" } = useParams();
+  const params = useParams();
+  const rawFolderId = params.folderId ?? "";
+  const folderId = isDriveId(rawFolderId) ? rawFolderId : "";
+  const invalidFolderId = rawFolderId.length > 0 && !folderId;
   const navigate = useNavigate();
   const {
     loading,
@@ -385,6 +389,37 @@ export function LibraryPage() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [navigate, query]);
+
+  if (invalidFolderId) {
+    return (
+      <div className="ny-library">
+        <LibraryHeader
+          title="Invalid library link"
+          shortFolderId="INVALID"
+          onBack={() => navigate("/")}
+        />
+        <div className="dc-error">
+          <div className="dc-error__head">
+            <span className="dc-error__icon" aria-hidden>
+              <LockIcon />
+            </span>
+            <div className="dc-error__body">
+              <span className="dc-tracker dc-tracker--accent">
+                INVALID DRIVE ID
+              </span>
+              <span className="dc-error__title">
+                This library URL is malformed
+              </span>
+              <span className="dc-error__sub">
+                Open the folder from Google Drive or paste a valid Drive folder
+                link in Nyrima.
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (

@@ -31,10 +31,17 @@
   contain-intrinsic-size: auto;
 }
 
-/* Backdrop variant — used in horizontal-scroll rows (Continue Watching). */
+/* Backdrop variant — used in horizontal-scroll rows (Continue Watching).
+   Use an explicit `width` (not `min-width`) so a long, nowrap title in the
+   body can't widen the flex column past its neighbours — every tile in the
+   row must occupy an identical track. */
 .ny-poster-card--backdrop {
-  min-width: clamp(220px, 28vw, 280px);
+  width: clamp(220px, 28vw, 280px);
   flex-shrink: 0;
+}
+
+.ny-poster-card--backdrop .ny-poster-card__title {
+  max-width: 100%;
 }
 
 .ny-poster-card__frame {

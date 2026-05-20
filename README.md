@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="public/icons/icon-128.png" width="120" alt="Nyrima logo" />
+<img src="public/icons/app-icon.png" width="120" alt="Nyrima logo" />
 
 # Nyrima
 
@@ -26,13 +26,16 @@
 Nyrima is a Chrome MV3 extension that turns a single Google Drive folder
 into your personal cinema. Pair it with a folder you call your **Nyrima
 root** and every child folder becomes a library tile in a cinematic lobby:
-covers from MyAnimeList, season / episode grouping, watch-state filters,
+folder-placed posters, season / episode grouping, watch-state filters,
 continue-watching, and a custom VLC-flavored player that streams the
 original bytes from Drive — no transcoding, no third-party server, your
-tokens never leave the extension.
+tokens never leave the extension. A Drive-native sharing layer lets you
+publish a public manifest folder, follow friends, comment, and import
+shared videos straight into your own Drive.
 
-Phases 1 (MVP), 2 (real player), and 3 (library polish) are shipped. See
-[`PHASES.md`](./PHASES.md) for the rolling status of every ticket.
+Phases 1 (MVP), 2 (real player), 3 (library polish), and 4 (sharing
+layer) are shipped. See [`PHASES.md`](./PHASES.md) for the rolling status
+of every ticket.
 
 ## Why Nyrima?
 
@@ -43,13 +46,16 @@ out of personal media:
   and remuxed Blu-rays get mangled.
 - **Broken fansub typesetting** — Drive's preview ignores embedded ASS.
   Signs, karaoke, and positioned credits disappear.
+- **No HEVC + multi-audio support** — Drive's player can't switch dub
+  tracks on Blu-ray MKVs, and HEVC fails outright.
 - **Lost progress across devices** — every fresh tab starts from frame 0.
 - **No cinematic surface** — a `<video>` tag inside drive.google.com is
   not a movie night.
 
-Nyrima keeps the bytes original, renders ASS through **libass** (JASSUB),
-remembers playback positions, and frames the whole experience like a
-private streaming app.
+Nyrima keeps the bytes original, remuxes HEVC + FLAC MKVs through MSE
+with in-place audio-track switching (no page reload), renders ASS through
+**libass** (JASSUB), remembers playback positions, and frames the whole
+experience like a private streaming app.
 
 ## Features
 
@@ -62,16 +68,17 @@ private streaming app.
 - **Library page** with in-folder search, watched-state filters, persisted
   sort (name / modified / size / duration), and three view modes
   (grouped seasons / poster grid / list).
-- **Library cards** show a MAL/Jikan cover backdrop, episode count, total
-  runtime, and a watched-ratio pill that turns solid at completion.
+- **Library cards** show a folder-placed `Poster.*` backdrop, episode
+  count, total runtime, and a watched-ratio pill that turns solid at
+  completion.
 - **Season / episode grouping** built on a folder-aware title parser so
   `[GS]01.mkv` reads as *Gimai Seikatsu · S01 · Ep01*.
-- **MAL/Jikan metadata** with folder-aware queries (episodic filenames
-  query the folder name, not the bare episode number). 30-day cache for
-  hits, 7-day for misses.
-- **Background bulk-enrichment** — un-visited libraries get stats + covers
-  fetched in the background on lobby load, so the UI fills in without
-  the user clicking through each library.
+- **User-placed posters** — drop a `Poster.{jpg,png,webp}` (and optional
+  `Backdrop.*`) into any library folder and Nyrima picks it up. No
+  third-party metadata lookups; what you place is what you see.
+- **Background bulk-enrichment** — un-visited libraries get stats + cover
+  paths resolved in the background on lobby load, so the UI fills in
+  without the user clicking through each library.
 - **Browser-native virtualisation** via `content-visibility: auto` on
   every grid and list surface — collections with hundreds of episodes
   stay smooth.
@@ -80,6 +87,15 @@ private streaming app.
 - **Native-first MKV** with an automatic MSE-remux fallback. EBML header
   probe reads codec + duration before decoding; per-file playback-mode
   cache so re-opening the same file skips the watchdog cost.
+- **HEVC + FLAC Blu-ray rips** — the MSE pipeline emits split
+  video/audio SourceBuffers, fixes the trun field order, uses `hev1`
+  (not `hvc1`) for inline-parameter HEVC, and unpacks EBML/Xiph/fixed
+  lacing for multi-frame FLAC blocks. Cooperative yields keep the main
+  thread responsive on multi-MB clusters.
+- **In-place audio-track switching** — pick a different dub from the HUD
+  and the picture never blinks. The MSE controller re-parses the cached
+  Tracks element, runs `changeType` on the audio SourceBuffer, and
+  back-fills from `currentTime − 0.5 s` without touching the video pipe.
 - **Custom Neon Cinema chrome** with mono timecodes, centered play/skip
   trio, auto-hiding HUD, hover preview bubble with a hairline tail, and
   four corner brackets.
@@ -92,9 +108,9 @@ private streaming app.
   after a draining 3.5 s timer.
 - **Pre-roll Now-Playing card** — series · episode · runtime fades over
   the first frame for 3.4 s.
-- **Ambient backdrop glow** sampled from the cached MAL poster, painted
-  via box-shadow around the player frame; transitions smoothly between
-  episodes.
+- **Ambient backdrop glow** sampled from the folder's `Poster.*` (or
+  `Backdrop.*`), painted via box-shadow around the player frame;
+  transitions smoothly between episodes.
 - **Next-up autoplay card** with poster + countdown in the closing
   seconds. Auto-advance fires on the `<video>` `ended` event so you see
   the final frame first.
@@ -105,12 +121,36 @@ private streaming app.
 - **Subtitle styling panel** — font preset, custom font upload, weight,
   fill / outline color, shadow, letter spacing, vertical position.
 
+### Sharing (Phase 4)
+- **Drive-only social model.** Each user gets a `Shared/` folder with
+  one `index.json` (inline share entries) and one `comments.jsonl`
+  (own outbound comments). No backend, no server-side state.
+- **Follow + pull** — paste a friend's `Shared/` URL, scan their index,
+  flatten into the Inbox. Bounded-concurrency Drive reads, last-good
+  rows cached so `/social` renders before the network completes.
+- **Comments** — decentralized JSONL appends. Each commenter writes to
+  their own folder; the share owner reconstructs threads by reading
+  followers' streams and filtering by `sharedFolderId`.
+- **Drive-to-Drive import** — Inbox rows have an Import button that
+  uses Drive's server-side `files.copy` to mirror the shared target
+  into `Nyrima/Imports/<title - timestamp>/` in your own Drive. No
+  browser download/re-upload round trip.
+- **Bootstrap directory** — opt-in `DirectoryEntry[]` hosted on GitHub
+  raw, cached on a 24 h TTL. Discover rail surfaces people you aren't
+  already following.
+
 ### Platform
 - **No backend.** Every byte of media flows from Drive to your browser.
   No Nyrima server, no analytics endpoint.
-- **API-key-first auth** with optional OAuth (chrome.identity) only for
-  files that need it. The `Authorization: Bearer` header is stamped on
+- **BYOK auth.** Each user pastes their own Google Cloud OAuth Client
+  ID; the background SW runs `chrome.identity.launchWebAuthFlow` with
+  that client_id. A 24 h interactive-consent ceiling caps stolen-device
+  blast radius. The `Authorization: Bearer` header is stamped on
   `<video>` Range fetches via a declarativeNetRequest rule.
+- **Narrow OAuth scopes.** `drive.readonly` for browsing, `drive.file`
+  for writing only files the app itself created (`Shared/` manifests +
+  `Nyrima/Imports/` copies), plus `userinfo.email` / `userinfo.profile`
+  for the share handle.
 - **One source of truth for filename parsing** — `@shared/title-parser`
   handles folder + filename → show / season / episode / specials, plus
   filename-only normalization for movies.
@@ -120,12 +160,14 @@ private streaming app.
 1. Pick a folder on Google Drive — call it whatever you want (the
    *default* is `Nyrima`). It becomes your library root.
 2. Drop folders of videos into it. Each child folder of the root is one
-   library in the lobby.
+   library in the lobby. Optionally place a `Poster.{jpg,png,webp}`
+   (and `Backdrop.*`) inside each folder for cinematic covers.
 3. Install the extension (see [Loading the unpacked extension](#loading-the-unpacked-extension)).
 4. On first launch, the welcome screen walks through:
    - Pairing the Nyrima root folder you just created.
-   - Adding a Google API key (preferred) — the Setup dialog explains the
-     minimum scopes. OAuth is optional and only needed for private files.
+   - Adding a Google API key (preferred for public files) and / or your
+     own Google Cloud OAuth Client ID for private folders + the Phase 4
+     sharing layer. See [`docs/oauth-setup.md`](./docs/oauth-setup.md).
 
 ## Tech stack
 
@@ -136,9 +178,8 @@ private streaming app.
 - **MSE + EBML parser** for the MKV-remux pipeline
   ([`mkv-remux/`](src/app/services/mkv-remux)).
 - **JASSUB / libass-wasm** for ASS / SSA rendering.
-- **Jikan v4** (no API key) for MAL metadata.
 - **chrome.declarativeNetRequest** for the `Authorization` header rule.
-- **Vitest** for the unit-test suite.
+- **Vitest** for the unit-test suite (87 tests).
 
 ## Setup
 
@@ -196,19 +237,20 @@ The repository keeps four living documents, each with a clear job:
 Detailed status lives in [`PHASES.md`](./PHASES.md). Headlines:
 
 - **Phase 1 — MVP** — shipped.
-- **Phase 2 — Real player** — shipped (MKV, JASSUB, custom HUD, ambient,
-  resume pill, next-up).
-- **Phase 3 — Library polish** — shipped (search, grouping, MAL,
-  virtualised grid, card upgrades, lobby stats, bulk-enrichment).
-- **Phase 4 — Sharing layer** — not started. Per-folder share entries on
-  Drive, follow + pull, comments-as-JSONL.
+- **Phase 2 — Real player** — shipped (MKV, HEVC + FLAC, in-place audio
+  swap, JASSUB, custom HUD, ambient, resume pill, next-up).
+- **Phase 3 — Library polish** — shipped (search, grouping, folder
+  posters, virtualised grid, card upgrades, lobby stats, bulk-enrichment).
+- **Phase 4 — Sharing layer** — shipped. Drive-only share manifests,
+  follow + pull, comments-as-JSONL, Drive-to-Drive import, bootstrap
+  directory.
 - **Phase 5 — Realtime + privacy** — not started. Watch parties via
   WebRTC datachannels (Drive signaling), AES-GCM encrypted libraries,
   PWA offline cache.
 
-Cross-cutting backlog: audio-track selector for MKVs (F.9), smarter
-SeekHead-following header sniff (F.10), timeline chapter markers (F.11),
-unified Tracks panel (F.12), and a few code-hygiene items.
+Cross-cutting backlog: SeekHead-following header sniff (F.10), timeline
+chapter markers (F.11), unified Tracks panel (F.12), and a few
+code-hygiene items.
 
 ## Security & privacy
 

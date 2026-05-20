@@ -33,6 +33,7 @@ import { useSharingStore } from "../stores/sharing-store";
 import { getFileMetadata } from "../services/drive/metadata-service";
 import { resolveFolderPoster } from "../services/folder-poster";
 import { MAX_SHARE_CAPTION_CHARS } from "@shared/constants";
+import { decodeDriveIdParam } from "@shared/drive-id";
 import { driveFolderUrl } from "@shared/drive-urls";
 import type {
   DriveFile,
@@ -435,16 +436,16 @@ function matchPlay(
 ): { folderId: string; fileId: string } | null {
   const m = pathname.match(/^\/play\/([^/]+)\/([^/]+)\/?$/);
   if (!m) return null;
-  return {
-    folderId: decodeURIComponent(m[1]),
-    fileId: decodeURIComponent(m[2]),
-  };
+  const folderId = decodeDriveIdParam(m[1]);
+  const fileId = decodeDriveIdParam(m[2]);
+  return folderId && fileId ? { folderId, fileId } : null;
 }
 
 function matchLibrary(pathname: string): { folderId: string } | null {
   const m = pathname.match(/^\/library\/([^/]+)\/?$/);
   if (!m) return null;
-  return { folderId: decodeURIComponent(m[1]) };
+  const folderId = decodeDriveIdParam(m[1]);
+  return folderId ? { folderId } : null;
 }
 
 function bestVideoTitle(file: DriveFile | null): string {

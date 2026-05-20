@@ -82,7 +82,7 @@
   position: absolute;
   inset: 0 0 auto 0;
   padding: 14px 20px 28px;
-  z-index: 3;
+  z-index: 45;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -197,7 +197,7 @@
 .dc-vlc__center {
   position: absolute;
   inset: 0;
-  z-index: 2;
+  z-index: 30;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -342,7 +342,7 @@
 .dc-vlc__hud {
   position: absolute;
   inset: auto 0 0 0;
-  z-index: 3;
+  z-index: 50;
   padding: 18px 20px 16px;
   background: linear-gradient(
     to top,
@@ -370,24 +370,52 @@
 // ---------------------------------------------------------------------------
 // Timeline
 // ---------------------------------------------------------------------------
+.dc-vlc__timeline-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 2px;
+  margin: 0 0 5px;
+  font-family: var(--dc-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.86);
+  pointer-events: none;
+
+  span:last-child {
+    color: rgba(255, 255, 255, 0.58);
+  }
+}
+
 .dc-vlc__timeline {
   position: relative;
-  height: 8px;
-  padding: 8px 0; // larger hit area
-  margin: 0 0 10px;
+  height: 18px;
+  padding: 6px 0; // larger hit area
+  margin: 0 0 8px;
   cursor: pointer;
+  touch-action: none;
+  user-select: none;
 
   &-track {
     position: relative;
-    height: 4px;
+    height: 5px;
     border-radius: 4px;
     background: rgba(255, 255, 255, 0.14);
     overflow: visible;
-    transition: height 140ms ease;
+    transition: height 120ms ease;
   }
 
-  &:hover &-track {
-    height: 6px;
+  &:hover &-track,
+  &.is-scrubbing &-track {
+    height: 7px;
+  }
+
+  &.is-scrubbing .dc-vlc__tl-progress,
+  &.is-scrubbing .dc-vlc__tl-thumb {
+    transition: none;
   }
 }
 
@@ -410,6 +438,7 @@
   );
   box-shadow: 0 0 10px var(--brand-alpha-medium);
   pointer-events: none;
+  transition: width 80ms linear;
 }
 
 .dc-vlc__tl-thumb {
@@ -423,14 +452,17 @@
   box-shadow:
     0 0 0 2px rgba(255, 255, 255, 0.9),
     0 0 14px var(--brand-alpha-strong);
-  opacity: 0;
-  transition: opacity 140ms ease;
+  opacity: 0.82;
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
   pointer-events: none;
 }
 
 .dc-vlc__timeline:hover .dc-vlc__tl-thumb,
 .dc-vlc__timeline.is-scrubbing .dc-vlc__tl-thumb {
   opacity: 1;
+  transform: translate(-50%, -50%) scale(1.08);
 }
 
 .dc-vlc__tl-preview {
@@ -567,6 +599,17 @@
     background: var(--accent-alpha-medium);
     box-shadow: 0 0 14px var(--accent-alpha-medium);
   }
+
+  &:disabled {
+    color: rgba(255, 255, 255, 0.28);
+    cursor: not-allowed;
+    box-shadow: none;
+
+    &:hover {
+      background: transparent;
+      color: rgba(255, 255, 255, 0.28);
+    }
+  }
 }
 
 /* Compact text-button variant — used by the speed picker so "1.5x" fits. */
@@ -644,30 +687,6 @@
   flex: 1;
 }
 
-// ---------------------------------------------------------------------------
-// Volume cluster — slider unfolds horizontally on hover
-// ---------------------------------------------------------------------------
-.dc-vlc__vol {
-  display: inline-flex;
-  align-items: center;
-  height: 36px;
-
-  &-rail {
-    width: 0;
-    overflow: hidden;
-    display: inline-flex;
-    align-items: center;
-    transition: width 220ms ease;
-  }
-
-  &:hover &-rail,
-  &.is-open &-rail {
-    width: 92px;
-    padding-left: 6px;
-    padding-right: 8px;
-  }
-}
-
 .dc-vlc__range {
   appearance: none;
   width: 100%;
@@ -710,12 +729,22 @@
   }
 }
 
+@container dc-vlc (max-width: 760px) {
+  .dc-vlc__bar {
+    gap: 7px;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Popup menus (subtitles, speed)
 // ---------------------------------------------------------------------------
 .dc-vlc__menu-host {
   position: relative;
   display: inline-flex;
+}
+
+.dc-vlc__menu-host--settings {
+  z-index: 70;
 }
 
 .dc-vlc__menu {
@@ -735,7 +764,7 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  z-index: 5;
+  z-index: 60;
 }
 
 .dc-vlc__menu-kana {
@@ -819,15 +848,20 @@
   text-align: center;
 }
 
-/* Settings popover — wider than the speed/sub menus to fit the slider.
-   Capped vertical extent + internal scroll so the new typography knobs
-   don't punch out of the bottom of the player chrome. */
+/* Settings popover — wide enough for the three-panel manager, anchored beside
+   fullscreen so it stays inside the player after fullscreen transitions. */
 .dc-vlc__menu--settings {
-  min-width: 296px;
-  max-width: 320px;
-  padding: 8px;
-  max-height: min(72vh, 560px);
-  overflow-y: auto;
+  right: -44px;
+  min-width: 0;
+  width: min(420px, 80cqw);
+  max-width: calc(100cqw - 24px);
+  height: min(460px, calc(100cqh - 126px));
+  padding: 10px;
+  gap: 8px;
+  overflow: hidden;
+  z-index: 80;
+  scrollbar-width: thin;
+  scrollbar-color: var(--brand-alpha-strong) transparent;
 
   /* Tighter rail for the in-player settings menu — the surface is dark and
    * compact, so a 6px scrollbar keeps the gradient legible without ever
@@ -836,6 +870,191 @@
   &::-webkit-scrollbar {
     width: 6px;
   }
+}
+
+.dc-vlc__settings-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 6px 2px;
+}
+
+.dc-vlc__settings-title {
+  margin-top: 2px;
+  color: rgba(255, 255, 255, 0.94);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.dc-vlc__settings-close {
+  appearance: none;
+  border: 0;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.72);
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+
+  &:hover {
+    background: var(--brand-alpha-weak);
+    color: var(--brand-on-background-strong);
+  }
+}
+
+.dc-vlc__settings-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  padding: 0 2px 2px;
+}
+
+.dc-vlc__settings-tab {
+  appearance: none;
+  min-width: 0;
+  height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.035);
+  color: rgba(255, 255, 255, 0.7);
+  font-family: var(--dc-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+
+  &:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.07);
+  }
+
+  &.is-active {
+    color: var(--brand-on-background-strong);
+    border-color: var(--brand-border-strong);
+    background: var(--brand-alpha-medium);
+    box-shadow: 0 0 0 1px var(--brand-border-strong) inset;
+  }
+}
+
+.dc-vlc__settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+  animation: dc-settings-panel-in 150ms ease;
+  scrollbar-width: thin;
+}
+
+.dc-vlc__settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 112px;
+  overflow-y: auto;
+  padding-right: 2px;
+  scrollbar-width: thin;
+}
+
+.dc-vlc__menu-row--tight {
+  padding: 6px 2px 0;
+}
+
+.dc-vlc__settings-slider-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.dc-vlc__settings-slider-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+
+  .dc-vlc__range {
+    height: 18px;
+    background-size: 100% 6px;
+
+    &::-webkit-slider-thumb {
+      width: 14px;
+      height: 14px;
+      margin-top: -4px;
+    }
+
+    &::-moz-range-thumb {
+      width: 14px;
+      height: 14px;
+    }
+  }
+}
+
+.dc-vlc__settings-slider-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 24px;
+}
+
+.dc-vlc__settings-slider-name {
+  font-family: var(--dc-font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.dc-vlc__settings-value {
+  min-width: 4ch;
+  text-align: right;
+  font-family: var(--dc-font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--accent-on-background-strong);
+}
+
+.dc-vlc__settings-pills--grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.dc-vlc__settings-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dc-vlc__menu--settings .dc-sub-cfg__section {
+  padding: 8px 10px;
+}
+
+.dc-vlc__menu--settings .dc-sub-cfg__preview {
+  margin: 8px 0;
 }
 
 /* Subtitle preview pill — renders the current style settings against a
@@ -965,6 +1184,23 @@
     background: var(--brand-alpha-medium);
     border-color: var(--brand-border-strong);
     color: var(--brand-on-background-strong);
+  }
+}
+
+.dc-vlc__pill--compact {
+  min-width: 64px;
+  padding: 5px 9px;
+  text-align: center;
+}
+
+@keyframes dc-settings-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 

@@ -3,7 +3,7 @@
  *
  * Step-by-step guide that walks the user through:
  *   1. Creating a "Nyrima" folder in Google Drive
- *   2. Sharing it as "Anyone with the link" → Editor
+ *   2. Sharing it as "Anyone with the link" → Viewer
  *   3. Pairing a Google API key
  *
  * Design intent:
@@ -197,8 +197,8 @@ export function SetupAccessDialog({ isOpen, onClose, onSaved }: Props) {
             <br />
             2. Under "General access", change <em>Restricted</em> to{" "}
             <strong>Anyone with the link</strong>.<br />
-            3. Set the role to <strong>Editor</strong> (so the extension can
-            read all files inside).
+            3. Set the role to <strong>Viewer</strong> (so the extension can
+            read files inside without letting anyone edit them).
             <br />
             4. Click <em>Done</em>.
           </Text>

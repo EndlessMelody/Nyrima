@@ -36,9 +36,13 @@ export function readVint(
   const first = buf[offset];
   const len = vintLength(first);
   const mask = maskForLength(len);
+  // Use multiplication, not `<<`, so we keep precision past 31 bits — JS
+  // bitwise operators truncate to int32 and would wrap 2 GB+ segment sizes
+  // negative. Number is exact through 2^53, which covers any practical
+  // single-file MKV (16 PB).
   let value = first & (mask - 1);
   for (let i = 1; i < len; i++) {
-    value = (value << 8) | buf[offset + i];
+    value = value * 0x100 + buf[offset + i];
   }
   return { value, length: len };
 }
@@ -59,7 +63,9 @@ function readElementId(
   const len = vintLength(first);
   let value = first; // keep marker bit intact
   for (let i = 1; i < len; i++) {
-    value = (value << 8) | buf[offset + i];
+    // Same int32-wrap concern as readVint, though IDs in this codebase fit
+    // in 32 bits — multiplication keeps the path identical for safety.
+    value = value * 0x100 + buf[offset + i];
   }
   return { value, length: len };
 }
@@ -71,8 +77,10 @@ function readDataSize(
 ): { value: number; length: number } {
   const res = readVint(buf, offset);
   // In EBML, all-ones in the value bits means "unknown size".
-  // For a N-byte VINT there are (N*7) value bits, so max = 2^(N*7) - 1.
-  const maxVal = (1 << (res.length * 7)) - 1;
+  // For an N-byte VINT there are (N*7) value bits, so max = 2^(N*7) - 1.
+  // `Math.pow` (not `1 << N`) so the comparison still works for 8-byte
+  // VINTs — JS's `<<` truncates the shift count mod 32.
+  const maxVal = Math.pow(2, res.length * 7) - 1;
   if (res.value >= maxVal) {
     // Unknown size — treat as "rest of buffer"
     return { value: -1, length: res.length };
@@ -228,9 +236,12 @@ export function readUint(
   offset: number,
   length: number,
 ): number {
+  // Multiplication instead of `<<` so 5–8 byte uints (cluster timecodes on
+  // very long files, TimecodeScale, large BlockDuration) stay accurate
+  // beyond 31 bits. Number is exact through 2^53.
   let value = 0;
   for (let i = 0; i < length; i++) {
-    value = (value << 8) | buf[offset + i];
+    value = value * 0x100 + buf[offset + i];
   }
   return value;
 }
@@ -276,6 +287,8 @@ export interface MkvTrack {
   language: string;
   name: string;
   codecPrivate?: Uint8Array;
+  /** Audio channel count when the muxer wrote an `Audio > Channels` field. */
+  audioChannels?: number;
 }
 
 export const TRACK_TYPE_VIDEO = 1;
@@ -326,6 +339,22 @@ export function parseTracks(
             field.dataOffset + field.dataLength,
           );
           break;
+        case MKV_ID.Audio: {
+          const aEnd = Math.min(
+            buf.length,
+            field.dataOffset + field.dataLength,
+          );
+          for (const a of iterateElements(buf, field.dataOffset, aEnd)) {
+            if (a.id === MKV_ID.Channels) {
+              track.audioChannels = readUint(
+                buf,
+                a.dataOffset,
+                a.dataLength,
+              );
+            }
+          }
+          break;
+        }
       }
     }
     if (
@@ -339,12 +368,26 @@ export function parseTracks(
   return tracks;
 }
 
-/** Parse a SimpleBlock to extract track number, timecode, flags, and payload. */
+/** Parse a SimpleBlock to extract track number, timecode, flags, and payload.
+ *
+ *  `frames` is the lacing-aware split: a non-laced block contains one frame
+ *  equal to the raw body; an EBML/Xiph/fixed-laced block returns N frames
+ *  derived from the lacing header. Consumers that don't care about lacing
+ *  (subtitles, for instance) can still read the raw block body through
+ *  `data`; it's preserved for backwards compatibility but is the WRONG
+ *  thing to feed to an audio decoder when lacing is active — every byte
+ *  before the first frame's sync header is muxer metadata.
+ */
 export interface SimpleBlock {
   trackNumber: number;
   timecode: number; // ms relative to cluster timecode
   keyframe: boolean;
+  /** Raw block body (post-header). Includes lacing header bytes when
+   *  lacing is active — usually NOT what you want for audio frames. */
   data: Uint8Array;
+  /** Per-frame payloads, lacing already unpacked. For non-laced blocks
+   *  this is a single-element array containing `data`. */
+  frames: Uint8Array[];
 }
 
 export function parseSimpleBlock(
@@ -361,12 +404,88 @@ export function parseSimpleBlock(
   const flags = buf[tcOffset + 2];
   const dataOffset = tcOffset + 3;
   const data = buf.subarray(dataOffset, offset + length);
+  const lacing = (flags >> 1) & 0x03; // 0=none, 1=Xiph, 2=fixed, 3=EBML
+
+  let frames: Uint8Array[];
+  if (lacing === 0 || data.length < 1) {
+    frames = [data];
+  } else {
+    const count = data[0] + 1;
+    if (count <= 1) {
+      // Pathological: lacing flag set but only one frame. Treat as no lacing.
+      frames = [data.subarray(1)];
+    } else if (lacing === 2) {
+      // Fixed lacing — all frames the same size.
+      const total = data.length - 1;
+      const frameSize = Math.floor(total / count);
+      frames = [];
+      for (let i = 0; i < count; i++) {
+        frames.push(data.subarray(1 + i * frameSize, 1 + (i + 1) * frameSize));
+      }
+    } else if (lacing === 1) {
+      // Xiph lacing — first N-1 frame sizes encoded as a sum of bytes;
+      // each byte adds to the running size, terminator is a byte < 0xff.
+      const sizes: number[] = [];
+      let cur = 1;
+      for (let i = 0; i < count - 1; i++) {
+        let sz = 0;
+        while (cur < data.length) {
+          const b = data[cur++];
+          sz += b;
+          if (b !== 0xff) break;
+        }
+        sizes.push(sz);
+      }
+      frames = sliceFrames(data, cur, sizes);
+    } else {
+      // EBML lacing — first frame size is unsigned EBML VINT; each
+      // subsequent size is a SIGNED EBML VINT delta from the previous.
+      const sizes: number[] = [];
+      let cur = 1;
+      let prev = 0;
+      for (let i = 0; i < count - 1; i++) {
+        if (i === 0) {
+          const v = readVint(data, cur);
+          sizes.push(v.value);
+          prev = v.value;
+          cur += v.length;
+        } else {
+          const v = readVint(data, cur);
+          const bias = Math.pow(2, v.length * 7 - 1) - 1;
+          const delta = v.value - bias;
+          const sz = prev + delta;
+          sizes.push(sz);
+          prev = sz;
+          cur += v.length;
+        }
+      }
+      frames = sliceFrames(data, cur, sizes);
+    }
+  }
+
   return {
     trackNumber,
     timecode,
     keyframe: (flags & 0x80) !== 0,
     data,
+    frames,
   };
+}
+
+/** Slice `data` starting at `cur` into `sizes.length + 1` frames. The last
+ *  frame absorbs whatever bytes remain after the explicitly-sized ones. */
+function sliceFrames(
+  data: Uint8Array,
+  cur: number,
+  sizes: number[],
+): Uint8Array[] {
+  const out: Uint8Array[] = [];
+  for (const sz of sizes) {
+    out.push(data.subarray(cur, cur + sz));
+    cur += sz;
+  }
+  out.push(data.subarray(cur));
+  return out;
 }
 
 /** Parse a Block (inside BlockGroup) — same layout as SimpleBlock. */

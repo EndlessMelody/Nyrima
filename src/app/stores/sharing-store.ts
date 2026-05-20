@@ -4,7 +4,7 @@
  * What lives here:
  *   - `profile`     — the user's own ShareProfile (handle + display + avatar).
  *                     Hydrated from chrome.storage on first read.
- *   - `folders`     — cached Drive ids for `Shared/` + entries/ + comments/.
+ *   - `folders`     — cached Drive id for the flat `Shared/` folder.
  *                     Resolved (and created) lazily via `ensureFolders()`.
  *   - `isPublic`    — last-known "Anyone with the link" state of `Shared/`.
  *                     Cached in chrome.storage so the composer can render
@@ -19,8 +19,8 @@
  *   - Bootstrap (`ensureFolders`) is expensive on a fresh install — caching
  *     in one place avoids racing identical bootstrap calls from two dialogs.
  *
- * The submitShare flow is the integration point that ties together
- * `entry-store`, `index-store`, and (optionally) `share-permissions`.
+ * The submitShare flow inlines a fresh ShareEntry into the index (schema
+ * v=2) and optionally publishes the Shared/ folder in the same transaction.
  */
 
 import { create } from "zustand";
@@ -28,7 +28,6 @@ import type {
   ShareAuthor,
   ShareEntry,
   ShareIndex,
-  ShareIndexEntry,
   ShareProfile,
   ShareTarget,
 } from "@shared/types";
@@ -36,12 +35,10 @@ import {
   ensureShareFolders,
   generateShareId,
   getShareProfile,
+  mutateShareIndex,
   prependIndexEntry,
   profileToAuthor,
-  readShareIndex,
   setShareProfile,
-  writeShareEntry,
-  writeShareIndex,
   type ShareFolderIds,
 } from "../services/sharing";
 import {
@@ -62,8 +59,9 @@ export interface SubmitSharePayload {
 
 export interface SubmitShareResult {
   entry: ShareEntry;
-  /** Drive file id of the entry JSON, useful for "open on Drive" links. */
-  entryFileId: string;
+  /** Drive folder id of the user's Shared/ folder — useful for the
+   *  composer's "view on Drive" success-state link. */
+  sharedFolderId: string;
 }
 
 interface SharingState {
@@ -93,9 +91,8 @@ interface SharingState {
   /** End-to-end share submit. Walks the steps:
    *  1. ensureFolders()
    *  2. readShareIndex() (or seed an empty one)
-   *  3. writeShareEntry()
-   *  4. prependIndexEntry + writeShareIndex()
-   *  5. publishSharedFolder() when payload.publishFolder is true
+   *  3. prependIndexEntry + writeShareIndex() (entry inlined into manifest)
+   *  4. publishSharedFolder() when payload.publishFolder is true
    *
    *  Throws DriveAccessError on permission failures so the composer can
    *  show "Reconnect Drive" (the existing UI). */
@@ -163,58 +160,42 @@ export const useSharingStore = create<SharingState>((set, get) => ({
     set({ submitting: true, lastError: null });
     try {
       const folders = await get().ensureFolders();
-      // Read the existing index, or seed a fresh empty one. New users have
-      // no index file yet; `readShareIndex` returns null in that case.
-      const existing = await readShareIndex(folders.root);
       const author: ShareAuthor = profileToAuthor(profile);
       const now = new Date().toISOString();
-      const seed: ShareIndex = existing ?? {
-        v: 1,
-        owner: author,
-        updatedAt: now,
-        entries: [],
-      };
-      // Always refresh the owner snapshot on write — the user may have
-      // updated their display name / avatar between shares.
-      const refreshedIndex: ShareIndex = { ...seed, owner: author };
-
       const entry: ShareEntry = {
         id: generateShareId(),
-        v: 1,
+        v: 2,
         sharedAt: now,
         updatedAt: now,
         target: payload.target,
-        author,
         caption: payload.caption,
         title: payload.title,
         posterUrl: payload.posterUrl,
       };
 
-      const { fileId: entryFileId } = await writeShareEntry(
-        folders.entries,
-        entry,
-      );
-
-      const indexEntry: ShareIndexEntry = {
-        id: entry.id,
-        sharedAt: entry.sharedAt,
-        entryFileId,
-        kind: entry.target.kind,
-        title: entry.title,
-        posterUrl: entry.posterUrl,
-      };
-      const nextIndex = prependIndexEntry(refreshedIndex, indexEntry);
-      await writeShareIndex(folders.root, nextIndex);
+      await mutateShareIndex(folders.root, (existing) => {
+        // Read the existing index, or seed a fresh empty one. New users (and
+        // anyone migrating off a legacy v=1 manifest) get `null` here.
+        const seed: ShareIndex = existing ?? {
+          v: 2,
+          owner: author,
+          updatedAt: now,
+          entries: [],
+        };
+        // Always refresh the owner snapshot on write — the user may have
+        // updated their display name / avatar between shares.
+        return prependIndexEntry({ ...seed, owner: author }, entry);
+      });
 
       // Optional: flip the folder public as part of the same submit. We do
-      // this AFTER the entry write so a permission failure doesn't leave a
+      // this AFTER the index write so a permission failure doesn't leave a
       // published-but-empty Shared/ folder.
       if (payload.publishFolder) {
         await publishSharedFolder(folders.root);
         set({ isPublic: true });
       }
 
-      return { entry, entryFileId };
+      return { entry, sharedFolderId: folders.root };
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to share.";
       set({ lastError: msg });

@@ -110,15 +110,14 @@ export default defineConfig({
   },
   build: {
     target: "esnext",
-    sourcemap: true,
+    sourcemap: false,
     rollupOptions: {
       input: {
-        // The extension's main app page lives in web_accessible_resources, not
-        // in action.default_popup, so @crxjs/vite-plugin doesn't auto-detect
+        // The extension's main app page is opened via chrome.runtime.getURL(),
+        // not action.default_popup, so @crxjs/vite-plugin doesn't auto-detect
         // it as an HTML entry. Declare it explicitly so Vite rewrites the
-        // <script src="./main.tsx"> to the bundled chunk and emits the file
-        // at dist/src/app/index.html (preserving the path the background SW
-        // uses via chrome.runtime.getURL(APP_PAGE)).
+        // <script src="./main.tsx"> to the bundled chunk and emits the file at
+        // dist/src/app/index.html, preserving the APP_PAGE path.
         appPage: fileURLToPath(
           new URL("./src/app/index.html", import.meta.url),
         ),

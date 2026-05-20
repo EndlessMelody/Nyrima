@@ -6,9 +6,9 @@ import type { AppSettings, SubtitleFontPreset } from "@shared/types";
 import "./SubtitleConfigPanel.scss";
 
 const FONT_PRESETS: { id: SubtitleFontPreset; label: string }[] = [
-  { id: "anime-brush", label: "Anime Brush" },
-  { id: "comic-dialogue", label: "Comic Dialogue" },
-  { id: "clean-sans", label: "Clean Sans" },
+  { id: "chinacat-teddybear", label: "Chinacat Teddybear" },
+  { id: "cascadia", label: "Cascadia" },
+  { id: "asap", label: "Asap" },
   { id: "system", label: "System UI" },
 ];
 

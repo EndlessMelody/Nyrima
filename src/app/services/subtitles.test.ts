@@ -16,6 +16,7 @@ import {
   parseAss,
   forceCenterDialogueInAss,
   detectLang,
+  stripAssTags,
 } from "./subtitles";
 
 describe("parseSrt", () => {
@@ -106,6 +107,57 @@ Format: Layer, Start, End, Style, Text
 Dialogue: 0,0:00:01.00,0:00:03.00,Sign,{\\pos(100,80)}A sign`;
     const out = forceCenterDialogueInAss(src);
     expect(out).toContain("{\\pos(100,80)}A sign");
+  });
+});
+
+describe("stripAssTags", () => {
+  it("strips well-formed override blocks", () => {
+    expect(stripAssTags("{\\b1}Hello{\\b0} world")).toBe("Hello world");
+  });
+
+  it("converts \\N / \\n to newlines and \\h to space", () => {
+    expect(stripAssTags("Line one\\NLine two\\hwith hard space")).toBe(
+      "Line one\nLine two with hard space",
+    );
+  });
+
+  it("drops drawing-mode sections so bare path data doesn't leak", () => {
+    // Real Tonari-no-Alya OP-title-card cue: a mask + a label split across
+    // multiple drawing-mode sections. The CSS overlay must NEVER let any of
+    // the `m … l …` path tokens through, otherwise the user sees the path
+    // commands rendered as plain text on top of the video.
+    const src =
+      "{\\an7\\pos(0,0)\\p1}m 936 690 l 997 691 1003 723 940 723{\\p0}" +
+      "{\\p1}m -1 704 l 1921 704 1921 1081 -1 1081{\\p0} itsP!";
+    expect(stripAssTags(src)).toBe("itsP!");
+  });
+
+  it("drops a drawing-mode section that runs to end-of-line (no \\p0 close)", () => {
+    // Some scripts leave drawing mode on at end of cue and rely on the
+    // implicit reset. The strip should still discard everything after \p1.
+    expect(stripAssTags("Hello {\\p1}m 0 0 l 10 10")).toBe("Hello");
+  });
+
+  it("keeps karaoke text (timing tags are stripped, words remain)", () => {
+    // Karaoke renders via libass; in the CSS fallback we just want the lyric
+    // text without the timing values. JASSUB still gets the full \k tags
+    // because it reads the raw script, not this stripped output.
+    const lyric = "{\\k20}mez{\\k34}ame {\\k28}sou{\\k30}na";
+    expect(stripAssTags(lyric)).toBe("mezame souna");
+  });
+});
+
+describe("parseAss with drawing-mode signs", () => {
+  it("skips Dialogue rows that are pure drawing-mode (no text)", () => {
+    const src = `[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.00,0:00:02.00,Sign,,0,0,0,,{\\an7\\pos(0,0)\\p1}m 0 0 l 100 100 b 200 200{\\p0}
+Dialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,Hello there.`;
+    const cues = parseAss(src);
+    // The drawing-only cue trims to empty and is skipped; the dialogue
+    // cue survives untouched.
+    expect(cues).toHaveLength(1);
+    expect(cues[0].text).toBe("Hello there.");
   });
 });
 

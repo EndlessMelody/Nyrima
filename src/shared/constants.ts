@@ -40,13 +40,20 @@ export const STORAGE_KEYS = {
    *  service doesn't re-resolve it on every Phase 4 call. Invalidated when
    *  the Nyrima root is re-paired (see account-reset.ts). */
   SHARED_FOLDER_ID: "dc.sharedFolderId",
-  /** Cached child folder ids inside `Shared/` (entries/ + comments/) so the
-   *  service can fetch them without re-listing. Shape: Record<string, string>
-   *  keyed by subfolder name. */
+  /** Legacy Phase 4.0 child-folder cache. The current share layout is flat,
+   *  but account reset still clears this key for users who upgraded from a
+   *  build that created `entries/` or `comments/` subfolders. */
   SHARED_SUBFOLDER_IDS: "dc.sharedSubfolderIds",
   /** FollowedUser[] — people the user has subscribed to. The Inbox + Friends
    *  surfaces in Phase 4.2 read from this list. */
   FOLLOWED_USERS: "dc.followedUsers",
+  /** Cached flattened inbox rows from the last successful social sync.
+   *  Lets `/social` render the previous feed while Drive refreshes. */
+  SOCIAL_INBOX_CACHE: "dc.socialInboxCache.v1",
+  /** Cached `DirectoryEntry[]` from the P4.4 bootstrap directory plus its
+   *  fetch timestamp. Refreshed on a 24h TTL so the Discover rail doesn't
+   *  hammer GitHub every Social hub visit. */
+  DIRECTORY_CACHE: "dc.directoryCache.v1",
 } as const;
 
 /** Max entries kept in the per-file playback-mode LRU. */
@@ -108,15 +115,13 @@ export const WATCHED_THRESHOLD_PCT = 95;
  *  publish it (Phase 4.1 surfaces the publish confirmation). */
 export const SHARED_FOLDER_NAME = "Shared";
 
-/** Subfolder of `Shared/` holding one JSON file per share entry. */
-export const SHARED_ENTRIES_SUBFOLDER = "entries";
-
-/** Subfolder of `Shared/` holding the user's comment JSONL files (each
- *  file targets one shareId the user has commented on). */
-export const SHARED_COMMENTS_SUBFOLDER = "comments";
-
 /** Filename of the index manifest at the root of `Shared/`. */
 export const SHARED_INDEX_FILENAME = "index.json";
+
+/** Filename of the user's flat comments stream at the root of `Shared/`.
+ *  One JSONL file with every comment the user has ever posted — the share
+ *  owner filters by `sharedFolderId` when aggregating. */
+export const SHARED_COMMENTS_FILENAME = "comments.jsonl";
 
 /** MIME type used when uploading JSON files to Drive. */
 export const SHARED_JSON_MIME = "application/json";
@@ -126,8 +131,10 @@ export const SHARED_JSON_MIME = "application/json";
  *  legacy clients can render them as plain text. */
 export const SHARED_JSONL_MIME = "text/plain";
 
-/** Soft cap on index.json — entries beyond this are still on Drive but
- *  not listed. Lets the index stay small for fast pulls. */
+/** Soft cap on inlined entries in `index.json`. Beyond this, the oldest
+ *  entry falls off the manifest entirely (the inline model drops the
+ *  legacy entries/ folder, so old entries are gone — not archived). At
+ *  ~600 B per entry the manifest stays comfortably under 200 KB. */
 export const MAX_SHARE_INDEX_ENTRIES = 200;
 
 /** Soft cap on a single comment's text length. */
@@ -140,3 +147,30 @@ export const MAX_SHARE_CAPTION_CHARS = 600;
  *  alphanumeric + dash + underscore. Keeps handles file-system safe and
  *  unambiguous across Drive listings. */
 export const SHARE_HANDLE_PATTERN = /^[a-z0-9][a-z0-9_-]{2,31}$/;
+
+// ---------------------------------------------------------------------------
+// Phase 4.4 — bootstrap directory
+//
+// A static `DirectoryEntry[]` published as a single JSON file on GitHub.
+// The extension fetches + caches it for the Discover rail in People.
+//
+// Opt-in is manual (copy-paste a snippet into a GitHub issue); the
+// repo maintainer reviews + merges. Spam-resistant by virtue of the
+// PR gate — no in-app write to the directory itself.
+// ---------------------------------------------------------------------------
+
+/** Raw GitHub URL of the directory JSON. Swap when the registry repo
+ *  is published — until then, a 404 is treated as "empty directory" and
+ *  the Discover rail surfaces a friendly note instead of an error. */
+export const NYRIMA_DIRECTORY_URL =
+  "https://raw.githubusercontent.com/nyrima/directory/main/users.json";
+
+/** Where to send opt-in requests. The dialog opens a new issue with the
+ *  pre-filled JSON snippet pasted into the body via URL params. */
+export const NYRIMA_DIRECTORY_ISSUE_URL =
+  "https://github.com/nyrima/directory/issues/new";
+
+/** Cache TTL for the directory pull, in ms. 24h is generous — entries
+ *  don't churn fast, and a stale cache is strictly better than spamming
+ *  unauthenticated requests at GitHub. */
+export const DIRECTORY_CACHE_TTL_MS = 24 * 60 * 60 * 1000;

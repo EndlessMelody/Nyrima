@@ -21,6 +21,21 @@ import {
   TRACK_TYPE_AUDIO,
   type EbmlElement,
 } from "../ebml";
+
+/**
+ * Options passed to `parseMkvMediaInfo`. Currently only the audio selector —
+ * lets the MSE controller's `switchAudio()` rebuild the init segment around
+ * a specific track without re-parsing other arguments through every call.
+ */
+export interface ParseMkvMediaInfoOptions {
+  /**
+   * MKV TrackNumber of the audio track to surface as `info.audio`. When
+   * omitted (or not found among the compatible tracks), the first compatible
+   * track in muxer order is selected — matching the prior single-track
+   * behaviour so non-dub callers get the same result.
+   */
+  audioTrackNumber?: number;
+}
 import type {
   MkvMediaInfo,
   VideoTrackInfo,
@@ -36,7 +51,10 @@ import type {
  * Parse the MKV header region to extract video/audio track info and locate
  * the first Cluster. `buf` should be the first few MB of the file.
  */
-export function parseMkvMediaInfo(buf: Uint8Array): MkvMediaInfo {
+export function parseMkvMediaInfo(
+  buf: Uint8Array,
+  opts: ParseMkvMediaInfoOptions = {},
+): MkvMediaInfo {
   const ebml = readElement(buf, 0);
   if (!ebml || ebml.id !== MKV_ID.EBML) {
     throw new Error("Not a valid MKV/EBML file");
@@ -62,7 +80,7 @@ export function parseMkvMediaInfo(buf: Uint8Array): MkvMediaInfo {
   let timecodeScaleNs = 1_000_000; // default 1ms
   let durationMs = 0;
   let video: VideoTrackInfo | undefined;
-  let audio: AudioTrackInfo | undefined;
+  let audioTracks: AudioTrackInfo[] = [];
   let firstClusterOffset = 0;
 
   let tracksResult: MediaTracks | undefined;
@@ -76,7 +94,7 @@ export function parseMkvMediaInfo(buf: Uint8Array): MkvMediaInfo {
     if (el.id === MKV_ID.Tracks) {
       tracksResult = parseMediaTracks(buf, el);
       video = tracksResult.video;
-      audio = tracksResult.audio;
+      audioTracks = tracksResult.audioTracks;
     }
     if (el.id === MKV_ID.Cluster) {
       // Record the absolute byte offset of the first Cluster
@@ -84,6 +102,16 @@ export function parseMkvMediaInfo(buf: Uint8Array): MkvMediaInfo {
       break; // stop scanning — we have everything we need
     }
   }
+
+  // Select the requested audio track (caller's `audioTrackNumber`), falling
+  // back to the first compatible track when the caller hasn't expressed a
+  // preference or the requested number isn't in the file. This is how
+  // `MkvMseController.switchAudio()` swaps dubs without re-parsing the file.
+  const requestedTrackNumber = opts.audioTrackNumber;
+  const audio =
+    (requestedTrackNumber != null
+      ? audioTracks.find((t) => t.trackNumber === requestedTrackNumber)
+      : undefined) ?? audioTracks[0];
 
   if (!video) {
     const diag = tracksResult
@@ -104,6 +132,7 @@ export function parseMkvMediaInfo(buf: Uint8Array): MkvMediaInfo {
     durationMs,
     video,
     audio,
+    audioTracks,
     firstClusterOffset,
   };
 }
@@ -132,13 +161,13 @@ function parseInfoElement(
 
 interface MediaTracks {
   video?: VideoTrackInfo;
-  audio?: AudioTrackInfo;
+  audioTracks: AudioTrackInfo[];
   /** Diagnostic: all tracks found, for error reporting. */
   allTracks: Array<{ trackNumber: number; trackType: number; codecId: string; hasPrivate: boolean }>;
 }
 
 function parseMediaTracks(buf: Uint8Array, tracksEl: EbmlElement): MediaTracks {
-  const result: MediaTracks = { allTracks: [] };
+  const result: MediaTracks = { allTracks: [], audioTracks: [] };
   const end = Math.min(buf.length, tracksEl.dataOffset + tracksEl.dataLength);
 
   for (const entry of iterateElements(buf, tracksEl.dataOffset, end)) {
@@ -153,6 +182,8 @@ function parseMediaTracks(buf: Uint8Array, tracksEl: EbmlElement): MediaTracks {
     let pixelHeight = 0;
     let sampleRate = 0;
     let channels = 0;
+    let language = "und";
+    let name = "";
 
     const entryEnd = Math.min(
       buf.length,
@@ -174,6 +205,12 @@ function parseMediaTracks(buf: Uint8Array, tracksEl: EbmlElement): MediaTracks {
           break;
         case MKV_ID.DefaultDuration:
           defaultDurationNs = readUint(buf, field.dataOffset, field.dataLength);
+          break;
+        case MKV_ID.Language:
+          language = readString(buf, field.dataOffset, field.dataLength);
+          break;
+        case MKV_ID.Name:
+          name = readString(buf, field.dataOffset, field.dataLength);
           break;
         case MKV_ID.Video: {
           const vEnd = Math.min(buf.length, field.dataOffset + field.dataLength);
@@ -226,26 +263,31 @@ function parseMediaTracks(buf: Uint8Array, tracksEl: EbmlElement): MediaTracks {
       };
     }
 
-    // Determine audio codec
-    let audioCodec: 'aac' | 'flac' | 'opus' | null = null;
+    // Determine audio codec. AC-3 (Dolby Digital) is unusual in that MKV
+    // doesn't ship a CodecPrivate for it — the per-frame sync headers carry
+    // everything libavcodec needs — so we don't require `codecPrivate` to be
+    // present for `ac3` like we do for the others.
+    let audioCodec: 'aac' | 'flac' | 'opus' | 'ac3' | null = null;
     if (codecId.startsWith("A_AAC")) audioCodec = 'aac';
-    if (codecId === "A_FLAC") audioCodec = 'flac';
-    if (codecId === "A_OPUS") audioCodec = 'opus';
+    else if (codecId === "A_FLAC") audioCodec = 'flac';
+    else if (codecId === "A_OPUS") audioCodec = 'opus';
+    else if (codecId === "A_AC3") audioCodec = 'ac3';
 
     if (
       trackType === TRACK_TYPE_AUDIO &&
       audioCodec &&
-      codecPrivate &&
-      !result.audio
+      (codecPrivate || audioCodec === 'ac3')
     ) {
-      result.audio = {
+      result.audioTracks.push({
         trackNumber,
         codec: audioCodec,
-        codecPrivate,
+        codecPrivate: codecPrivate ?? new Uint8Array(0),
         sampleRate: sampleRate || 48000,
         channels: channels || 2,
         defaultDurationNs,
-      };
+        language,
+        name,
+      });
     }
   }
 
@@ -277,41 +319,67 @@ export function extractClusterSamples(
     }
     if (child.id === MKV_ID.SimpleBlock) {
       const block = parseSimpleBlock(buf, child.dataOffset, child.dataLength);
-      const sample = blockToSample(block, clusterTimeMs, info);
-      if (sample) samples.push(sample);
+      for (const s of blockToSamples(block, clusterTimeMs, info)) {
+        samples.push(s);
+      }
     }
     if (child.id === MKV_ID.BlockGroup) {
       parseBlockGroup(buf, child, clusterTimeMs, info, samples);
     }
   }
 
-  samples.sort((a, b) => a.pts - b.pts);
+  // Intentionally NOT sorted. MKV stores SimpleBlocks in decode order;
+  // their `timecode` field is the PTS, which for HEVC/AVC with B-frames is
+  // non-monotonic across the array (a B-frame's PTS sits between I/P-frames
+  // that decode before it). Sorting by PTS would emit samples in DISPLAY
+  // order, which puts B-frames ahead of the references they need — Chrome's
+  // HEVC decoder reads sample 0 (B), can't find its forward reference, and
+  // rejects the media fragment. Keeping file order preserves decode order
+  // so the mp4-generator can emit them in the same order in the moof's trun.
+  //
+  // (Long-term: emit per-sample `composition_time_offset` (ctts) in trun so
+  // the buffer's reported PTS matches display order without re-sorting.
+  // Until then PTS in the buffer equals DTS plus accumulated durations,
+  // which is close enough for playback — Chrome reorders via the
+  // bitstream's PicOrderCnt anyway.)
   return samples;
 }
 
-function blockToSample(
-  block: { trackNumber: number; timecode: number; keyframe: boolean; data: Uint8Array },
+function blockToSamples(
+  block: {
+    trackNumber: number;
+    timecode: number;
+    keyframe: boolean;
+    frames: Uint8Array[];
+  },
   clusterTimeMs: number,
   info: MkvMediaInfo,
-): DemuxedSample | null {
+): DemuxedSample[] {
   const isVideo = block.trackNumber === info.video.trackNumber;
   const isAudio = block.trackNumber === info.audio?.trackNumber;
-  if (!isVideo && !isAudio) return null;
+  if (!isVideo && !isAudio) return [];
 
-  const pts = clusterTimeMs + block.timecode;
   const defaultDurNs = isVideo
     ? info.video.defaultDurationNs
     : info.audio?.defaultDurationNs ?? 0;
-  const duration = defaultDurNs > 0 ? defaultDurNs / 1_000_000 : 0;
+  const durationMs = defaultDurNs > 0 ? defaultDurNs / 1_000_000 : 0;
+  const blockPts = clusterTimeMs + block.timecode;
 
-  return {
-    trackNumber: block.trackNumber,
-    isVideo,
-    pts,
-    duration,
-    data: block.data,
-    isKeyframe: block.keyframe,
-  };
+  // Laced blocks contain N audio frames sharing one timecode. Each frame's
+  // PTS advances by `durationMs` from the block's base — that's how
+  // mkvtoolnix / ffmpeg recover per-frame timestamps from a laced block.
+  const out: DemuxedSample[] = [];
+  for (let i = 0; i < block.frames.length; i++) {
+    out.push({
+      trackNumber: block.trackNumber,
+      isVideo,
+      pts: blockPts + i * durationMs,
+      duration: durationMs,
+      data: block.frames[i],
+      isKeyframe: block.keyframe,
+    });
+  }
+  return out;
 }
 
 function parseBlockGroup(
@@ -335,13 +403,20 @@ function parseBlockGroup(
 
   if (!blockEl) return;
   const block = parseBlock(buf, blockEl.dataOffset, blockEl.dataLength);
-  const sample = blockToSample(
+  const blockSamples = blockToSamples(
     { ...block, keyframe: true }, // blocks in BlockGroup are keyframes by default
     clusterTimeMs,
     info,
   );
-  if (sample) {
-    if (blockDurationMs > 0) sample.duration = blockDurationMs;
-    out.push(sample);
+  if (blockSamples.length > 0) {
+    // BlockDuration applies to the whole laced run; spread it evenly across
+    // the frames so PTS still progresses monotonically inside the block.
+    if (blockDurationMs > 0) {
+      const perFrame = blockDurationMs / blockSamples.length;
+      for (let i = 0; i < blockSamples.length; i++) {
+        blockSamples[i].duration = perFrame;
+      }
+    }
+    for (const s of blockSamples) out.push(s);
   }
 }

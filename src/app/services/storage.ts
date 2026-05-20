@@ -16,6 +16,11 @@ import type {
 } from "@shared/types";
 import { DEFAULT_SETTINGS } from "@shared/types";
 
+type LegacyAppSettings = Partial<AppSettings> & {
+  subtitleFont?: string;
+  preferredSubtitleLanguage?: unknown;
+};
+
 async function get<T>(key: string): Promise<T | undefined> {
   const obj = await chrome.storage.local.get(key);
   return obj[key] as T | undefined;
@@ -209,26 +214,40 @@ export function isInProgress(
 // --- Settings --------------------------------------------------------------
 
 export async function getSettings(): Promise<AppSettings> {
-  const stored = await get<Partial<AppSettings> & { subtitleFont?: string }>(
-    STORAGE_KEYS.SETTINGS,
-  );
+  const stored = await get<LegacyAppSettings>(STORAGE_KEYS.SETTINGS);
   const migrated = stored ? migrateSettings(stored) : {};
   return { ...DEFAULT_SETTINGS, ...migrated };
 }
 
-/** Fold the pre-2026-05-15 font-preset keys (`comic`, `geist`) into the new
- *  picker labels so users who hydrated with the old shape don't get reset to
- *  defaults. Also folds the legacy `subtitlePosition: 0.08` default into the
- *  current default of 0 — the SCSS bottom offset tightened up, so 0.08 on
- *  top of the new tighter base lifts cues into the middle of the frame. */
-function migrateSettings(
-  s: Partial<AppSettings> & { subtitleFont?: string },
-): Partial<AppSettings> {
-  const next: Partial<AppSettings> & { subtitleFont?: string } = { ...s };
+/** Fold legacy font-preset keys into the current ones so users hydrated
+ *  with an older settings shape don't get reset to defaults. Two waves:
+ *    - 2026-05-15: `comic`/`geist` (the original two-preset picker)
+ *    - 2026-05-19: `anime-brush`/`comic-dialogue`/`clean-sans` renamed to
+ *      `chinacat-teddybear`/`cascadia`/`asap` so each key matches the
+ *      bundled face it ships with.
+ *  Also folds the legacy `subtitlePosition: 0.08` default into the current
+ *  default of 0 — the SCSS bottom offset tightened up, so 0.08 on top of
+ *  the new tighter base lifts cues into the middle of the frame. */
+function migrateSettings(s: LegacyAppSettings): Partial<AppSettings> {
+  const next: LegacyAppSettings = { ...s };
+  delete next.preferredSubtitleLanguage;
   const legacy = next.subtitleFont as string | undefined;
-  if (legacy === "comic") next.subtitleFont = "anime-brush";
-  else if (legacy === "geist") next.subtitleFont = "clean-sans";
+  if (legacy === "comic" || legacy === "anime-brush") {
+    next.subtitleFont = "chinacat-teddybear";
+  } else if (legacy === "comic-dialogue") {
+    next.subtitleFont = "cascadia";
+  } else if (legacy === "geist" || legacy === "clean-sans") {
+    next.subtitleFont = "asap";
+  }
   if (next.subtitlePosition === 0.08) next.subtitlePosition = 0;
+  if (
+    typeof next.defaultVolume === "number" &&
+    Number.isFinite(next.defaultVolume)
+  ) {
+    next.defaultVolume = Math.max(0, Math.min(1, next.defaultVolume));
+  } else {
+    delete next.defaultVolume;
+  }
   return next as Partial<AppSettings>;
 }
 

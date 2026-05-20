@@ -17,8 +17,12 @@ interface Props {
   folderId?: string;
   positions: Record<string, PlaybackPosition>;
   /** Folder-level poster URL — used as fallback art when a file has no
-   *  Drive frame thumbnail. */
+   *  Drive frame thumbnail. Applies to every card when the row is scoped
+   *  to a single library (LibraryPage). */
   seriesPosterUrl?: string;
+  /** Per-folder poster URLs — used by the lobby row, which mixes items
+   *  from many libraries. Each card looks up its own folder. */
+  postersByFolder?: Record<string, string | undefined>;
 }
 
 export function ContinueWatchingRow({
@@ -26,6 +30,7 @@ export function ContinueWatchingRow({
   folderId,
   positions,
   seriesPosterUrl,
+  postersByFolder,
 }: Props) {
   const items = useMemo(() => {
     return videos
@@ -43,19 +48,25 @@ export function ContinueWatchingRow({
     <section className="ny-continue">
       <h3 className="ny-continue__heading">Continue Watching</h3>
       <div className="ny-continue__scroll">
-        {items.map(({ file, pos }) => (
-          <PosterCard
-            key={file.id}
-            file={file}
-            folderId={folderId ?? pos.folderId}
-            variant="backdrop"
-            seriesPosterUrl={seriesPosterUrl}
-            playbackPosition={{
-              positionSeconds: pos.positionSeconds,
-              durationSeconds: pos.durationSeconds,
-            }}
-          />
-        ))}
+        {items.map(({ file, pos }) => {
+          const cardFolderId = folderId ?? pos.folderId;
+          const poster =
+            (cardFolderId ? postersByFolder?.[cardFolderId] : undefined) ??
+            seriesPosterUrl;
+          return (
+            <PosterCard
+              key={file.id}
+              file={file}
+              folderId={cardFolderId}
+              variant="backdrop"
+              seriesPosterUrl={poster}
+              playbackPosition={{
+                positionSeconds: pos.positionSeconds,
+                durationSeconds: pos.durationSeconds,
+              }}
+            />
+          );
+        })}
       </div>
     </section>
   );

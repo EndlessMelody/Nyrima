@@ -7,7 +7,7 @@
  *
  * Supported codecs:
  *   Video: H.264 (AVC), H.265 (HEVC)
- *   Audio: AAC, FLAC, Opus
+ *   Audio: AAC, FLAC, Opus, AC-3
  */
 
 import type { VideoTrackInfo, AudioTrackInfo, DemuxedSample } from "./types";
@@ -93,14 +93,86 @@ function strBytes(s: string): Uint8Array {
 // Init segment
 // ---------------------------------------------------------------------------
 
+/**
+ * Multiplexed init segment (video + audio in one moov). Retained for the
+ * codec-combo probe in PlayerPage and the existing unit tests. The MSE
+ * controller has moved to split init segments (`generateVideoInitSegment`
+ * / `generateAudioInitSegment`) so it can run two SourceBuffers and swap
+ * audio in place without re-buffering the video.
+ */
 export function generateInitSegment(
   video: VideoTrackInfo,
   audio?: AudioTrackInfo,
 ): { data: Uint8Array; codecString: string } {
   const ftyp = buildFtyp();
-  const moov = buildMoov(video, audio);
+  const moov = buildMoovCombined(video, audio);
   const codecString = buildCodecString(video, audio);
   return { data: concatBytes(ftyp, moov), codecString };
+}
+
+/**
+ * Video-only init segment. The trak is at trackId=1 inside its own moov
+ * — the buffer is a self-contained stream so it doesn't share IDs with
+ * audio. The MSE controller appends this to its video SourceBuffer.
+ */
+export function generateVideoInitSegment(
+  video: VideoTrackInfo,
+): { data: Uint8Array; codecString: string } {
+  const ftyp = buildFtyp();
+  const moov = box(
+    "moov",
+    buildMvhd(),
+    buildVideoTrak(1, video),
+    buildMvex(1),
+  );
+  const codecString = buildVideoCodecString(video);
+  return { data: concatBytes(ftyp, moov), codecString };
+}
+
+/**
+ * Audio-only init segment. Same trackId=1 trick as the video segment —
+ * each split SourceBuffer is an independent stream. Swapping dubs at
+ * runtime feeds a fresh one of these into `audioSB.changeType(...) +
+ * appendBuffer(...)` without touching the video side.
+ */
+export function generateAudioInitSegment(
+  audio: AudioTrackInfo,
+): { data: Uint8Array; codecString: string } {
+  const ftyp = buildFtyp();
+  const moov = box(
+    "moov",
+    buildMvhd(),
+    buildAudioTrak(1, audio),
+    buildMvex(1),
+  );
+  const codecString = buildAudioCodecString(audio);
+  return { data: concatBytes(ftyp, moov), codecString };
+}
+
+/**
+ * Returns the `video/mp4; codecs="..."` string that `MediaSource.isType
+ * Supported` expects. Lets callers probe whether the browser can play a
+ * given video+audio combination BEFORE we kick off the MSE pipeline —
+ * crucial for catching things like Chrome refusing `hevc+ac-3` muxed
+ * together even when each codec works on its own.
+ *
+ * With split SourceBuffers we additionally probe per-buffer mime types
+ * (`buildVideoMimeType` / `buildAudioMimeType`) since combinations that
+ * fail muxed sometimes succeed split.
+ */
+export function buildMimeType(
+  video: VideoTrackInfo,
+  audio?: AudioTrackInfo,
+): string {
+  return `video/mp4; codecs="${buildCodecString(video, audio)}"`;
+}
+
+export function buildVideoMimeType(video: VideoTrackInfo): string {
+  return `video/mp4; codecs="${buildVideoCodecString(video)}"`;
+}
+
+export function buildAudioMimeType(audio: AudioTrackInfo): string {
+  return `audio/mp4; codecs="${buildAudioCodecString(audio)}"`;
 }
 
 function buildFtyp(): Uint8Array {
@@ -120,25 +192,29 @@ function buildFtyp(): Uint8Array {
 // ---------------------------------------------------------------------------
 
 function buildCodecString(video: VideoTrackInfo, audio?: AudioTrackInfo): string {
-  let codec: string;
+  let codec = buildVideoCodecString(video);
+  if (audio) codec += ", " + buildAudioCodecString(audio);
+  return codec;
+}
 
+function buildVideoCodecString(video: VideoTrackInfo): string {
   if (video.codec === 'avc') {
     const cp = video.codecPrivate;
     const profile = cp[1].toString(16).padStart(2, "0");
     const compat = cp[2].toString(16).padStart(2, "0");
     const level = cp[3].toString(16).padStart(2, "0");
-    codec = `avc1.${profile}${compat}${level}`;
-  } else {
-    // HEVC — parse HEVCDecoderConfigurationRecord
-    codec = buildHevcCodecString(video.codecPrivate);
+    return `avc1.${profile}${compat}${level}`;
   }
+  return buildHevcCodecString(video.codecPrivate);
+}
 
-  if (audio) {
-    if (audio.codec === 'aac') codec += ", mp4a.40.2";
-    else if (audio.codec === 'flac') codec += ", flac";
-    else if (audio.codec === 'opus') codec += ", opus";
+function buildAudioCodecString(audio: AudioTrackInfo): string {
+  switch (audio.codec) {
+    case 'aac':  return "mp4a.40.2";
+    case 'flac': return "flac";
+    case 'opus': return "opus";
+    case 'ac3':  return "ac-3";
   }
-  return codec;
 }
 
 function buildHevcCodecString(cp: Uint8Array): string {
@@ -177,9 +253,9 @@ function buildHevcCodecString(cp: Uint8Array): string {
 // moov
 // ---------------------------------------------------------------------------
 
-function buildMoov(video: VideoTrackInfo, audio?: AudioTrackInfo): Uint8Array {
-  const parts: Uint8Array[] = [buildMvhd(), buildVideoTrak(video)];
-  if (audio) parts.push(buildAudioTrak(audio));
+function buildMoovCombined(video: VideoTrackInfo, audio?: AudioTrackInfo): Uint8Array {
+  const parts: Uint8Array[] = [buildMvhd(), buildVideoTrak(1, video)];
+  if (audio) parts.push(buildAudioTrak(2, audio));
   parts.push(buildMvex(audio ? 2 : 1));
   return box("moov", ...parts);
 }
@@ -198,8 +274,8 @@ function buildMvhd(): Uint8Array {
 
 // ---- Video trak -----------------------------------------------------------
 
-function buildVideoTrak(video: VideoTrackInfo): Uint8Array {
-  return box("trak", buildTkhd(1, video.width, video.height, false), buildVideoMdia(video));
+function buildVideoTrak(trackId: number, video: VideoTrackInfo): Uint8Array {
+  return box("trak", buildTkhd(trackId, video.width, video.height, false), buildVideoMdia(video));
 }
 
 function buildTkhd(trackId: number, width: number, height: number, isAudio: boolean): Uint8Array {
@@ -250,7 +326,7 @@ function buildDinf(): Uint8Array {
 }
 
 function buildVideoStbl(video: VideoTrackInfo): Uint8Array {
-  const sampleEntry = video.codec === 'avc' ? buildAvc1(video) : buildHvc1(video);
+  const sampleEntry = video.codec === 'avc' ? buildAvc1(video) : buildHev1(video);
   const stsd = fullBox("stsd", 0, 0, u32(1), sampleEntry);
   return box(
     "stbl", stsd,
@@ -281,16 +357,34 @@ function buildAvc1(video: VideoTrackInfo): Uint8Array {
   return box("avc1", prefix, avcC);
 }
 
-function buildHvc1(video: VideoTrackInfo): Uint8Array {
+/**
+ * HEVC sample entry. Despite the box being named `hvcC`, the *sample entry*
+ * type we emit is `hev1`, not `hvc1`. The two differ in how strict the
+ * parser is about parameter sets:
+ *
+ *   - `hvc1`: VPS/SPS/PPS MUST live ONLY in the `hvcC` config — any inline
+ *     occurrence inside a NAL unit makes Chrome reject the buffer.
+ *   - `hev1`: parameter sets MAY appear inline inside samples.
+ *
+ * Real-world x265 encodes (the common case here — YURASUKA, USBD, etc.)
+ * routinely embed VPS/SPS/PPS inline in keyframes. Using `hev1` makes
+ * those play without re-rewriting the bitstream. The `hvcC` config box
+ * name is the same regardless of which sample-entry type we declare.
+ *
+ * The codec string in `buildHevcCodecString` is also `hev1.…` so the
+ * advertised codec and the on-disk sample entry agree — Chrome's MSE
+ * parser cross-checks them on the first appendBuffer.
+ */
+function buildHev1(video: VideoTrackInfo): Uint8Array {
   const prefix = buildVideoSampleEntryPrefix(video);
   const hvcC = box("hvcC", video.codecPrivate);
-  return box("hvc1", prefix, hvcC);
+  return box("hev1", prefix, hvcC);
 }
 
 // ---- Audio trak -----------------------------------------------------------
 
-function buildAudioTrak(audio: AudioTrackInfo): Uint8Array {
-  return box("trak", buildTkhd(2, 0, 0, true), buildAudioMdia(audio));
+function buildAudioTrak(trackId: number, audio: AudioTrackInfo): Uint8Array {
+  return box("trak", buildTkhd(trackId, 0, 0, true), buildAudioMdia(audio));
 }
 
 function buildAudioMdia(audio: AudioTrackInfo): Uint8Array {
@@ -305,6 +399,7 @@ function buildAudioStbl(audio: AudioTrackInfo): Uint8Array {
   let sampleEntry: Uint8Array;
   if (audio.codec === 'aac') sampleEntry = buildMp4a(audio);
   else if (audio.codec === 'flac') sampleEntry = buildFlac(audio);
+  else if (audio.codec === 'ac3') sampleEntry = buildAc3(audio);
   else sampleEntry = buildOpus(audio);
 
   const stsd = fullBox("stsd", 0, 0, u32(1), sampleEntry);
@@ -362,8 +457,22 @@ function buildFlac(audio: AudioTrackInfo): Uint8Array {
 /**
  * Build the dfLa (FLACSpecificBox) from MKV CodecPrivate.
  *
- * MKV A_FLAC CodecPrivate contains the FLAC metadata blocks
- * (STREAMINFO header + data, possibly preceded by "fLaC" marker).
+ * Per RFC 9639 / FLAC-in-ISOBMFF, the dfLa payload is a sequence of FLAC
+ * metadata blocks (STREAMINFO mandatory, others optional) with the
+ * last-block-flag set on the final block. The MKV A_FLAC CodecPrivate
+ * field may carry the full FLAC stream header — STREAMINFO followed by
+ * any number of VORBIS_COMMENT / SEEKTABLE / PADDING / etc. blocks —
+ * optionally prefixed by the four-byte "fLaC" magic.
+ *
+ * An earlier implementation simply set the last-block flag on the first
+ * block and shipped the rest verbatim. Some FLAC pipelines accept that;
+ * Chrome's decoder rejects the audio packets that follow because the
+ * remaining metadata leaks "noise" into the codec state and the
+ * subsequent frames look misaligned. We sidestep the question by
+ * walking the metadata stream and emitting **only STREAMINFO** inside
+ * dfLa — the smallest possible spec-compliant payload, identical for
+ * every FLAC file regardless of how creative the muxer was with extra
+ * metadata.
  */
 function buildDfla(codecPrivate: Uint8Array): Uint8Array {
   let metadata = codecPrivate;
@@ -376,21 +485,48 @@ function buildDfla(codecPrivate: Uint8Array): Uint8Array {
     metadata = metadata.slice(4);
   }
 
-  // If CodecPrivate is just the raw STREAMINFO (34 bytes) without the
-  // 4-byte metadata block header, prepend the header.
+  // Case A: CodecPrivate is just the raw 34-byte STREAMINFO content
+  // (no metadata-block header). Wrap it with a fresh last-block header.
   if (metadata.length === 34) {
-    const hdr = new Uint8Array(4);
-    hdr[0] = 0x80; // last-block-flag=1, block-type=0 (STREAMINFO)
-    hdr[1] = 0x00;
-    hdr[2] = 0x00;
-    hdr[3] = 34;
-    metadata = concatBytes(hdr, metadata);
-  } else if (metadata.length > 0 && (metadata[0] & 0x7f) === 0) {
-    // Has metadata block header; ensure last-block-flag is set on first block
-    metadata = metadata.slice(); // copy to avoid mutating original
-    metadata[0] |= 0x80;
+    const out = new Uint8Array(38);
+    out[0] = 0x80;
+    out[1] = 0x00;
+    out[2] = 0x00;
+    out[3] = 34;
+    out.set(metadata, 4);
+    return fullBox("dfLa", 0, 0, out);
   }
 
+  // Case B: full metadata-block stream. Walk it, find STREAMINFO, emit
+  // ONLY that block marked as last. Everything else (VORBIS_COMMENT,
+  // SEEKTABLE, PADDING, application blocks, ...) is dropped.
+  let offset = 0;
+  while (offset + 4 <= metadata.length) {
+    const blockType = metadata[offset] & 0x7f;
+    const blockLen =
+      (metadata[offset + 1] << 16) |
+      (metadata[offset + 2] << 8) |
+      metadata[offset + 3];
+    if (offset + 4 + blockLen > metadata.length) break; // truncated
+    if (blockType === 0) {
+      const out = new Uint8Array(4 + blockLen);
+      out[0] = 0x80;
+      out[1] = (blockLen >> 16) & 0xff;
+      out[2] = (blockLen >> 8) & 0xff;
+      out[3] = blockLen & 0xff;
+      out.set(metadata.subarray(offset + 4, offset + 4 + blockLen), 4);
+      return fullBox("dfLa", 0, 0, out);
+    }
+    offset += 4 + blockLen;
+  }
+
+  // Couldn't find a STREAMINFO block (shouldn't happen for a well-formed
+  // FLAC track). Fall back to the raw metadata with the last-block bit
+  // set on whatever comes first — best-effort, may still play.
+  if (metadata.length > 0 && (metadata[0] & 0x80) === 0) {
+    metadata = metadata.slice();
+    metadata[0] |= 0x80;
+  }
   return fullBox("dfLa", 0, 0, metadata);
 }
 
@@ -401,14 +537,139 @@ function buildOpus(audio: AudioTrackInfo): Uint8Array {
 }
 
 function buildDops(audio: AudioTrackInfo): Uint8Array {
-  // MKV A_OPUS CodecPrivate is the OpusHead packet.
-  // dOps box contains the OpusHead data starting from byte 8 (skip "OpusHead" magic).
-  let opusHead = audio.codecPrivate;
-  if (opusHead.length > 8) {
-    const magic = String.fromCharCode(...opusHead.slice(0, 8));
-    if (magic === "OpusHead") opusHead = opusHead.slice(8);
+  return box("dOps", buildDopsPayload(audio));
+}
+
+function buildDopsPayload(audio: AudioTrackInfo): Uint8Array {
+  // MKV A_OPUS CodecPrivate is the Ogg OpusHead packet. OpusHead stores
+  // multi-byte integers little-endian, but ISO BMFF boxes store them
+  // big-endian. Chrome accepts `audio/mp4; codecs="opus"` during MIME probe
+  // and then rejects the init segment if dOps is copied byte-for-byte.
+  const cp = audio.codecPrivate;
+  const hasMagic =
+    cp.length >= 8 &&
+    cp[0] === 0x4f && cp[1] === 0x70 && cp[2] === 0x75 && cp[3] === 0x73 &&
+    cp[4] === 0x48 && cp[5] === 0x65 && cp[6] === 0x61 && cp[7] === 0x64;
+  const body = hasMagic ? cp.subarray(8) : cp;
+  if (body.length < 11) {
+    const fallback = new Uint8Array(11);
+    fallback[0] = 1;
+    fallback[1] = Math.max(1, Math.min(audio.channels || 2, 255));
+    new DataView(fallback.buffer).setUint32(4, audio.sampleRate || 48000);
+    return fallback;
   }
-  return box("dOps", opusHead);
+
+  const inView = new DataView(body.buffer, body.byteOffset, body.byteLength);
+  const mappingFamily = body[10];
+  const tail =
+    mappingFamily !== 0 && body.length > 11
+      ? body.subarray(11)
+      : new Uint8Array(0);
+  const out = new Uint8Array(11 + tail.length);
+  const outView = new DataView(out.buffer);
+  out[0] = body[0]; // version
+  out[1] = body[1] || Math.max(1, Math.min(audio.channels || 2, 255));
+  outView.setUint16(2, inView.getUint16(2, true), false); // preSkip
+  outView.setUint32(4, inView.getUint32(4, true), false); // inputSampleRate
+  outView.setInt16(8, inView.getInt16(8, true), false);   // outputGain
+  out[10] = mappingFamily;
+  out.set(tail, 11);
+  return out;
+}
+
+// ---- AC-3 -----------------------------------------------------------------
+
+/**
+ * Build an `ac-3` sample entry for the audio stsd. Same shape as `mp4a`
+ * (the standard 28-byte audio prefix) with a `dac3` config box appended in
+ * place of `esds`. AC-3 bitstreams pass through unmodified — each MKV
+ * SimpleBlock already contains one AC-3 sync frame, which is exactly what
+ * MP4 sample boundaries call for.
+ */
+function buildAc3(audio: AudioTrackInfo): Uint8Array {
+  const prefix = buildAudioSampleEntryPrefix(audio);
+  const dac3 = buildDac3(audio);
+  return box("ac-3", prefix, dac3);
+}
+
+/**
+ * Build the `dac3` (AC3SpecificBox) per ETSI TS 102 366 Annex F.
+ *
+ * Field layout (3 bytes, MSB-first across the row):
+ *
+ *   fscod          2 bits   sample-rate code: 0=48k 1=44.1k 2=32k 3=reserved
+ *   bsid           5 bits   bitstream id; 8 = standard AC-3
+ *   bsmod          3 bits   bitstream mode; 0 = complete main
+ *   acmod          3 bits   audio coding mode (channel layout, see below)
+ *   lfeon          1 bit    low-frequency-effects channel present
+ *   bit_rate_code  5 bits   nominal bit rate; 23 = 640 kbps (max)
+ *   reserved       5 bits   zero
+ *
+ * Channel mapping (acmod) is derived from the muxer's `Channels` count, with
+ * LFE inferred for 6-channel (5.1) layouts. This matches ~99 % of fansub /
+ * Blu-ray AC-3 tracks in the wild; exotic layouts (7.1 or asymmetric) will
+ * still produce a valid box but acmod may not match the actual stream — the
+ * AC-3 decoder picks up the truth from each frame's sync header anyway, so
+ * the dac3 box is mostly advisory for the container.
+ *
+ * `bit_rate_code = 23` is a safe over-estimate. The value here is informa-
+ * tional; the decoder reads the real bitrate from each frame.
+ */
+function buildDac3(audio: AudioTrackInfo): Uint8Array {
+  const fscod = ac3FscodFor(audio.sampleRate);
+  const bsid = 8;
+  const bsmod = 0;
+  const { acmod, lfeon } = ac3ChannelLayoutFor(audio.channels);
+  const bit_rate_code = 23;
+
+  const payload = new Uint8Array(3);
+  payload[0] = (fscod << 6) | (bsid << 1) | ((bsmod >> 2) & 0x01);
+  payload[1] =
+    ((bsmod & 0x03) << 6) |
+    (acmod << 3) |
+    (lfeon << 2) |
+    ((bit_rate_code >> 3) & 0x03);
+  payload[2] = (bit_rate_code & 0x07) << 5;
+  return box("dac3", payload);
+}
+
+function ac3FscodFor(sampleRate: number): number {
+  if (sampleRate === 48000) return 0;
+  if (sampleRate === 44100) return 1;
+  if (sampleRate === 32000) return 2;
+  // The decoder will reject `3` (reserved), so fall back to 48 kHz — the
+  // overwhelmingly common case for AC-3 dubs. Mis-tagging here is benign:
+  // each AC-3 sync frame carries its own fscod that the decoder honours.
+  return 0;
+}
+
+function ac3ChannelLayoutFor(
+  channels: number,
+): { acmod: number; lfeon: number } {
+  // ATSC A/52 acmod table (channels here is total INCLUDING LFE):
+  //   acmod=1 → 1/0 mono
+  //   acmod=2 → 2/0 stereo
+  //   acmod=3 → 3/0 L C R
+  //   acmod=4 → 2/1 L R S
+  //   acmod=5 → 3/1 L C R S
+  //   acmod=6 → 2/2 L R SL SR
+  //   acmod=7 → 3/2 L C R SL SR
+  switch (channels) {
+    case 1:
+      return { acmod: 1, lfeon: 0 };
+    case 2:
+      return { acmod: 2, lfeon: 0 };
+    case 3:
+      return { acmod: 3, lfeon: 0 };
+    case 4:
+      return { acmod: 6, lfeon: 0 };
+    case 5:
+      return { acmod: 7, lfeon: 0 };
+    case 6:
+      return { acmod: 7, lfeon: 1 }; // 5.1
+    default:
+      return { acmod: 2, lfeon: 0 };
+  }
 }
 
 // ---- mvex -----------------------------------------------------------------
@@ -432,6 +693,12 @@ function buildMvex(trackCount: number): Uint8Array {
 const KEYFRAME_FLAGS = 0x02000000;
 const NON_KEYFRAME_FLAGS = 0x01010000;
 
+/**
+ * Multiplexed media segment — kept for backwards compatibility with code
+ * that still drives a single SourceBuffer. New code should call
+ * `generateVideoMediaSegment` / `generateAudioMediaSegment` and feed two
+ * SourceBuffers; that's what enables seamless audio swapping in-flight.
+ */
 export function generateMediaSegment(
   samples: DemuxedSample[],
   sequenceNumber: number,
@@ -444,56 +711,155 @@ export function generateMediaSegment(
   fillDurations(videoSamples, video.defaultDurationNs);
   if (audio) fillDurations(audioSamples, audio.defaultDurationNs);
 
-  const mfhd = buildMfhd(sequenceNumber);
-
-  interface TrafInfo {
-    trackId: number;
-    timescale: number;
-    baseDecodeTime: number;
-    trunPayload: Uint8Array;
-    dataSize: number;
-  }
-  const trafInfos: TrafInfo[] = [];
-  const mdatParts: Uint8Array[] = [];
-
+  const trafs: TrafInput[] = [];
   if (videoSamples.length > 0) {
-    const baseMs = videoSamples[0].pts;
-    const baseDts = Math.round((baseMs / 1000) * VIDEO_TIMESCALE);
-    const trunPayload = buildTrunPayload(videoSamples, VIDEO_TIMESCALE);
-    let dataSize = 0;
-    for (const s of videoSamples) { mdatParts.push(s.data); dataSize += s.data.length; }
-    trafInfos.push({ trackId: 1, timescale: VIDEO_TIMESCALE, baseDecodeTime: baseDts, trunPayload, dataSize });
+    trafs.push(makeVideoTrafInput(videoSamples, 1));
   }
-
   if (audio && audioSamples.length > 0) {
-    const baseMs = audioSamples[0].pts;
-    const baseDts = Math.round((baseMs / 1000) * audio.sampleRate);
-    const trunPayload = buildTrunPayload(audioSamples, audio.sampleRate);
-    let dataSize = 0;
-    for (const s of audioSamples) { mdatParts.push(s.data); dataSize += s.data.length; }
-    trafInfos.push({ trackId: 2, timescale: audio.sampleRate, baseDecodeTime: baseDts, trunPayload, dataSize });
+    trafs.push(makeAudioTrafInput(audioSamples, 2, audio));
   }
+  return assembleMediaSegment(sequenceNumber, trafs);
+}
 
-  // Measure traf sizes to compute data_offset
+/**
+ * Video-only fragment: one moof + one mdat carrying video samples for the
+ * dedicated video SourceBuffer. trackId is 1 because the split init segment
+ * defines a single trak.
+ */
+export function generateVideoMediaSegment(
+  samples: DemuxedSample[],
+  sequenceNumber: number,
+  video: VideoTrackInfo,
+): Uint8Array {
+  const videoSamples = samples.filter((s) => s.isVideo);
+  if (videoSamples.length === 0) return new Uint8Array(0);
+  fillDurations(videoSamples, video.defaultDurationNs);
+  return assembleMediaSegment(sequenceNumber, [
+    makeVideoTrafInput(videoSamples, 1),
+  ]);
+}
+
+/**
+ * Audio-only fragment for the dedicated audio SourceBuffer. Called both
+ * from the main streaming loop (forward emission for the currently-selected
+ * dub) and from the side catch-up fetch that backfills audio after a swap.
+ */
+export function generateAudioMediaSegment(
+  samples: DemuxedSample[],
+  sequenceNumber: number,
+  audio: AudioTrackInfo,
+): Uint8Array {
+  const audioSamples = samples.filter((s) => !s.isVideo);
+  if (audioSamples.length === 0) return new Uint8Array(0);
+  fillDurations(audioSamples, audio.defaultDurationNs);
+  return assembleMediaSegment(sequenceNumber, [
+    makeAudioTrafInput(audioSamples, 1, audio),
+  ]);
+}
+
+interface TrafInput {
+  trackId: number;
+  baseDecodeTime: number;
+  /** Per-sample triples (duration/size/flags) — does NOT include sample_count;
+   *  that gets written by `buildTrun` in the spec-correct slot. */
+  perSampleData: Uint8Array;
+  sampleCount: number;
+  sampleData: Uint8Array[];
+  dataSize: number;
+  hasCompositionOffsets?: boolean;
+}
+
+function makeVideoTrafInput(samples: DemuxedSample[], trackId: number): TrafInput {
+  const ptsTicks = samples.map((s) =>
+    Math.round((s.pts / 1000) * VIDEO_TIMESCALE),
+  );
+  const baseDts = Math.min(...ptsTicks);
+  const compositionOffsets = new Int32Array(samples.length);
+  let sampleDts = baseDts;
+  for (let i = 0; i < samples.length; i++) {
+    compositionOffsets[i] = ptsTicks[i] - sampleDts;
+    sampleDts += Math.round((samples[i].duration / 1000) * VIDEO_TIMESCALE) || 1;
+  }
+  const perSampleData = buildPerSampleTriples(
+    samples,
+    VIDEO_TIMESCALE,
+    compositionOffsets,
+  );
+  let dataSize = 0;
+  const sampleData: Uint8Array[] = [];
+  for (const s of samples) { sampleData.push(s.data); dataSize += s.data.length; }
+  return {
+    trackId,
+    baseDecodeTime: baseDts,
+    perSampleData,
+    sampleCount: samples.length,
+    sampleData,
+    dataSize,
+    hasCompositionOffsets: true,
+  };
+}
+
+function makeAudioTrafInput(
+  samples: DemuxedSample[],
+  trackId: number,
+  audio: AudioTrackInfo,
+): TrafInput {
+  const baseDts = Math.round((samples[0].pts / 1000) * audio.sampleRate);
+  const perSampleData = buildPerSampleTriples(samples, audio.sampleRate);
+  let dataSize = 0;
+  const sampleData: Uint8Array[] = [];
+  for (const s of samples) { sampleData.push(s.data); dataSize += s.data.length; }
+  return {
+    trackId,
+    baseDecodeTime: baseDts,
+    perSampleData,
+    sampleCount: samples.length,
+    sampleData,
+    dataSize,
+  };
+}
+
+function assembleMediaSegment(seq: number, trafs: TrafInput[]): Uint8Array {
+  const mfhd = buildMfhd(seq);
+
+  // Two passes: first measure traf sizes (data_offset depends on moof size)
   const trafSizes: number[] = [];
-  for (const ti of trafInfos) {
+  for (const ti of trafs) {
     const tfhd = buildTfhd(ti.trackId);
     const tfdt = buildTfdt(ti.baseDecodeTime);
-    const trun = buildTrun(ti.trunPayload, 0);
+    const trun = buildTrun(
+      ti.perSampleData,
+      ti.sampleCount,
+      0,
+      ti.hasCompositionOffsets === true,
+    );
     trafSizes.push(box("traf", tfhd, tfdt, trun).length);
   }
-
   const moofPayloadSize = mfhd.length + trafSizes.reduce((a, b) => a + b, 0);
   const moofSize = 8 + moofPayloadSize;
 
-  const trafs: Uint8Array[] = [];
+  const trafBoxes: Uint8Array[] = [];
+  const mdatParts: Uint8Array[] = [];
   let dataOffsetAcc = moofSize + 8;
-  for (const ti of trafInfos) {
-    trafs.push(box("traf", buildTfhd(ti.trackId), buildTfdt(ti.baseDecodeTime), buildTrun(ti.trunPayload, dataOffsetAcc)));
+  for (const ti of trafs) {
+    trafBoxes.push(
+      box(
+        "traf",
+        buildTfhd(ti.trackId),
+        buildTfdt(ti.baseDecodeTime),
+        buildTrun(
+          ti.perSampleData,
+          ti.sampleCount,
+          dataOffsetAcc,
+          ti.hasCompositionOffsets === true,
+        ),
+      ),
+    );
     dataOffsetAcc += ti.dataSize;
+    for (const d of ti.sampleData) mdatParts.push(d);
   }
 
-  const moof = box("moof", mfhd, ...trafs);
+  const moof = box("moof", mfhd, ...trafBoxes);
 
   let mdatSize = 0;
   for (const p of mdatParts) mdatSize += p.length;
@@ -520,35 +886,85 @@ function buildTfdt(baseDecodeTime: number): Uint8Array {
   return fullBox("tfdt", 1, 0, payload);
 }
 
-function buildTrun(trunPayload: Uint8Array, dataOffset: number): Uint8Array {
-  return fullBox("trun", 0, 0x000701, u32(dataOffset), trunPayload);
+/**
+ * Build a TrackRunBox per ISO/IEC 14496-12 §8.8.8.
+ *
+ * Critical ordering: `sample_count` MUST be written before `data_offset`.
+ * An earlier version of this code wrote `data_offset` first, which Chrome's
+ * MSE parser interpreted as a sample_count in the thousands — every video
+ * media fragment was rejected with "SourceBuffer error (stage=media)".
+ * Audio fragments slipped through because their tiny size let Chrome's
+ * fallback box-size derivation paper over the mis-order; video did not.
+ */
+function buildTrun(
+  perSampleData: Uint8Array,
+  sampleCount: number,
+  dataOffset: number,
+  hasCompositionOffsets = false,
+): Uint8Array {
+  return fullBox(
+    "trun",
+    hasCompositionOffsets ? 1 : 0,
+    hasCompositionOffsets ? 0x000f01 : 0x000701,
+    u32(sampleCount),
+    u32(dataOffset),
+    perSampleData,
+  );
 }
 
-function buildTrunPayload(samples: DemuxedSample[], timescale: number): Uint8Array {
-  const buf = new Uint8Array(4 + samples.length * 12);
+/** Per-sample duration/size/flags triples. `sample_count` is written by
+ *  `buildTrun` in the spec-correct field; do not prepend it here. */
+function buildPerSampleTriples(
+  samples: DemuxedSample[],
+  timescale: number,
+  compositionOffsets?: Int32Array,
+): Uint8Array {
+  const fieldsPerSample = compositionOffsets ? 16 : 12;
+  const buf = new Uint8Array(samples.length * fieldsPerSample);
   const dv = new DataView(buf.buffer);
-  dv.setUint32(0, samples.length);
   for (let i = 0; i < samples.length; i++) {
     const s = samples[i];
-    const off = 4 + i * 12;
+    const off = i * fieldsPerSample;
     dv.setUint32(off, Math.round((s.duration / 1000) * timescale) || 1);
     dv.setUint32(off + 4, s.data.length);
     dv.setUint32(off + 8, s.isKeyframe ? KEYFRAME_FLAGS : NON_KEYFRAME_FLAGS);
+    if (compositionOffsets) {
+      dv.setInt32(off + 12, compositionOffsets[i] ?? 0);
+    }
   }
   return buf;
 }
 
+/**
+ * Assign a duration to every sample that doesn't already have one.
+ *
+ * For HEVC/AVC with B-frames, samples arrive from the demuxer in **decode**
+ * order. A neighbour's PTS may belong to the next decoded frame (P after I,
+ * jumping ahead by the full GOP reorder delay before the B-frames fill in),
+ * so PTS deltas overstate the I-frame's duration by 4-5x. With B-frame
+ * video we MUST use `defaultDurationNs` from the MKV TrackEntry instead —
+ * for CFR content (every BD encode) that's the exact frame interval.
+ *
+ * Audio samples are monotonic but defaultDurationNs is just as accurate
+ * there, so prefer it uniformly. Falls back to PTS delta only when the
+ * muxer didn't author a default duration.
+ */
 function fillDurations(samples: DemuxedSample[], defaultDurNs: number) {
   const defaultMs = defaultDurNs > 0 ? defaultDurNs / 1_000_000 : 0;
+  const fallbackMs = samples[0]?.isVideo ? 33 : 23;
   for (let i = 0; i < samples.length; i++) {
     if (samples[i].duration > 0) continue;
-    if (i < samples.length - 1) {
-      samples[i].duration = samples[i + 1].pts - samples[i].pts;
-    } else if (defaultMs > 0) {
+    if (defaultMs > 0) {
       samples[i].duration = defaultMs;
-    } else {
-      samples[i].duration = samples[i].isVideo ? 33 : 23;
+      continue;
     }
-    if (samples[i].duration <= 0) samples[i].duration = 1;
+    if (i < samples.length - 1) {
+      const delta = samples[i + 1].pts - samples[i].pts;
+      if (delta > 0) {
+        samples[i].duration = delta;
+        continue;
+      }
+    }
+    samples[i].duration = fallbackMs;
   }
 }

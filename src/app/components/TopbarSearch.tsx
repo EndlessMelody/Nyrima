@@ -42,6 +42,7 @@ import cn from "classnames";
 import { useNyrimaRootStore } from "../stores/nyrima-root-store";
 import { useSocialStore } from "../stores/social-store";
 import { useSharingStore } from "../stores/sharing-store";
+import { targetDriveUrl } from "./social/InboxList";
 import "./TopbarSearch.scss";
 
 interface ResultItem {
@@ -191,7 +192,7 @@ export function TopbarSearch({ isCompact }: Props) {
           title: e.title ?? "Untitled share",
           subtitle: "Your share",
           posterUrl: e.posterUrl,
-          url: `https://drive.google.com/file/d/${e.entryFileId}/view`,
+          url: targetDriveUrl(e.target),
         });
         seen.add(e.id);
         if (shareHits.length >= MAX_PER_GROUP) break;
@@ -207,7 +208,7 @@ export function TopbarSearch({ isCompact }: Props) {
           title: i.entry.title ?? "Untitled share",
           subtitle: `@${i.author.handle}`,
           posterUrl: i.entry.posterUrl,
-          url: `https://drive.google.com/file/d/${i.entry.entryFileId}/view`,
+          url: targetDriveUrl(i.entry.target),
         });
         seen.add(i.entry.id);
         if (shareHits.length >= MAX_PER_GROUP) break;

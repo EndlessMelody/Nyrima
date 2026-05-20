@@ -28,9 +28,22 @@ import type { RequestOptions } from "./drive/types";
 let cachedToken: { value: string; fetchedAt: number } | null = null;
 const TOKEN_TTL_MS = 50 * 60 * 1000; // chrome.identity tokens last ~60min
 
+// Mirrors the SW-side INTERACTIVE_AT_KEY. Read-only on this side: the SW writes
+// it on every successful interactive consent, the frontend reads it to decide
+// whether to show "Connect Drive" vs "Session expired — sign in again".
+const INTERACTIVE_AT_KEY = "dc.oauthInteractiveAt";
+const INTERACTIVE_TTL_MS = 24 * 60 * 60 * 1000;
+
+/** Sentinel the SW throws past the 24h interactive ceiling. */
+const NEEDS_RECONSENT = "needs-reconsent";
+
 /**
  * Try to fetch an OAuth token. Returns null when OAuth isn't configured in
  * the manifest (or the user hasn't consented yet and we don't want to prompt).
+ *
+ * Past the 24h interactive ceiling, the SW throws NEEDS_RECONSENT; we drop
+ * our cached token and return null. Callers that care about the difference
+ * between "never signed in" and "session expired" can read getOAuthSessionState.
  */
 export async function tryGetAccessToken(
   interactive = false,
@@ -43,13 +56,54 @@ export async function tryGetAccessToken(
       type: "AUTH_GET_TOKEN",
       interactive,
     })) as DcResponse<{ token: string }>;
-    if (!response.ok) return null;
+    if (!response.ok) {
+      if (response.error.includes(NEEDS_RECONSENT)) cachedToken = null;
+      return null;
+    }
     const token = response.data.token;
     cachedToken = { value: token, fetchedAt: Date.now() };
     return token;
   } catch {
     return null;
   }
+}
+
+export type OAuthSessionState =
+  | "not-configured" // no OAuth Client ID paired
+  | "signed-out" // OAuth configured but no interactive consent yet
+  | "active" // within the 24h interactive window
+  | "expired"; // past the 24h ceiling, needs re-consent
+
+/**
+ * Returns the high-level OAuth state used by the login screen so it can
+ * differentiate "first time, click Connect Drive" vs "session expired,
+ * sign in again". Reads the SW-managed `dc.oauthInteractiveAt` timestamp.
+ */
+export async function getOAuthSessionState(): Promise<{
+  state: OAuthSessionState;
+  interactiveAt: number | null;
+  expiresAt: number | null;
+}> {
+  const hasClient = !!(await getOAuthClientId());
+  if (!hasClient) {
+    return { state: "not-configured", interactiveAt: null, expiresAt: null };
+  }
+  let interactiveAt: number | null = null;
+  try {
+    const obj = await chrome.storage.local.get(INTERACTIVE_AT_KEY);
+    const v = obj[INTERACTIVE_AT_KEY];
+    if (typeof v === "number") interactiveAt = v;
+  } catch {
+    /* default to signed-out */
+  }
+  if (interactiveAt == null) {
+    return { state: "signed-out", interactiveAt: null, expiresAt: null };
+  }
+  const expiresAt = interactiveAt + INTERACTIVE_TTL_MS;
+  if (Date.now() >= expiresAt) {
+    return { state: "expired", interactiveAt, expiresAt };
+  }
+  return { state: "active", interactiveAt, expiresAt };
 }
 
 export async function getAccessToken(interactive = true): Promise<string> {

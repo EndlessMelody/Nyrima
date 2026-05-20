@@ -1,19 +1,49 @@
 /**
- * SocialToolbar — header band at the top of the social hub.
+ * SocialToolbar + SyncControls — rail header and footer for the social hub.
  *
- * Renders four pieces of metadata, all visible at once:
- *   - Kana caption + page title (matches the lobby's instrument-tape look).
- *   - Handle pill — your `@handle` so you know who you're acting as.
- *   - Sync state — last refresh + a Sync button when you've got follows.
- *   - Share CTA — dispatches the existing topbar event so the composer
- *     opens. This is the same plumbing the AppShell Share button uses;
- *     having a second entry point inside the hub avoids a U-turn through
- *     the topbar for a power user composing several shares in a row.
+ * Two small components, exported from one file because they're always
+ * rendered together in the rail and refactoring them apart costs more in
+ * imports than it saves:
+ *
+ *   SocialToolbar  — kana caption + page title + one-line subtitle. Sits at
+ *                    the top of the rail. Purely presentational.
+ *   SyncControls   — sync status line + Sync button + "Share current page"
+ *                    CTA. Sits at the bottom of the rail and gets pushed
+ *                    down by `margin-top: auto` so it stays anchored even
+ *                    when the rail content is short.
+ *
+ * The Share button re-dispatches the `nyrima:topbar` CustomEvent the
+ * AppShell's Share button uses — same composer, two entry points.
  */
 
 import type { ShareProfile } from "@shared/types";
 
-interface Props {
+// ---------------------------------------------------------------------------
+// SocialToolbar — rail header.
+// ---------------------------------------------------------------------------
+
+export function SocialToolbar() {
+  return (
+    <section className="ny-social-toolbar" aria-label="Social hub header">
+      <span className="ny-social-toolbar__kana">
+        ソーシャル · NYRIMA SOCIAL
+      </span>
+      <h1 className="ny-social-toolbar__title">Social</h1>
+      <p className="ny-social-toolbar__sub">
+        Share what you're watching. Follow other libraries. Keep your shelf
+        public on your own terms.
+      </p>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SyncControls — rail footer.
+// ---------------------------------------------------------------------------
+
+interface SyncControlsProps {
+  /** Used only to gate the "Acting as …" hint when no profile is loaded yet
+   *  — handle pill itself lives in the ShelfLinkCard now. */
   profile: ShareProfile | null;
   profileLoaded: boolean;
   syncing: boolean;
@@ -22,81 +52,60 @@ interface Props {
   onSync: () => void;
 }
 
-export function SocialToolbar({
+export function SyncControls({
   profile,
   profileLoaded,
   syncing,
   lastSyncedAt,
   followsCount,
   onSync,
-}: Props) {
+}: SyncControlsProps) {
+  const statusLabel = syncing
+    ? "Syncing…"
+    : lastSyncedAt
+      ? `Synced ${formatAgo(lastSyncedAt)}`
+      : followsCount === 0
+        ? profileLoaded && !profile
+          ? "Pick a handle"
+          : "No follows yet"
+        : "Not synced";
+
   return (
-    <section className="ny-social-toolbar" aria-label="Social hub header">
-      <div className="ny-social-toolbar__lead">
-        <span className="ny-social-toolbar__kana">
-          ソーシャル · NYRIMA SOCIAL
+    <section className="ny-social-sync" aria-label="Sync and share controls">
+      <div className="ny-social-sync__row">
+        <span className="ny-social-sync__label" title={statusLabel}>
+          {statusLabel}
         </span>
-        <h1 className="ny-social-toolbar__title">Social</h1>
-        <p className="ny-social-toolbar__sub">
-          Share what you're watching. Follow other libraries. Keep your shelf
-          public on your own terms.
-        </p>
-      </div>
-
-      <div className="ny-social-toolbar__meta">
-        <div className="ny-social-toolbar__handle" data-state={profileLoaded ? "ready" : "loading"}>
-          <span className="ny-social-toolbar__handle-label">Acting as</span>
-          {profile ? (
-            <span className="ny-social-toolbar__handle-value">
-              @{profile.handle}
-            </span>
-          ) : (
-            <span className="ny-social-toolbar__handle-value is-muted">
-              {profileLoaded ? "Pick a handle" : "…"}
-            </span>
-          )}
-        </div>
-
-        <div className="ny-social-toolbar__sync">
-          <span className="ny-social-toolbar__sync-label">
-            {syncing
-              ? "Syncing…"
-              : lastSyncedAt
-                ? `Synced ${formatAgo(lastSyncedAt)}`
-                : followsCount === 0
-                  ? "No follows yet"
-                  : "Not synced"}
-          </span>
-          <button
-            type="button"
-            className="ny-social-toolbar__sync-btn"
-            disabled={syncing || followsCount === 0}
-            onClick={onSync}
-            aria-label="Sync follows"
-            title={
-              followsCount === 0
-                ? "Follow someone first"
-                : "Refresh inbox from Drive"
-            }
-          >
-            <SyncIcon spinning={syncing} />
-            <span>Sync</span>
-          </button>
-        </div>
-
         <button
           type="button"
-          className="ny-social-toolbar__share"
-          onClick={() =>
-            window.dispatchEvent(
-              new CustomEvent("nyrima:topbar", { detail: { scope: "share" } }),
-            )
+          className="ny-social-sync__btn"
+          disabled={syncing || followsCount === 0}
+          onClick={onSync}
+          aria-label="Sync follows"
+          title={
+            followsCount === 0
+              ? "Follow someone first"
+              : "Refresh inbox from Drive"
           }
         >
-          <ShareIcon />
-          <span>Share current page</span>
+          <SyncIcon spinning={syncing} />
+          <span>Sync</span>
         </button>
       </div>
+
+      <button
+        type="button"
+        className="ny-social-sync__share"
+        onClick={() =>
+          window.dispatchEvent(
+            new CustomEvent("nyrima:topbar", { detail: { scope: "share" } }),
+          )
+        }
+        title="Share the current page to your Shared/ folder"
+      >
+        <ShareIcon />
+        <span>Share current page</span>
+      </button>
     </section>
   );
 }
@@ -112,7 +121,7 @@ function formatAgo(ts: number): string {
 function SyncIcon({ spinning }: { spinning: boolean }) {
   return (
     <svg
-      className={`ny-social-toolbar__icon${spinning ? " is-spin" : ""}`}
+      className={`ny-social-sync__icon${spinning ? " is-spin" : ""}`}
       viewBox="0 0 16 16"
       fill="none"
       aria-hidden="true"
@@ -137,7 +146,12 @@ function SyncIcon({ spinning }: { spinning: boolean }) {
 
 function ShareIcon() {
   return (
-    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <svg
+      className="ny-social-sync__icon"
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-hidden="true"
+    >
       <circle cx="12" cy="3.5" r="1.9" stroke="currentColor" strokeWidth="1.2" />
       <circle cx="4" cy="8" r="1.9" stroke="currentColor" strokeWidth="1.2" />
       <circle cx="12" cy="12.5" r="1.9" stroke="currentColor" strokeWidth="1.2" />

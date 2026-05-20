@@ -46,22 +46,39 @@ watched-ratio pill), lobby stats strip.
 
 Deferred: multi-folder libraries (P3.6) — needs a data-model rewrite.
 
-## Phase 4 — Sharing layer ("P2P on Drive") · *not started*
+## Phase 4 — Sharing layer ("P2P on Drive") · **shipped**
 
 Goal: turn the personal cinema into a small social surface without
 introducing a backend. Share entries live as JSON inside the sharer's
-Drive; a central bootstrap index lets people discover each other.
+Drive; a public GitHub-hosted bootstrap directory lets people discover
+each other.
 
-Open shape:
+What landed:
 
-- Schema for share entries (`Shared/<id>.json` in the sharer's Drive).
-- A small public bootstrap folder we maintain that holds `index.json`.
-- Per-user follow + pull (no server polling — pull-on-open).
-- Comments as JSONL appends so writes don't conflict.
-- A "Share this video" UX → produces a viewable Drive link + share entry.
+- `Shared/index.json` (schema v=2, inline `ShareEntry[]` — one Drive
+  read yields the whole feed) plus `comments.jsonl` (single flat JSONL
+  of every comment the user has ever posted, tagged with
+  `sharedFolderId` + `shareId` so the owner can filter).
+- "Share this video" UX with handle picker, composer, public-folder
+  confirmation, per-`Shared/` mutation queue to avoid same-context
+  index overwrites.
+- `/social` hub with Inbox, My Shares, People, Activity, Privacy tabs;
+  followed-shelf view; comment composer; received/sent strands.
+- Follow + pull pipeline with last-good cache, per-card retry, and
+  bounded concurrency.
+- Drive-to-Drive import via `files.copy` — Inbox rows mirror the share
+  target into `Nyrima/Imports/<title - timestamp>/`. Video shares pull
+  same-folder `Poster.*` + matching subtitles along with the video;
+  library shares recurse the folder tree. Partial library failures are
+  collected rather than aborting the whole import.
+- Bootstrap directory cached on a 24 h TTL from
+  `raw.githubusercontent.com/nyrima/directory/main/users.json`; opt-in
+  via GitHub-issue PR.
 
-Risk: this is the first phase that touches *other people's* data. OAuth
-scope and consent flows need a careful pass.
+Scope decision that came out of this phase: OAuth scope set is
+`drive.readonly` + `drive.file` + `userinfo.{email,profile}`. The
+narrower `drive.file` covers all writes (Shared/ + Imports/) because
+both folder trees are extension-created.
 
 ## Phase 5 — Realtime + privacy · *not started*
 

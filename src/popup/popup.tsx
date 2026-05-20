@@ -9,7 +9,7 @@
  *
  * Surfaces:
  *   - Status chip in the header (DRIVE · LINKED / DRIVE · SETUP)
- *   - "Open Library" primary CTA (opens the app page)
+ *   - Resume + Lobby quick actions, or a single "Open Library" CTA
  *   - Pinned + Recent folder sections, with pin toggle per item
  *   - Welcome empty-state with a setup-access CTA when nothing exists yet
  *   - Mono footer with build stamp + Manage access link
@@ -101,6 +101,26 @@ function StatusChip({
         {ok ? "DRIVE · LINKED" : "DRIVE · SETUP"}
       </span>
     </button>
+  );
+}
+
+function HomeGlyph() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="14"
+      height="14"
+      aria-hidden
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 11.5 12 4l9 7.5" />
+      <path d="M5.5 10.5V20h13v-9.5" />
+      <path d="M9.5 20v-5h5v5" />
+    </svg>
   );
 }
 
@@ -260,7 +280,7 @@ function Popup() {
   }
 
   const pinned = folders.filter((f) => f.pinned).slice(0, 3);
-  const recent = folders.filter((f) => !f.pinned).slice(0, 5);
+  const recent = folders.filter((f) => !f.pinned).slice(0, 3);
   const empty = folders.length === 0;
   const recentSectionNumber = pinned.length > 0 ? "02" : "01";
 
@@ -289,11 +309,10 @@ function Popup() {
       </header>
 
       {resume && resume.folderId ? (
-        // Promote the in-progress watch to the primary CTA. One tap takes
-        // the user straight to where they left off; "Open Library" demotes
-        // to a secondary link below. When there's nothing in progress, the
-        // popup falls back to the original "Open Library" shape.
-        <>
+        // Promote the in-progress watch while keeping the lobby one tap away.
+        // When there's nothing in progress, the popup falls back to the
+        // original full-width "Open Library" shape.
+        <div className="dc-pop-cta-row">
           <button
             type="button"
             className="dc-pop-cta dc-pop-cta--resume"
@@ -302,30 +321,34 @@ function Popup() {
                 `/play/${encodeURIComponent(resume.folderId!)}/${encodeURIComponent(resume.fileId)}`,
               )
             }
-            title={resume.name ?? "Resume last video"}
+            title={`${resume.name ?? "Resume last video"} · ${formatTimecode(
+              resume.positionSeconds,
+            )} / ${formatTimecode(resume.durationSeconds)}`}
           >
             <span className="dc-pop-cta__glyph" aria-hidden>
               ▶
             </span>
             <span className="dc-pop-cta__label">
-              Resume{" "}
-              <span className="dc-pop-cta__resume-name">
+              Resume
+              <span className="dc-pop-cta__detail">
                 {(resume.name ?? "last video").replace(/\.[^.]+$/, "")}
               </span>
-            </span>
-            <span className="dc-pop-cta__sub">
-              {formatTimecode(resume.positionSeconds)} ·{" "}
-              {formatTimecode(resume.durationSeconds)}
             </span>
           </button>
           <button
             type="button"
-            className="dc-pop-link"
+            className="dc-pop-cta dc-pop-cta--lobby"
             onClick={() => openApp("/")}
           >
-            Open Library ↗
+            <span className="dc-pop-cta__glyph" aria-hidden>
+              <HomeGlyph />
+            </span>
+            <span className="dc-pop-cta__label">
+              Lobby
+              <span className="dc-pop-cta__detail">Open Nyrima</span>
+            </span>
           </button>
-        </>
+        </div>
       ) : (
         <button
           type="button"

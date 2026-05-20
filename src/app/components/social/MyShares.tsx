@@ -24,6 +24,7 @@ import {
   KindBadge,
   ShareTable,
   formatAgo,
+  targetDriveUrl,
 } from "./InboxList";
 
 export function MyShares() {
@@ -141,12 +142,12 @@ export function MyShares() {
 function MyShareRow({
   entry,
 }: {
-  entry: import("@shared/types").ShareIndexEntry;
+  entry: import("@shared/types").ShareEntry;
 }) {
   const unshare = useSocialStore((s) => s.unshare);
   const [armed, setArmed] = useState(false);
   const [pending, setPending] = useState(false);
-  const driveUrl = `https://drive.google.com/file/d/${entry.entryFileId}/view`;
+  const driveUrl = targetDriveUrl(entry.target);
 
   async function doUnshare() {
     if (!armed) {
@@ -193,7 +194,7 @@ function MyShareRow({
       </div>
 
       <div className="ny-share-row__cell ny-share-row__cell--kind">
-        <KindBadge kind={entry.kind} />
+        <KindBadge kind={entry.target.kind} />
       </div>
 
       <div

@@ -25,7 +25,7 @@
 
   position: absolute;
   inset: 0;
-  z-index: 35;
+  z-index: 20;
   pointer-events: none;
 }
 
@@ -130,10 +130,19 @@ $sub-base-fullscreen: clamp(22px, 3.4cqi, 64px);
   &[data-underline="true"] {
     text-decoration: underline;
   }
-  // text-align is locked to center for every cue; the previous data-align
-  // left/right overrides have been intentionally removed so fansub `\an1` /
-  // `\an4` / `\an7` overrides can't pull dialogue off-center. Positioned
-  // signs flow through JASSUB instead, which respects `\pos`/`\move`.
+  // Honor the parsed ASS alignment so the brief CSS-overlay window (before
+  // libass takes over) still surfaces the cue at the typesetter's intended
+  // horizontal anchor. libass owns this once JASSUB reports ready; until
+  // then, at least top-center romaji and bottom-right translations land in
+  // roughly the right place instead of all stacking centred.
+  &[data-align="left"] {
+    text-align: left;
+    align-self: flex-start;
+  }
+  &[data-align="right"] {
+    text-align: right;
+    align-self: flex-end;
+  }
 }
 
 .dc-sub-overlay.is-fs .dc-sub-cue {

@@ -11,23 +11,22 @@
  * presentational + filter logic.
  *
  * Actions per row:
- *   - Open in Drive   → followed user's entry JSON URL (drive.google.com
- *                       file viewer). Lets the user verify what they're
- *                       about to open before committing to a play.
- *   - Copy link       → clipboard the entry's Drive URL.
+ *   - Open in Drive   → the *target's* Drive URL (the video file or library
+ *                       folder), not the manifest file. Schema v=2 inlines
+ *                       the full target in the index, so we have the real
+ *                       fileId/folderId without a second fetch.
+ *   - Import          → Drive-to-Drive copy into the recipient's Nyrima root.
+ *   - Copy link       → clipboard the target Drive URL.
  *   - Mark read       → bumps `lastSeenEntryId` on the follow.
- *
- * The "Play" affordance is intentionally absent here — Inbox is a *manifest*
- * of shares; the actual `target.fileId` lives in the entry JSON, which we
- * don't fetch eagerly for every row. Clicking the row opens the entry on
- * Drive; a future P4.2.1 can wire "Resolve + play in Nyrima" once the
- * inbox-detail flyout exists.
  */
 
 import { useMemo, useState } from "react";
 import cn from "classnames";
 import { useSocialStore, type InboxItem } from "../../stores/social-store";
+import type { ShareTarget } from "@shared/types";
+import type { DriveImportResult } from "../../services/sharing";
 import { Link } from "react-router-dom";
+import { CommentComposerDialog } from "./CommentComposerDialog";
 
 type Filter = "all" | "unread" | "videos" | "libraries";
 
@@ -52,8 +51,8 @@ export function InboxList() {
     const q = query.trim().toLowerCase();
     return items.filter((i) => {
       if (filter === "unread" && !i.isUnread) return false;
-      if (filter === "videos" && i.entry.kind !== "video") return false;
-      if (filter === "libraries" && i.entry.kind !== "library") return false;
+      if (filter === "videos" && i.entry.target.kind !== "video") return false;
+      if (filter === "libraries" && i.entry.target.kind !== "library") return false;
       if (q) {
         const t = (i.entry.title ?? "").toLowerCase();
         const h = i.author.handle.toLowerCase();
@@ -160,8 +159,9 @@ export function InboxList() {
 
 function InboxRow({ item }: { item: InboxItem }) {
   const { entry, author } = item;
-  const driveUrl = `https://drive.google.com/file/d/${entry.entryFileId}/view`;
+  const driveUrl = targetDriveUrl(entry.target);
   const markFollowRead = useSocialStore((s) => s.markFollowRead);
+  const [commentOpen, setCommentOpen] = useState(false);
 
   return (
     <article
@@ -202,7 +202,7 @@ function InboxRow({ item }: { item: InboxItem }) {
       </div>
 
       <div className="ny-share-row__cell ny-share-row__cell--kind">
-        <KindBadge kind={entry.kind} />
+        <KindBadge kind={entry.target.kind} />
       </div>
 
       <div
@@ -225,6 +225,19 @@ function InboxRow({ item }: { item: InboxItem }) {
         <button
           type="button"
           className="ny-share-row__btn ny-share-row__btn--ghost"
+          onClick={() => setCommentOpen(true)}
+          title="Reply with a comment"
+        >
+          Comment
+        </button>
+        <ImportShareButton
+          target={entry.target}
+          title={entry.title}
+          onImported={() => void markFollowRead(item.sourceFolderId)}
+        />
+        <button
+          type="button"
+          className="ny-share-row__btn ny-share-row__btn--ghost"
           onClick={() => {
             void navigator.clipboard.writeText(driveUrl);
           }}
@@ -233,8 +246,88 @@ function InboxRow({ item }: { item: InboxItem }) {
           Copy
         </button>
       </div>
+      <CommentComposerDialog
+        isOpen={commentOpen}
+        onClose={() => setCommentOpen(false)}
+        target={{
+          sharedFolderId: item.sourceFolderId,
+          shareId: entry.id,
+          title: entry.title,
+          authorHandle: author.handle,
+        }}
+      />
     </article>
   );
+}
+
+export function ImportShareButton({
+  target,
+  title,
+  onImported,
+}: {
+  target: ShareTarget;
+  title?: string;
+  onImported?: (result: DriveImportResult) => void;
+}) {
+  const importShareTarget = useSocialStore((s) => s.importShareTarget);
+  const [pending, setPending] = useState(false);
+  const [result, setResult] = useState<DriveImportResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const label = pending ? "Importing" : result ? "Imported" : error ? "Retry" : "Import";
+  const titleText = pending
+    ? "Copying into your Nyrima Drive"
+    : result
+      ? summarizeImport(result)
+      : error
+        ? error
+        : "Copy this share into your Nyrima Drive";
+
+  async function handleClick() {
+    if (pending) return;
+    if (result) {
+      window.open(
+        targetDriveUrl({ kind: "library", folderId: result.destinationFolder.id }),
+        "_blank",
+        "noopener,noreferrer",
+      );
+      return;
+    }
+    setPending(true);
+    setError(null);
+    try {
+      const imported = await importShareTarget({ target, title });
+      setResult(imported);
+      onImported?.(imported);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Import failed.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      className="ny-share-row__btn ny-share-row__btn--ghost"
+      onClick={() => void handleClick()}
+      disabled={pending}
+      title={titleText}
+      aria-label={titleText}
+    >
+      {label}
+    </button>
+  );
+}
+
+function summarizeImport(result: DriveImportResult): string {
+  const copied = `${result.copiedFiles.length} file${
+    result.copiedFiles.length === 1 ? "" : "s"
+  } copied`;
+  if (result.failures.length === 0) {
+    return `${copied}. Click to open the imported folder.`;
+  }
+  return `${copied}; ${result.failures.length} failed. Click to open the imported folder.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -283,6 +376,17 @@ export function EmptyState({
       {cta && <div className="ny-social-empty__cta">{cta}</div>}
     </div>
   );
+}
+
+/** Build a Drive viewer URL for the actual content the share points at —
+ *  the video file for `kind: video`, the folder for `kind: library`.
+ *  Used by InboxList + MyShares so the Open/Copy actions surface the
+ *  thing the user actually wants to land on, not the manifest file. */
+export function targetDriveUrl(target: ShareTarget): string {
+  if (target.kind === "video") {
+    return `https://drive.google.com/file/d/${target.fileId}/view`;
+  }
+  return `https://drive.google.com/drive/folders/${target.folderId}`;
 }
 
 export function formatAgo(iso: string): string {

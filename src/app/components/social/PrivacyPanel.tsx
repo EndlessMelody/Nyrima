@@ -7,12 +7,11 @@
  * Layout: three rows.
  *   1. Public/Private toggle — the canonical home for what currently lives
  *      as a one-off checkbox inside ShareComposerDialog.
- *   2. Bootstrap directory consent — placeholder for P4.4. Currently
- *      disabled with a "coming with P4.4" hint.
- *   3. Block list — local mute list for handles you don't want to see in
+ *   2. Bootstrap directory consent — generate the moderated P4.4 listing
+ *      request snippet once the user's Shared/ folder is public.
+ *   3. Block list — future local mute list for handles you don't want to see in
  *      Inbox even if you accidentally followed them. Persists alongside
- *      followedUsers. Placeholder until P4.2 ships the discovery surface
- *      that creates the need.
+ *      followedUsers.
  */
 
 import { useEffect, useState } from "react";
@@ -21,15 +20,18 @@ import {
   publishSharedFolder,
   unpublishSharedFolder,
 } from "../../services/sharing/share-permissions";
+import { RequestListingDialog } from "./RequestListingDialog";
 
 export function PrivacyPanel() {
   const folders = useSharingStore((s) => s.folders);
+  const profile = useSharingStore((s) => s.profile);
   const ensureFolders = useSharingStore((s) => s.ensureFolders);
   const isPublic = useSharingStore((s) => s.isPublic);
   const refreshPublicState = useSharingStore((s) => s.refreshPublicState);
 
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [listingOpen, setListingOpen] = useState(false);
 
   // Probe Drive on mount so the toggle reflects reality rather than just the
   // cached value. Cheap (single permissions list call) and the result
@@ -98,36 +100,55 @@ export function PrivacyPanel() {
       </div>
       {error && <p className="ny-privacy-row__error">{error}</p>}
 
-      <div className="ny-privacy-row is-disabled">
+      <div className="ny-privacy-row">
         <div className="ny-privacy-row__copy">
           <h3 className="ny-privacy-row__title">
             Listed in the bootstrap directory
           </h3>
           <p className="ny-privacy-row__sub">
             Opt in to appear in Nyrima's discoverable user index so people
-            can find you without a link. Ships with P4.4.
+            can find you without a link. Listing is moderated — generate
+            a JSON snippet, open a GitHub issue, and a maintainer reviews
+            the request. Public discovery must be on for followers to
+            actually read your <code>index.json</code>.
           </p>
         </div>
         <div className="ny-privacy-row__control">
-          <span className="ny-privacy-pill is-soon">
-            <span className="ny-privacy-pill__dot" />
-            <span className="ny-privacy-pill__label">P4.4</span>
-          </span>
+          <button
+            type="button"
+            className="ny-btn ny-btn--ghost"
+            onClick={() => setListingOpen(true)}
+            disabled={!profile || isPublic !== true}
+            title={
+              !profile
+                ? "Pick a share handle first."
+                : isPublic !== true
+                  ? "Make your Shared/ folder public before requesting a listing."
+                  : "Generate a directory-listing snippet."
+            }
+          >
+            Request listing
+          </button>
         </div>
       </div>
+
+      <RequestListingDialog
+        isOpen={listingOpen}
+        onClose={() => setListingOpen(false)}
+      />
 
       <div className="ny-privacy-row is-disabled">
         <div className="ny-privacy-row__copy">
           <h3 className="ny-privacy-row__title">Block list</h3>
           <p className="ny-privacy-row__sub">
             Hide a handle's shares from your Inbox even if you accidentally
-            re-follow them. Lands with the discovery surfaces in P4.2.
+            re-follow them. Planned as a local mute layer on top of follows.
           </p>
         </div>
         <div className="ny-privacy-row__control">
           <span className="ny-privacy-pill is-soon">
             <span className="ny-privacy-pill__dot" />
-            <span className="ny-privacy-pill__label">P4.2</span>
+            <span className="ny-privacy-pill__label">Later</span>
           </span>
         </div>
       </div>

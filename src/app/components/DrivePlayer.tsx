@@ -23,7 +23,8 @@ import cn from "classnames";
 import "./DrivePlayer.scss";
 import { SubtitleOverlay } from "./SubtitleOverlay";
 import { JassubOverlay } from "./JassubOverlay";
-import { SettingsPopover } from "./SettingsPopover";
+import { PgsOverlay } from "./PgsOverlay";
+import { SettingsPopover, type PlayerAudioTrack } from "./SettingsPopover";
 import type { SubCue } from "../services/subtitles";
 import { EMPTY_CUES } from "../services/subtitles";
 import { formatTimecode } from "../services/formatters";
@@ -48,6 +49,13 @@ export interface SubtitleTrack {
    */
   assSource?: string;
   assRenderer?: "jassub";
+  /**
+   * Decoded PGS compositions for Blu-ray bitmap tracks. When present, the
+   * player swaps SubtitleOverlay for PgsOverlay and ignores `cues`. Cleared
+   * while extraction is still streaming so the picker doesn't expose a
+   * half-built track.
+   */
+  pgsCompositions?: import("../services/pgs-renderer").PgsComposition[];
 }
 
 interface Props {
@@ -59,6 +67,13 @@ interface Props {
    * the <video> ref from the parent so the player stays encapsulated.
    */
   initialSeek?: number;
+  /**
+   * Skip the "Resume?" pill and apply `initialSeek` silently. PlayerPage sets
+   * this for navigations that aren't a fresh-open (e.g. a dub-switch reload
+   * where the user expects to continue at the same spot, not see a 3.5 s
+   * count-down before the seek fires).
+   */
+  silentResume?: boolean;
   /** Called when the <video> emits a fatal error. */
   onMediaError?: (err: MediaError | null) => void;
   /** Called once metadata is known. */
@@ -101,6 +116,27 @@ interface Props {
   prevVideo?: { fileId: string; title: string } | null;
   onNext?: () => void;
   onPrev?: () => void;
+  /**
+   * Audio tracks parsed from the MKV header. When provided, this list — not
+   * the browser's `HTMLVideoElement.audioTracks` — is the source of truth for
+   * the SettingsPopover audio picker. The browser list is still flipped on
+   * pick to switch the active dub for native playback; in MSE mode the parent
+   * additionally re-mounts the controller via `onPickAudioTrackNumber` because
+   * fMP4 init segments aren't re-writable in place.
+   */
+  mkvAudioTracks?: import("../services/mkv-subtitles").MkvAudioTrack[];
+  /**
+   * Currently selected MKV audio TrackNumber. Drives the "active" pill in the
+   * picker — and matches what the MSE controller was started with.
+   */
+  selectedMkvAudioTrackNumber?: number | null;
+  /**
+   * Fired when the user picks a different MKV audio track from the popover.
+   * The parent owns the consequences: in native mode it's a no-op (the
+   * `.enabled` flip below already moved the browser to the new dub); in MSE
+   * mode it must destroy and re-start the controller with the new track.
+   */
+  onPickAudioTrackNumber?: (trackNumber: number) => void;
   /** Theatre-mode state, owned by the parent page. When provided, the player
    *  exposes a toggle button in the bottom-right control cluster. */
   theatreMode?: boolean;
@@ -126,11 +162,48 @@ const NEXT_UP_THRESHOLD_SEC = 20;
 // gentle smart default rather than a wait.
 const RESUME_AUTO_MS = 3500;
 
+interface BrowserAudioTrack {
+  id?: string;
+  label?: string;
+  language?: string;
+  enabled: boolean;
+}
+
+interface BrowserAudioTrackList {
+  length: number;
+  [index: number]: BrowserAudioTrack;
+  addEventListener?: (type: string, listener: EventListener) => void;
+  removeEventListener?: (type: string, listener: EventListener) => void;
+}
+
+function audioTrackId(track: BrowserAudioTrack, index: number): string {
+  return track.id || `${track.language || "audio"}-${index}`;
+}
+
+function snapshotAudioTracks(
+  list: BrowserAudioTrackList | undefined,
+): PlayerAudioTrack[] {
+  if (!list || list.length === 0) return [];
+  return Array.from({ length: list.length }, (_, i) => {
+    const track = list[i];
+    const language = track.language || undefined;
+    return {
+      id: audioTrackId(track, i),
+      label:
+        track.label ||
+        (language ? `${language.toUpperCase()} audio` : `Audio track ${i + 1}`),
+      language,
+      enabled: Boolean(track.enabled),
+    };
+  });
+}
+
 export function DrivePlayer({
   src,
   subtitleTracks,
   title,
   initialSeek,
+  silentResume,
   onMediaError,
   onLoadedMetadata,
   onTimeUpdate,
@@ -142,6 +215,9 @@ export function DrivePlayer({
   prevVideo,
   onNext,
   onPrev,
+  mkvAudioTracks,
+  selectedMkvAudioTrackNumber,
+  onPickAudioTrackNumber,
   theatreMode,
   onToggleTheatre,
   ambientSourceUrl,
@@ -210,6 +286,13 @@ export function DrivePlayer({
   useEffect(() => {
     initialSeekRef.current = initialSeek;
   }, [initialSeek]);
+  // Same closure trick for `silentResume`: the loadedmetadata handler attaches
+  // once and needs the latest prop value when it fires (which can be hundreds
+  // of ms after mount, well after props have settled).
+  const silentResumeRef = useRef(silentResume);
+  useEffect(() => {
+    silentResumeRef.current = silentResume;
+  }, [silentResume]);
 
   // Ambient backdrop glow — samples the dominant colour out of the supplied
   // poster URL and writes it as RGB CSS custom properties on the player
@@ -330,6 +413,8 @@ export function DrivePlayer({
   const [bufferedEnd, setBufferedEnd] = useState(0);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
+  const [audioTracks, setAudioTracks] = useState<PlayerAudioTrack[]>([]);
+  const [activeAudioId, setActiveAudioId] = useState<string | null>(null);
   const [speed, setSpeed] = useState(1);
   const [buffering, setBuffering] = useState(true);
   const [looping, setLooping] = useState(false);
@@ -378,6 +463,87 @@ export function DrivePlayer({
     [settings.subtitleFont],
   );
 
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const nextVolume = Math.max(0, Math.min(1, settings.defaultVolume));
+    v.volume = nextVolume;
+    if (nextVolume > 0) v.muted = false;
+    setVolume(nextVolume);
+    setMuted(v.muted);
+  }, [settings.defaultVolume]);
+
+  useEffect(() => {
+    const v = videoRef.current as
+      | (HTMLVideoElement & { audioTracks?: BrowserAudioTrackList })
+      | null;
+    if (!v) return;
+    const list = v.audioTracks;
+
+    // MKV-derived list wins when present — it has the muxer-authored labels
+    // ("Japanese 5.1") that Chrome's `audioTracks` doesn't surface, and it's
+    // the only source of multi-track info in MSE mode (where the fMP4 only
+    // carries the selected track).
+    //
+    // A track is rendered DISABLED in the picker when we have no path to
+    // switch INTO it. Two reasons knock a track out:
+    //
+    //   1. The codec isn't in the MSE remuxer's whitelist (e.g. DTS,
+    //      TrueHD) — we can't build a fresh fMP4 init segment for it.
+    //   2. PlayerPage found no browser path for it: neither MSE packaging
+    //      nor the external WebCodecs audio lane can play that track.
+    //
+    // The currently-playing track is always enabled — even if its codec
+    // hits one of those gates, clicking your own active dub is a no-op
+    // anyway, and forcing it disabled would look like a bug.
+    // The muxer-default is also always enabled because native playback
+    // is already producing audio for it without any of our pipeline.
+    const defaultTrackNumber = mkvAudioTracks?.[0]?.number;
+    function refreshAudioTracks() {
+      if (mkvAudioTracks && mkvAudioTracks.length > 0) {
+        const tracks: PlayerAudioTrack[] = mkvAudioTracks.map((t) => {
+          const isActive = t.number === selectedMkvAudioTrackNumber;
+          const isMuxerDefault = t.number === defaultTrackNumber;
+          const reason = !t.remuxable
+            ? `${t.codecId} isn't in the MSE remuxer's whitelist. ` +
+              `Nyrima can't switch into this dub on its own.`
+            : t.browserSupported === false
+              ? `Your browser refuses ${t.codecId} for this file's ` +
+                `available playback paths.`
+              : undefined;
+          const switchable = !reason || isMuxerDefault;
+          return {
+            id: `mkv-${t.number}`,
+            label: t.label,
+            language: t.language,
+            enabled: isActive,
+            disabled: !isActive && !switchable,
+            disabledReason: switchable ? undefined : reason,
+          };
+        });
+        setAudioTracks(tracks);
+        const active = tracks.find((t) => t.enabled);
+        setActiveAudioId(active?.id ?? tracks[0]?.id ?? null);
+        return;
+      }
+      const next = snapshotAudioTracks(list);
+      setAudioTracks(next);
+      setActiveAudioId(next.find((track) => track.enabled)?.id ?? null);
+    }
+
+    refreshAudioTracks();
+    v.addEventListener("loadedmetadata", refreshAudioTracks);
+    list?.addEventListener?.("change", refreshAudioTracks);
+    list?.addEventListener?.("addtrack", refreshAudioTracks);
+    list?.addEventListener?.("removetrack", refreshAudioTracks);
+    return () => {
+      v.removeEventListener("loadedmetadata", refreshAudioTracks);
+      list?.removeEventListener?.("change", refreshAudioTracks);
+      list?.removeEventListener?.("addtrack", refreshAudioTracks);
+      list?.removeEventListener?.("removetrack", refreshAudioTracks);
+    };
+  }, [src, mkvAudioTracks, selectedMkvAudioTrackNumber]);
+
   // Keep the `ended`-handler refs in sync with the latest prop / setting values.
   useEffect(() => {
     autoplayNextRef.current = settings.autoplayNext;
@@ -404,8 +570,6 @@ export function DrivePlayer({
 
   // UI state ----------------------------------------------------------------
   const [hudOn, setHudOn] = useState(true);
-  const [showSubMenu, setShowSubMenu] = useState(false);
-  const [showSpeedMenu, setShowSpeedMenu] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [hoverTime, setHoverTime] = useState<number | null>(null);
   const [hoverX, setHoverX] = useState<number>(0);
@@ -413,6 +577,7 @@ export function DrivePlayer({
     "idle" | "loading" | "ready" | "unavailable"
   >("idle");
   const [scrubbing, setScrubbing] = useState(false);
+  const scrubbingRef = useRef(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Subscribe to <video> events --------------------------------------------
@@ -463,7 +628,20 @@ export function DrivePlayer({
           seek < dur - 2
         ) {
           initialSeekAppliedRef.current = true;
-          setResumePill({ positionSec: seek, status: "pending" });
+          if (silentResumeRef.current) {
+            // Dub-switch reload (or similar): apply the seek immediately
+            // instead of asking the user to confirm. They've already been
+            // watching this clip; no need to interrupt with a pill.
+            try {
+              v.currentTime = seek;
+            } catch {
+              // Buffer might not cover this offset yet — the browser will
+              // park `currentTime` at the closest seekable point and stream
+              // the rest in. Same recovery as the regular resume path.
+            }
+          } else {
+            setResumePill({ positionSec: seek, status: "pending" });
+          }
         }
         callbacksRef.current.onLoadedMetadata?.(v.duration);
       },
@@ -634,8 +812,6 @@ export function DrivePlayer({
     if (!playing) return; // never auto-hide while paused
     idleTimerRef.current = window.setTimeout(() => {
       setHudOn(false);
-      setShowSubMenu(false);
-      setShowSpeedMenu(false);
       setShowSettings(false);
     }, 2600);
   }, [playing]);
@@ -660,7 +836,7 @@ export function DrivePlayer({
       // Don't hijack the wheel when the user is scrolling a menu or the
       // volume rail itself — those have their own scroll/click semantics.
       const t = e.target as HTMLElement | null;
-      if (t?.closest(".dc-vlc__menu, .dc-vlc__vol-rail")) return;
+      if (t?.closest(".dc-vlc__menu")) return;
       e.preventDefault();
       const step = e.deltaY < 0 ? +0.05 : -0.05;
       v.volume = Math.max(0, Math.min(1, v.volume + step));
@@ -882,11 +1058,18 @@ export function DrivePlayer({
     v.muted = !v.muted;
   }
 
+  function setVideoVolumePct(pct: number) {
+    const v = videoRef.current;
+    if (!v) return;
+    const nextPct = Math.max(0, Math.min(100, pct));
+    v.volume = nextPct / 100;
+    if (nextPct > 0) v.muted = false;
+  }
+
   function changeSpeed(s: number) {
     const v = videoRef.current;
     if (!v) return;
     v.playbackRate = s;
-    setShowSpeedMenu(false);
   }
 
   /**
@@ -914,7 +1097,50 @@ export function DrivePlayer({
 
   function pickSub(id: string | null) {
     setActiveSubId(id);
-    setShowSubMenu(false);
+  }
+
+  function pickAudioTrack(id: string) {
+    // MKV path: the SettingsPopover ids are `mkv-<TrackNumber>`. We do two
+    // things — flip the browser's audioTracks[i] (for native MKVs Chrome
+    // already plays all dubs; flipping `.enabled` switches without a reload),
+    // AND fire the parent callback so PlayerPage can re-mount the MSE
+    // controller if we're in MSE mode (where the browser only ever sees the
+    // one fMP4-baked track).
+    const mkvMatch = mkvAudioTracks?.find((t) => `mkv-${t.number}` === id);
+    if (mkvMatch && onPickAudioTrackNumber) {
+      const v = videoRef.current as
+        | (HTMLVideoElement & { audioTracks?: BrowserAudioTrackList })
+        | null;
+      const list = v?.audioTracks;
+      if (list && list.length > 0) {
+        // Best-effort native-side switch: flip by position. The MKV list and
+        // the browser list are usually in the same order (Matroska TrackEntry
+        // order = audioTracks index order in Chrome's parser), so this lets
+        // the dub change happen without re-muxing.
+        const idx = mkvAudioTracks!.indexOf(mkvMatch);
+        for (let i = 0; i < list.length; i++) {
+          list[i].enabled = i === idx;
+        }
+      }
+      setActiveAudioId(id);
+      onPickAudioTrackNumber(mkvMatch.number);
+      return;
+    }
+
+    // Legacy fallback: SettingsPopover ids are the browser-derived ids
+    // (used for non-MKV files, e.g. an `.mp4` with two embedded dubs).
+    const v = videoRef.current as
+      | (HTMLVideoElement & { audioTracks?: BrowserAudioTrackList })
+      | null;
+    const list = v?.audioTracks;
+    if (!list) return;
+    for (let i = 0; i < list.length; i++) {
+      const track = list[i];
+      track.enabled = audioTrackId(track, i) === id;
+    }
+    const next = snapshotAudioTracks(list);
+    setAudioTracks(next);
+    setActiveAudioId(next.find((track) => track.enabled)?.id ?? id);
   }
 
   function cycleSubTrack() {
@@ -959,16 +1185,27 @@ export function DrivePlayer({
     return Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
   }
 
-  function onTimelineMouseMove(e: React.MouseEvent) {
+  function updateTimelineFromClientX(clientX: number, seek: boolean) {
     if (!duration) return;
-    const pct = pctFromEvent(e);
+    const pct = pctFromEvent({ clientX });
     const nextTime = pct * duration;
     setHoverTime(nextTime);
     setHoverX(pct);
     queueTimelinePreview(nextTime);
+    if (seek) {
+      const v = videoRef.current;
+      setCurrentTime(nextTime);
+      if (v) v.currentTime = nextTime;
+    }
   }
 
-  function onTimelineMouseLeave() {
+  function onTimelinePointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!duration) return;
+    updateTimelineFromClientX(e.clientX, scrubbingRef.current);
+  }
+
+  function onTimelinePointerLeave() {
+    if (scrubbingRef.current) return;
     setHoverTime(null);
     setPreviewStatus("idle");
     if (previewTimerRef.current) {
@@ -977,28 +1214,22 @@ export function DrivePlayer({
     }
   }
 
-  function onTimelineMouseDown(e: React.MouseEvent) {
+  function onTimelinePointerDown(e: React.PointerEvent<HTMLDivElement>) {
     if (!duration) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    scrubbingRef.current = true;
     setScrubbing(true);
-    const v = videoRef.current;
-    const t0 = pctFromEvent(e) * duration;
-    if (v) v.currentTime = t0;
+    updateTimelineFromClientX(e.clientX, true);
+  }
 
-    function onMove(ev: MouseEvent) {
-      const pct = pctFromEvent(ev);
-      const nextTime = pct * duration;
-      setHoverTime(nextTime);
-      setHoverX(pct);
-      queueTimelinePreview(nextTime);
-      if (v) v.currentTime = pct * duration;
+  function finishTimelinePointer(e: React.PointerEvent<HTMLDivElement>) {
+    if (!scrubbingRef.current) return;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
     }
-    function onUp() {
-      setScrubbing(false);
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    }
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    scrubbingRef.current = false;
+    setScrubbing(false);
   }
 
   function queueTimelinePreview(time: number) {
@@ -1172,6 +1403,18 @@ export function DrivePlayer({
         />
       )}
 
+      {/* Blu-ray PGS bitmaps render through a dedicated canvas overlay. The
+          CSS SubtitleOverlay above still mounts but stays empty (cues is the
+          empty array because PGS tracks don't populate `cues`), so we can
+          layer them without coordination. */}
+      {activeTrack?.pgsCompositions && activeTrack.pgsCompositions.length > 0 && (
+        <PgsOverlay
+          videoRef={videoRef}
+          compositions={activeTrack.pgsCompositions}
+          delay={subDelay}
+        />
+      )}
+
       {/* Four corner brackets */}
       <div className="dc-vlc__corners" aria-hidden>
         <span className="tl" />
@@ -1318,12 +1561,18 @@ export function DrivePlayer({
 
       {/* Bottom HUD */}
       <div className="dc-vlc__hud">
+        <div className="dc-vlc__timeline-head" aria-live="off">
+          <span>{formatTimecode(currentTime)}</span>
+          <span>{formatTimecode(duration)}</span>
+        </div>
         <div
           ref={timelineRef}
           className={cn("dc-vlc__timeline", { "is-scrubbing": scrubbing })}
-          onMouseMove={onTimelineMouseMove}
-          onMouseLeave={onTimelineMouseLeave}
-          onMouseDown={onTimelineMouseDown}
+          onPointerMove={onTimelinePointerMove}
+          onPointerLeave={onTimelinePointerLeave}
+          onPointerDown={onTimelinePointerDown}
+          onPointerUp={finishTimelinePointer}
+          onPointerCancel={finishTimelinePointer}
         >
           <div className="dc-vlc__timeline-track">
             <div
@@ -1361,19 +1610,20 @@ export function DrivePlayer({
 
         <div className="dc-vlc__bar">
           {/* Prev */}
-          {prevVideo && (
-            <button
-              type="button"
-              className="dc-vlc__btn"
-              onClick={onPrev}
-              title={`Previous: ${prevVideo.title} (P)`}
-              aria-label="Previous video"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden>
-                <path d="M6 6h2v12H6zm3.5 6 8.5 6V6z" />
-              </svg>
-            </button>
-          )}
+          <button
+            type="button"
+            className="dc-vlc__btn"
+            onClick={onPrev}
+            disabled={!prevVideo || !onPrev}
+            title={
+              prevVideo ? `Previous: ${prevVideo.title} (P)` : "No previous episode"
+            }
+            aria-label="Previous video"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden>
+              <path d="M6 6h2v12H6zm3.5 6 8.5 6V6z" />
+            </svg>
+          </button>
 
           <button
             type="button"
@@ -1394,269 +1644,20 @@ export function DrivePlayer({
           </button>
 
           {/* Next */}
-          {nextVideo && (
-            <button
-              type="button"
-              className="dc-vlc__btn"
-              onClick={onNext}
-              title={`Next: ${nextVideo.title} (N)`}
-              aria-label="Next video"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden>
-                <path d="M6 18l8.5-6L6 6v12zM16 6h2v12h-2z" />
-              </svg>
-            </button>
-          )}
-
-          <div className="dc-vlc__time" aria-live="off">
-            <span>{formatTimecode(currentTime)}</span>
-            <span className="sep">/</span>
-            <span className="total">{formatTimecode(duration)}</span>
-          </div>
-
-          <div className="dc-vlc__spacer" />
-
-          {/* Volume */}
-          <div className="dc-vlc__vol">
-            <button
-              type="button"
-              className="dc-vlc__btn"
-              onClick={toggleMute}
-              title={muted || volume === 0 ? "Unmute (M)" : "Mute (M)"}
-              aria-label="Toggle mute"
-            >
-              {muted || volume === 0 ? (
-                <svg viewBox="0 0 24 24" aria-hidden>
-                  <path d="M16.5 12A4.5 4.5 0 0 0 14 7.97v2.21l2.45 2.45c.03-.2.05-.41.05-.63zM19 12c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.95 8.95 0 0 0 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06a8.99 8.99 0 0 0 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" />
-                </svg>
-              ) : volume > 0.5 ? (
-                <svg viewBox="0 0 24 24" aria-hidden>
-                  <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05A4.5 4.5 0 0 0 16.5 12zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
-                </svg>
-              ) : (
-                <svg viewBox="0 0 24 24" aria-hidden>
-                  <path d="M7 9v6h4l5 5V4l-5 5H7z" />
-                </svg>
-              )}
-            </button>
-            <div className="dc-vlc__vol-rail" onMouseEnter={kickIdleTimer}>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                step={1}
-                value={muted ? 0 : volPct}
-                onChange={(e) => {
-                  const v = videoRef.current;
-                  if (!v) return;
-                  const pct = Number(e.target.value);
-                  v.volume = pct / 100;
-                  if (pct > 0) v.muted = false;
-                }}
-                className="dc-vlc__range"
-                style={{
-                  ["--pct" as never]: `${muted ? 0 : volPct}%`,
-                }}
-                aria-label="Volume"
-              />
-            </div>
-          </div>
-
-          {/* Subtitles */}
-          <div className="dc-vlc__menu-host">
-            <button
-              type="button"
-              className={cn("dc-vlc__btn", { "is-on": activeSubId !== null })}
-              onClick={() => {
-                setShowSpeedMenu(false);
-                setShowSubMenu((v) => !v);
-              }}
-              title="Subtitles (C)"
-              aria-label="Subtitles"
-              aria-expanded={showSubMenu}
-            >
-              <svg viewBox="0 0 24 24" aria-hidden>
-                <path d="M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM4 12h4v2H4v-2zm10 6H4v-2h10v2zm6 0h-4v-2h4v2zm0-4H10v-2h10v2z" />
-              </svg>
-            </button>
-            {showSubMenu && (
-              <div className="dc-vlc__menu" role="menu">
-                <div className="dc-vlc__menu-kana">字幕 · Subtitles</div>
-                <div
-                  className={cn(
-                    "dc-vlc__menu-status",
-                    `is-${subtitleStatus.tone}`,
-                  )}
-                >
-                  <span>{subtitleStatus.label}</span>
-                  <em>{subtitleStatus.detail}</em>
-                </div>
-                <button
-                  type="button"
-                  className={cn("dc-vlc__menu-item", {
-                    "is-active": activeSubId === null,
-                  })}
-                  onClick={() => pickSub(null)}
-                  role="menuitem"
-                >
-                  <span>Off</span>
-                  <span className="dc-vlc__menu-side">—</span>
-                </button>
-                {subtitleTracks.length === 0 && (
-                  <div
-                    className="dc-vlc__menu-item is-disabled"
-                    style={{ cursor: "default" }}
-                  >
-                    <span>No subtitles found</span>
-                  </div>
-                )}
-                {subtitleTracks.map((s) => (
-                  <button
-                    type="button"
-                    key={s.id}
-                    className={cn("dc-vlc__menu-item", {
-                      "is-active": activeSubId === s.id,
-                      "is-disabled": s.imageBased,
-                    })}
-                    onClick={() => {
-                      if (!s.imageBased) pickSub(s.id);
-                    }}
-                    role="menuitem"
-                    title={
-                      s.imageBased
-                        ? `${s.label} — image-based subtitles can't be rendered in-browser`
-                        : s.label
-                    }
-                    disabled={s.imageBased}
-                  >
-                    <span>{s.label}</span>
-                    <span className="dc-vlc__menu-side">
-                      {subtitleTrackBadge(s)}
-                    </span>
-                  </button>
-                ))}
-                {subtitleTracks.length > 0 && (
-                  <>
-                    <div className="dc-vlc__menu-divider" />
-                    <div className="dc-vlc__menu-row">
-                      <button
-                        type="button"
-                        className="dc-vlc__menu-mini"
-                        onClick={() => adjustSubDelay(-0.5)}
-                        title="Earlier (, )"
-                      >
-                        −0.5s
-                      </button>
-                      <span className="dc-vlc__menu-mid">
-                        {subDelay > 0
-                          ? `+${subDelay.toFixed(1)}s`
-                          : `${subDelay.toFixed(1)}s`}
-                      </span>
-                      <button
-                        type="button"
-                        className="dc-vlc__menu-mini"
-                        onClick={() => adjustSubDelay(0.5)}
-                        title="Later ( . )"
-                      >
-                        +0.5s
-                      </button>
-                    </div>
-                    <button
-                      type="button"
-                      className="dc-vlc__menu-item"
-                      onClick={() => {
-                        setShowSubMenu(false);
-                        setShowSettings(true);
-                      }}
-                      role="menuitem"
-                      title="Open subtitle settings"
-                    >
-                      <span>More settings…</span>
-                      <span className="dc-vlc__menu-side">
-                        {Math.round(settings.subtitleScale * 100)}%
-                      </span>
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Speed */}
-          <div className="dc-vlc__menu-host">
-            <button
-              type="button"
-              className={cn("dc-vlc__btn", "dc-vlc__btn--text", {
-                "is-on": speed !== 1,
-              })}
-              onClick={() => {
-                setShowSubMenu(false);
-                setShowSpeedMenu((v) => !v);
-              }}
-              title="Playback speed"
-              aria-label="Playback speed"
-              aria-expanded={showSpeedMenu}
-            >
-              {speed}x
-            </button>
-            {showSpeedMenu && (
-              <div className="dc-vlc__menu" role="menu">
-                <div className="dc-vlc__menu-kana">速度 · Speed</div>
-                {SPEEDS.map((s) => (
-                  <button
-                    type="button"
-                    key={s}
-                    className={cn("dc-vlc__menu-item", {
-                      "is-active": Math.abs(speed - s) < 0.01,
-                    })}
-                    onClick={() => changeSpeed(s)}
-                    role="menuitem"
-                  >
-                    <span>{s}x</span>
-                    <span className="dc-vlc__menu-side">
-                      {s === 1 ? "Normal" : s < 1 ? "Slow" : "Fast"}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Loop */}
           <button
             type="button"
-            className={cn("dc-vlc__btn", { "is-on": looping })}
-            onClick={toggleLoop}
-            title={looping ? "Loop on" : "Loop off"}
-            aria-label="Toggle loop"
+            className="dc-vlc__btn"
+            onClick={onNext}
+            disabled={!nextVideo || !onNext}
+            title={nextVideo ? `Next: ${nextVideo.title} (N)` : "No next episode"}
+            aria-label="Next video"
           >
             <svg viewBox="0 0 24 24" aria-hidden>
-              <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z" />
+              <path d="M6 18l8.5-6L6 6v12zM16 6h2v12h-2z" />
             </svg>
           </button>
 
-          {/* Settings (gear) */}
-          <div className="dc-vlc__menu-host">
-            <button
-              type="button"
-              className={cn("dc-vlc__btn", { "is-on": showSettings })}
-              onClick={() => {
-                setShowSubMenu(false);
-                setShowSpeedMenu(false);
-                setShowSettings((v) => !v);
-              }}
-              title="Player settings"
-              aria-label="Player settings"
-              aria-expanded={showSettings}
-            >
-              <svg viewBox="0 0 24 24" aria-hidden>
-                <path d="M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65a.5.5 0 0 0 .12-.64l-2-3.46a.5.5 0 0 0-.61-.22l-2.49 1a7.03 7.03 0 0 0-1.69-.98l-.38-2.65A.488.488 0 0 0 14 2h-4a.488.488 0 0 0-.49.42l-.38 2.65c-.61.25-1.17.58-1.69.98l-2.49-1a.5.5 0 0 0-.61.22l-2 3.46a.5.5 0 0 0 .12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65a.5.5 0 0 0-.12.64l2 3.46a.5.5 0 0 0 .61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.04.24.25.42.49.42h4c.24 0 .45-.18.49-.42l.38-2.65c.61-.25 1.17-.58 1.69-.98l2.49 1a.5.5 0 0 0 .61-.22l2-3.46a.5.5 0 0 0-.12-.64l-2.11-1.65zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z" />
-              </svg>
-            </button>
-            {showSettings && (
-              <SettingsPopover onClose={() => setShowSettings(false)} />
-            )}
-          </div>
+          <div className="dc-vlc__spacer" />
 
           {/* PiP */}
           {"pictureInPictureEnabled" in document && (
@@ -1690,6 +1691,44 @@ export function DrivePlayer({
               </svg>
             </button>
           )}
+
+          {/* Settings (gear) */}
+          <div className="dc-vlc__menu-host dc-vlc__menu-host--settings">
+            <button
+              type="button"
+              className={cn("dc-vlc__btn", { "is-on": showSettings })}
+              onClick={() => setShowSettings((v) => !v)}
+              title="Player settings"
+              aria-label="Player settings"
+              aria-expanded={showSettings}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden>
+                <path d="M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65a.5.5 0 0 0 .12-.64l-2-3.46a.5.5 0 0 0-.61-.22l-2.49 1a7.03 7.03 0 0 0-1.69-.98l-.38-2.65A.488.488 0 0 0 14 2h-4a.488.488 0 0 0-.49.42l-.38 2.65c-.61.25-1.17.58-1.69.98l-2.49-1a.5.5 0 0 0-.61.22l-2 3.46a.5.5 0 0 0 .12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65a.5.5 0 0 0-.12.64l2 3.46a.5.5 0 0 0 .61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.04.24.25.42.49.42h4c.24 0 .45-.18.49-.42l.38-2.65c.61-.25 1.17-.58 1.69-.98l2.49 1a.5.5 0 0 0 .61-.22l2-3.46a.5.5 0 0 0-.12-.64l-2.11-1.65zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z" />
+              </svg>
+            </button>
+            {showSettings && (
+              <SettingsPopover
+                onClose={() => setShowSettings(false)}
+                audioTracks={audioTracks}
+                activeAudioId={activeAudioId}
+                onPickAudio={pickAudioTrack}
+                subtitleTracks={subtitleTracks}
+                activeSubId={activeSubId}
+                onPickSubtitle={pickSub}
+                subDelay={subDelay}
+                onAdjustSubDelay={adjustSubDelay}
+                volumePct={volPct}
+                muted={muted || volume === 0}
+                onSetVolumePct={setVideoVolumePct}
+                onToggleMute={toggleMute}
+                speed={speed}
+                speeds={SPEEDS}
+                onChangeSpeed={changeSpeed}
+                looping={looping}
+                onToggleLoop={toggleLoop}
+              />
+            )}
+          </div>
 
           {/* Fullscreen */}
           <button
@@ -1766,12 +1805,30 @@ function describeSubtitleStatus({
       tone: "loading",
     };
   }
+  // PGS tracks that finished decoding ship `pgsCompositions` and flip
+  // `imageBased` to false in PlayerPage — they fall through to the regular
+  // status line below ("Embedded IMG · PGS · N cues"). The branch here only
+  // catches still-image-based tracks (VobSub, or PGS while extracting).
   if (activeTrack.imageBased || activeTrack.format === "image") {
+    const isPgs = activeTrack.codecId
+      ?.toUpperCase()
+      .replace(/\s/g, "")
+      .includes("PGS");
     return {
       label: "Image subtitles",
-      detail: "Unsupported",
-      title: "PGS/VobSub image subtitles are detected but not rendered yet.",
-      tone: "unsupported",
+      detail: isPgs ? "Decoding" : "Unsupported",
+      title: isPgs
+        ? "Blu-ray PGS bitmaps are still being extracted from the file."
+        : "VobSub (DVD) image subtitles are not decoded.",
+      tone: isPgs ? "loading" : "unsupported",
+    };
+  }
+  if (activeTrack.pgsCompositions && activeTrack.pgsCompositions.length > 0) {
+    return {
+      label: `Embedded ${subtitleTrackBadge(activeTrack)}`,
+      detail: `canvas · ${activeTrack.pgsCompositions.length} cues`,
+      title: `${activeTrack.label} renders Blu-ray bitmaps via canvas overlay.`,
+      tone: "ready",
     };
   }
 

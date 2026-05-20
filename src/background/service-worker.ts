@@ -18,6 +18,7 @@ import {
   APP_PAGE,
 } from "@shared/constants";
 import { type DcMessage, type DcResponse, ok, err } from "@shared/messages";
+import { assertDriveId } from "@shared/drive-id";
 import { extractFolderId } from "@shared/parse-folder-url";
 import type { RecentFolder } from "@shared/types";
 
@@ -27,10 +28,12 @@ import type { RecentFolder } from "@shared/types";
 
 chrome.runtime.onInstalled.addListener(async () => {
   await setupContextMenus();
+  await ensureTokenRefreshAlarm();
 });
 
 chrome.runtime.onStartup.addListener(async () => {
   await setupContextMenus();
+  await ensureTokenRefreshAlarm();
 });
 
 // ---------------------------------------------------------------------------
@@ -132,6 +135,81 @@ let customTokenCache: { token: string; expiresAt: number } | null = null;
 // we want for a 1-hour OAuth token.
 const TOKEN_SESSION_KEY = "dc.oauthAccessToken";
 
+// Persisted timestamp of the most recent *interactive* consent. Google's
+// implicit OAuth flow caps access tokens at 1h and gives no refresh token, so
+// to deliver the "24h session" we silent-refresh via prompt=none every ~50min
+// and force a fresh interactive consent once this timestamp is older than 24h.
+// Persisted in chrome.storage.local so it survives SW restarts and browser
+// quits — the ceiling is a wall-clock window, not a session window.
+const INTERACTIVE_AT_KEY = "dc.oauthInteractiveAt";
+const INTERACTIVE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+
+// Periodic alarm name for the proactive silent refresh.
+const TOKEN_REFRESH_ALARM = "dc.oauth.refresh";
+
+// Distinct error code the frontend recognises so it can surface "your 24h
+// session expired, sign in again" instead of a generic OAuth failure.
+const NEEDS_RECONSENT = "needs-reconsent";
+
+async function readInteractiveAt(): Promise<number | null> {
+  try {
+    const obj = await chrome.storage.local.get(INTERACTIVE_AT_KEY);
+    const v = obj[INTERACTIVE_AT_KEY];
+    return typeof v === "number" ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeInteractiveAt(ts: number | null): Promise<void> {
+  try {
+    if (ts == null) await chrome.storage.local.remove(INTERACTIVE_AT_KEY);
+    else await chrome.storage.local.set({ [INTERACTIVE_AT_KEY]: ts });
+  } catch {
+    /* ignore */
+  }
+}
+
+async function ensureTokenRefreshAlarm(): Promise<void> {
+  try {
+    const existing = await chrome.alarms.get(TOKEN_REFRESH_ALARM);
+    if (existing) return;
+    // 50min cadence: token TTL is 60min minus our 5min safety margin, so a
+    // 50min alarm always lands inside the valid window of the current token.
+    await chrome.alarms.create(TOKEN_REFRESH_ALARM, {
+      delayInMinutes: 50,
+      periodInMinutes: 50,
+    });
+  } catch {
+    /* alarms may not be available in some contexts; silent refresh is best-effort */
+  }
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== TOKEN_REFRESH_ALARM) return;
+  void silentRefreshIfEligible();
+});
+
+async function silentRefreshIfEligible(): Promise<void> {
+  // Only refresh when:
+  //   - the user has an OAuth Client ID configured (else nothing to refresh),
+  //   - they're within the 24h interactive window,
+  //   - the previous token cache exists (no point keeping one warm if they
+  //     never signed in this device).
+  try {
+    const obj = await chrome.storage.local.get(STORAGE_KEYS.OAUTH_CLIENT_ID);
+    if (!obj[STORAGE_KEYS.OAUTH_CLIENT_ID]) return;
+    const interactiveAt = await readInteractiveAt();
+    if (interactiveAt == null) return;
+    if (Date.now() - interactiveAt >= INTERACTIVE_TTL_MS) return;
+    // Fire-and-forget: any failure is fine, the next Drive call will fall
+    // through to the on-demand silent fetch path inside getAuthToken.
+    await getAuthToken(false).catch(() => null);
+  } catch {
+    /* ignore */
+  }
+}
+
 async function readPersistedToken(): Promise<{ token: string; expiresAt: number } | null> {
   try {
     const obj = await chrome.storage.session.get(TOKEN_SESSION_KEY);
@@ -169,6 +247,23 @@ async function getAuthToken(interactive: boolean): Promise<string> {
     throw new Error(
       "OAuth not configured. Open User Center → API Settings and paste your Google Cloud OAuth Client ID.",
     );
+  }
+
+  // 24h interactive ceiling. Once the wall-clock window since the last
+  // interactive consent is up, silent (prompt=none) refresh is no longer
+  // honoured — we force the user back through the consent screen even if
+  // their Google session is still warm. This caps the blast radius of a
+  // stolen device / left-open browser; the UI catches NEEDS_RECONSENT and
+  // shows the "sign in again" CTA in the login screen.
+  const interactiveAt = await readInteractiveAt();
+  const past24h =
+    interactiveAt == null || Date.now() - interactiveAt >= INTERACTIVE_TTL_MS;
+  if (!interactive && past24h) {
+    // Drop the cached token: serving a stale one would let the user keep
+    // calling Drive past the ceiling. Next interactive call mints a new one.
+    customTokenCache = null;
+    await writePersistedToken(null);
+    throw new Error(NEEDS_RECONSENT);
   }
 
   // Try in-memory first, then session storage. This is the hot path on
@@ -227,6 +322,13 @@ async function getAuthToken(interactive: boolean): Promise<string> {
           customTokenCache = entry;
           void writePersistedToken(entry);
           void setDnrAuthRule(token);
+          // Interactive consent (re)starts the 24h wall-clock window. Silent
+          // refreshes don't touch this — they just rotate the underlying 1h
+          // access token until the 24h ceiling fires.
+          if (interactive) {
+            void writeInteractiveAt(Date.now());
+            void ensureTokenRefreshAlarm();
+          }
           resolve(token);
         } else {
           reject(new Error("No access_token found in redirect URI."));
@@ -241,6 +343,7 @@ async function getAuthToken(interactive: boolean): Promise<string> {
 async function revokeAllTokens(): Promise<void> {
   customTokenCache = null;
   await writePersistedToken(null);
+  await writeInteractiveAt(null);
   await clearDnrAuthRule();
   // Best-effort: clear cached tokens. Real revocation requires hitting Google's
   // revoke endpoint with the access token; we do that opportunistically.
@@ -336,12 +439,13 @@ async function openAppForFolder(
   folderId: string,
   folderName?: string,
 ): Promise<void> {
+  const safeFolderId = assertDriveId(folderId, "Drive folder ID");
   await rememberRecentFolder({
-    id: folderId,
+    id: safeFolderId,
     name: folderName ?? "Untitled folder",
     lastOpenedAt: Date.now(),
   });
-  const hash = `/library/${encodeURIComponent(folderId)}`;
+  const hash = `/library/${encodeURIComponent(safeFolderId)}`;
   await openAppPage(hash);
 }
 

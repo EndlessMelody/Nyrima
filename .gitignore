@@ -49,3 +49,12 @@ coverage
 # Misc
 *.local
 .cache
+
+# Local dev scratch — large MKV fixtures, debug logs, MCP & per-machine config.
+# Kept on disk for local probing, never committed.
+example/
+.playwright-mcp/
+.mcp.json
+NOTES_*.txt
+NOTES_*.md
+scripts/probe-output/

@@ -10,7 +10,17 @@
       "Bash(powershell -Command \"\\(Get-ChildItem -Recurse -File -Path src | Measure-Object -Property Length -Sum\\).Sum / 1KB\")",
       "Bash(Select-Object -First 5)",
       "Bash(npx tsc *)",
-      "Bash(echo \"exit=$?\")"
+      "Bash(echo \"exit=$?\")",
+      "Bash(npx vitest *)",
+      "Bash(npx vite *)",
+      "Bash(echo \"EXITCODE=$?\")",
+      "Bash(npm test *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://127.0.0.1:9222/json/version)",
+      "Bash(curl -s http://127.0.0.1:9222/json/version)",
+      "mcp__playwright__browser_tabs",
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_snapshot"
     ]
-  }
+  },
+  "enableAllProjectMcpServers": true
 }

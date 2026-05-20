@@ -16,6 +16,38 @@
  * imports.
  */
 
+/* Subtitle font faces — bundled locally so the picker presets render the
+   same on every OS instead of leaning on whatever the system happens to
+   ship. Each entry maps 1:1 to a preset key in subtitle-font.ts.
+
+   - Chinacat Teddybear → "chinacat-teddybear" preset (the brush voice)
+   - Asap (variable wdth+wght) → "asap" preset (the clean modern body)
+   - Cascadia Mono → "cascadia" preset (the dialogue / mono voice) */
+@font-face {
+  font-family: "Chinacat Teddybear";
+  src: url("../assets/fonts/chinacat-teddybear.ttf") format("truetype");
+  font-weight: 400 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Asap";
+  src: url("../assets/fonts/asap-variable.ttf") format("truetype-variations");
+  font-weight: 100 900;
+  font-stretch: 75% 125%;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Cascadia Mono";
+  src: url("../assets/fonts/cascadia-mono.ttf") format("truetype");
+  font-weight: 200 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   /* Display + body: Geist Sans, tabular numerals on by default */
   --dc-font-display:
@@ -45,18 +77,18 @@
     "M PLUS Rounded 1c", "Zen Kaku Gothic New", "Hiragino Kaku Gothic ProN",
     "Yu Gothic", system-ui, sans-serif;
 
-  /* Subtitle: anime-fansub voice — system Comic Sans MS where present
-     (Windows/macOS, full Vietnamese coverage), Comic Neue (bundled) as the
-     cross-OS clone. "Itim" is included with a Vietnamese-only unicode-range
-     subset (see main.tsx) so accented Vietnamese characters stay in a brush
-     face instead of falling through to the OS default sans. Italic leakage
-     into Latin can't happen because Itim's @font-face only declares the
-     Vietnamese unicode range. `font-synthesis: style weight` in
+  /* Subtitle: anime-fansub voice — Chinacat Teddybear is the brush face
+     that owns the "Anime Brush" preset; it's bundled locally so the look
+     is identical on every OS. Comic Sans MS / Comic Neue stay in the stack
+     as fallbacks for any character Chinacat doesn't cover, and "Itim" sits
+     last with a Vietnamese-only unicode-range subset (see main.tsx) so
+     accented Vietnamese characters stay in a brush face instead of falling
+     through to the OS default sans. `font-synthesis: style weight` in
      SubtitleOverlay.scss continues to synthesize italics on Comic Sans /
      Comic Neue for the Latin path. */
   --dc-font-subtitle:
-    "Comic Sans MS", "Chalkboard SE", "Marker Felt", "Comic Neue", "Itim",
-    var(--dc-font-body);
+    "Chinacat Teddybear", "Comic Sans MS", "Chalkboard SE", "Marker Felt",
+    "Comic Neue", "Itim", var(--dc-font-body);
 }
 
 /* Hand the resolved families to Once UI's typography tokens so every */

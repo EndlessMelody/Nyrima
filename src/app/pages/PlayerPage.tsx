@@ -42,9 +42,18 @@ import {
 import { SetupAccessDialog } from "../components/SetupAccessDialog";
 import { DrivePlayer, type SubtitleTrack } from "../components/DrivePlayer";
 import { DriveStatusBanner } from "../components/DriveStatusBanner";
-import { extractMkvSubtitles } from "../services/mkv-subtitles";
-import { forceCenterDialogueInAss } from "../services/subtitles";
+import {
+  extractMkvSubtitles,
+  type MkvAudioTrack,
+} from "../services/mkv-subtitles";
+import { stripAssFontReferences } from "../services/subtitles";
 import { MkvMseController } from "../services/mkv-remux/mse-controller";
+import { parseMkvMediaInfo } from "../services/mkv-remux/demuxer";
+import {
+  buildVideoMimeType,
+  buildAudioMimeType,
+} from "../services/mkv-remux/mp4-generator";
+import { ExternalMkvAudioRenderer } from "../services/mkv-remux/external-audio-renderer";
 import {
   normalizeMovieTitle,
   parseTitle,
@@ -80,6 +89,7 @@ import {
   WATCHED_THRESHOLD_PCT,
 } from "@shared/constants";
 import { driveFileUrl } from "@shared/drive-urls";
+import { isDriveId } from "@shared/drive-id";
 import type { DriveFile } from "@shared/types";
 import "./PlayerPage.scss";
 
@@ -100,10 +110,36 @@ const POSITION_SAVE_MS = 4000;
 const ACTIVE_STRATEGY: PlaybackStrategy = "force-native";
 
 export function PlayerPage() {
-  const { folderId = "", fileId = "" } = useParams();
+  const params = useParams();
+  const rawFolderId = params.folderId ?? "";
+  const rawFileId = params.fileId ?? "";
+  const folderId = isDriveId(rawFolderId) ? rawFolderId : "";
+  const fileId = isDriveId(rawFileId) ? rawFileId : "";
+  const invalidRouteIds =
+    !rawFolderId || !rawFileId || !folderId || !fileId;
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const restartRequested = searchParams.get("restart") === "1";
+  /**
+   * `?audio=<TrackNumber>` opts the player into a specific MKV audio track
+   * from the start. Set by `handlePickAudioTrackNumber` below — picking a dub
+   * navigates to the same path with this param updated, which forces a clean
+   * remount of the player with the new track baked into the MSE init segment
+   * (or, for native MKV, seeded as the preferred track). This is the
+   * "reload to apply the new audio" model: simpler and more reliable than
+   * trying to mutate playback mid-stream because Chrome's `audioTracks` API
+   * for Matroska is unreliable across builds.
+   */
+  const audioParam = searchParams.get("audio");
+  const requestedAudioTrackNumber =
+    audioParam != null && /^\d+$/.test(audioParam) ? Number(audioParam) : null;
+  /**
+   * Presence of `?audio=` means we got here from a dub-switch reload — the
+   * user was already watching this clip moments ago and expects to continue
+   * at the same spot without the "Resume?" pill counting down to a seek
+   * 3.5 s after metadata loads. Forwarded to DrivePlayer as `silentResume`.
+   */
+  const isDubSwitchReload = requestedAudioTrackNumber != null;
 
   const [file, setFile] = useState<DriveFile | null>(null);
   const [folderName, setFolderName] = useState<string>("");
@@ -111,6 +147,16 @@ export function PlayerPage() {
    *  "Yahari Ore.../Kan"). Empty string otherwise. */
   const [showFolderName, setShowFolderName] = useState<string>("");
   const [subtitleTracks, setSubtitleTracks] = useState<SubtitleTrack[]>([]);
+  const [mkvAudioTracks, setMkvAudioTracks] = useState<MkvAudioTrack[]>([]);
+  /**
+   * MKV TrackNumber of the audio currently driving the player. Seeded from
+   * the `?audio=` URL param on mount, then snapped to the first compatible
+   * track once the header parse confirms what's actually in the file. `null`
+   * means "no MKV audio info yet" — the default for a fresh-open with no
+   * `?audio=` param before extractMkvSubtitles returns.
+   */
+  const [selectedMkvAudioTrackNumber, setSelectedMkvAudioTrackNumber] =
+    useState<number | null>(requestedAudioTrackNumber);
   const [folderVideos, setFolderVideos] = useState<DriveFile[]>([]);
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
   const [bufferingBlob, setBufferingBlob] = useState(false);
@@ -155,6 +201,7 @@ export function PlayerPage() {
      *  boundary instead of starting mid-payload. */
     headerParsedTo: number;
   } | null>(null);
+  const mkvSubBackgroundActiveRef = useRef(false);
   // Native-attempt watchdog. Armed when we start a native MKV stream; cleared
   // once `canplay` fires or fallback is triggered.
   const nativeWatchdogRef = useRef<number | null>(null);
@@ -186,6 +233,21 @@ export function PlayerPage() {
 
   // Load video metadata + decide a streaming URL + load subtitles.
   useEffect(() => {
+    if (!folderId || !fileId) {
+      setError(null);
+      setErrorReason(null);
+      setUnsupported(false);
+      setFile(null);
+      setStreamUrl(null);
+      setSubtitleTracks([]);
+      setMkvAudioTracks([]);
+      setFolderVideos([]);
+      setFolderName("");
+      setShowFolderName("");
+      setInitialSeek(0);
+      return;
+    }
+
     let cancelled = false;
     // One AbortController per route so navigating away cancels in-flight
     // Drive calls (metadata, subtitle text, range probes) before they
@@ -203,6 +265,8 @@ export function PlayerPage() {
     setBufferingBlob(false);
     setStreamUrl(null);
     setSubtitleTracks([]);
+    setMkvAudioTracks([]);
+    setSelectedMkvAudioTrackNumber(null);
     setFolderVideos([]);
     setFolderName("");
     setShowFolderName("");
@@ -223,6 +287,7 @@ export function PlayerPage() {
       mkvSubStreamAbortRef.current.abort();
       mkvSubStreamAbortRef.current = null;
     }
+    mkvSubBackgroundActiveRef.current = false;
     if (nativeWatchdogRef.current !== null) {
       window.clearTimeout(nativeWatchdogRef.current);
       nativeWatchdogRef.current = null;
@@ -348,8 +413,11 @@ export function PlayerPage() {
           // This is fast — just a 4 MB header fetch + parse, no streaming.
           const ac = new AbortController();
           mkvExtractAbortRef.current = ac;
+          let extracted: Awaited<ReturnType<typeof extractMkvSubtitles>> | null =
+            null;
+          let probedAudioTracks: MkvAudioTrack[] = [];
           try {
-            const extracted = await extractMkvSubtitles(fileId, {
+            extracted = await extractMkvSubtitles(fileId, {
               signal: ac.signal,
               onHeader: ({ buf, fileSize: mkvFileSize }) => {
                 if (!cancelled) {
@@ -359,30 +427,34 @@ export function PlayerPage() {
               onProgress: (mkvSubs) => {
                 if (cancelled) return;
                 const mkvTracks: SubtitleTrack[] = mkvSubs.map((s) => {
-                  // Route embedded ASS/SSA through libass (JASSUB) only once
-                  // the extractor flips `assSourceComplete` — i.e. all clusters
-                  // have been fed and the script is finalized. While streaming,
-                  // `assSource` rebuilds on every cluster; handing JASSUB the
-                  // WIP script would cause its setTrack effect to refire
-                  // constantly (perceptible blink) and would also leave libass
-                  // blank if the user seeks past the streamed window. The CSS
-                  // overlay handles the incremental period; libass takes over
-                  // in one clean transition once the script is complete.
-                  const useJassub =
-                    !!s.assSource &&
-                    !s.imageBased &&
-                    s.assSourceComplete === true;
+                  // Hand the (possibly partial) ASS script to libass as soon
+                  // as the extractor produces it. The script grows as clusters
+                  // arrive; JassubOverlay debounces setTrack so the worker
+                  // isn't churned per chunk. This is what lets fansub
+                  // typesetting (top-center romaji, bottom-right translation,
+                  // colored signs, italics) appear from the first cue rather
+                  // than only after the whole MKV has finished streaming.
+                  const useJassub = !!s.assSource && !s.imageBased;
+                  // PGS tracks no longer block the picker — surface them as
+                  // selectable once finalize() has produced compositions.
+                  // While extraction is in progress, the track shows as
+                  // image-based with zero cues, same as before.
+                  const pgsReady =
+                    !!s.pgsCompositions &&
+                    s.pgsCompositions.length > 0 &&
+                    s.pgsCompositionsComplete === true;
                   return {
                     id: s.id,
                     lang: s.lang,
                     label: s.label,
                     cues: s.cues.slice(),
-                    imageBased: s.imageBased,
+                    imageBased: s.imageBased && !pgsReady,
                     source: "embedded",
                     format: subtitleFormatFromMkvCodec(s.codecId, s.imageBased),
                     codecId: s.codecId,
                     assSource: useJassub ? s.assSource : undefined,
                     assRenderer: useJassub ? "jassub" : undefined,
+                    pgsCompositions: pgsReady ? s.pgsCompositions : undefined,
                   };
                 });
                 setSubtitleTracks((prev) => [
@@ -391,6 +463,47 @@ export function PlayerPage() {
                 ]);
               },
             });
+            if (!cancelled) {
+              // Probe each audio track's codec combo against MSE *before*
+              // surfacing it in the picker. The check matters for files
+              // like HEVC + AC-3 where each codec individually works in
+              // MSE but Chrome refuses the muxed combination — without
+              // the probe, the user would click the AC-3 row, the page
+              // would reload into a forced-MSE attempt, the controller
+              // would fail at `isTypeSupported`, and we'd have to bounce
+              // them back via the codec-error recovery path (visible
+              // double-reload + scary console errors).
+              //
+              // The muxer-default track is assumed supported because
+              // native playback is already proving it works; we only
+              // probe non-default tracks (the ones that would force MSE).
+              const probedTracks = await probeMkvAudioTrackSupport(
+                mkvHeaderRef.current?.buf,
+                extracted.audioTracks,
+              );
+              probedAudioTracks = probedTracks;
+              setMkvAudioTracks(probedTracks);
+              // Pick the active highlight so it matches what will *actually*
+              // play. The URL-requested track wins when it exists AND we can
+              // honor it (either it's MSE-remuxable + browser-supported so
+              // we'll force MSE below, or it happens to be the muxer-default
+              // that native picks too). Otherwise fall back to the first
+              // audio track.
+              const requested = requestedAudioTrackNumber;
+              const requestedTrack =
+                requested != null
+                  ? probedTracks.find((t) => t.number === requested)
+                  : undefined;
+              const willHonor =
+                !!requestedTrack &&
+                ((requestedTrack.remuxable &&
+                  requestedTrack.browserSupported !== false) ||
+                  requestedTrack.number === probedTracks[0]?.number);
+              const initial = willHonor
+                ? requestedTrack
+                : probedTracks[0];
+              if (initial) setSelectedMkvAudioTrackNumber(initial.number);
+            }
             if (extracted.feedChunk && extracted.finalize && !cancelled) {
               mkvSubFeederRef.current = {
                 feedChunk: extracted.feedChunk,
@@ -406,8 +519,99 @@ export function PlayerPage() {
           }
           if (cancelled) return;
 
-          if (decision.mode === "mse-remux") {
+          // If the URL pinned a specific audio track via `?audio=N` and the
+          // muxer's default isn't that track, force MSE mode for this load.
+          // Native MKV in Chrome always picks the first audio track and
+          // ignores any client-side preference, so the only reliable way
+          // to honor the user's dub pick is to bake it into the MSE init
+          // segment.
+          //
+          // We force MSE only when:
+          //   - the target track is in the MSE remuxer's codec whitelist, AND
+          //   - the browser's `isTypeSupported` accepts the muxed combo with
+          //     the file's video codec.
+          //
+          // Otherwise the MSE attempt would fail at the controller's
+          // pre-flight check, the user would see two scary console errors,
+          // and we'd have to recover via navigate(replace). The probe above
+          // catches these cases up front so the bad path never starts.
+          let effectiveMode = decision.mode;
+          if (
+            effectiveMode !== "mse-remux" &&
+            requestedAudioTrackNumber != null
+          ) {
+            const target = probedAudioTracks.find(
+              (t) => t.number === requestedAudioTrackNumber,
+            );
+            const isMuxerDefault =
+              probedAudioTracks[0]?.number === requestedAudioTrackNumber;
+            if (
+              target &&
+              target.remuxable &&
+              target.browserSupported !== false &&
+              !isMuxerDefault
+            ) {
+              debugLog(
+                `[playback] forcing MSE mode to honor ?audio=${requestedAudioTrackNumber} ` +
+                `(target=${target.label})`,
+              );
+              effectiveMode = "mse-remux";
+              setPlaybackMode("mse-remux");
+            } else if (target && !target.remuxable) {
+              // eslint-disable-next-line no-console
+              console.warn(
+                `[playback] ?audio=${requestedAudioTrackNumber} requests ` +
+                `"${target.label}" (codec ${target.codecId}) which isn't in ` +
+                `the MSE remuxer's whitelist; native playback will likely ` +
+                `pick the muxer-default track instead.`,
+              );
+            } else if (target && target.browserSupported === false) {
+              // eslint-disable-next-line no-console
+              console.warn(
+                `[playback] ?audio=${requestedAudioTrackNumber} requests ` +
+                `"${target.label}" but MediaSource.isTypeSupported rejected ` +
+                `the muxed combo with this file's video codec — staying ` +
+                `native on the muxer-default audio.`,
+              );
+            }
+          }
+
+          if (effectiveMode === "mse-remux") {
             setIsMkvMse(true);
+            // MSE can pause its byte stream whenever SourceBuffers are far
+            // ahead. That is good for quota, but it also delays subtitle cue
+            // extraction if we only piggyback on media bytes. Run the same
+            // low-priority sub-only scan used by native mode so ASS/JASSUB
+            // tracks become usable even while playback backpressure sleeps.
+            const header = mkvHeaderRef.current;
+            const feeder = mkvSubFeederRef.current;
+            debugLog(
+              `[subs] mse-mode setup: header=${header ? `${header.buf.length}/${header.fileSize}` : "null"} ` +
+              `feeder=${feeder ? "ready" : "null"}`,
+            );
+            if (header && feeder && header.buf.length < header.fileSize) {
+              if (feeder.headerParsedTo < header.buf.length) {
+                const trailing = header.buf.subarray(feeder.headerParsedTo);
+                debugLog(
+                  `[subs] priming feeder with header tail ` +
+                  `[${feeder.headerParsedTo}, ${header.buf.length}) = ${trailing.length} bytes`,
+                );
+                feeder.feedChunk(trailing);
+              }
+              const subAbort = new AbortController();
+              mkvSubStreamAbortRef.current = subAbort;
+              mkvSubBackgroundActiveRef.current = true;
+              debugLog(
+                `[subs] starting MSE background stream offset=${header.buf.length} eof=${header.fileSize}`,
+              );
+              void streamMkvSubsInBackground(
+                fileId,
+                header.buf.length,
+                feeder.feedChunk,
+                feeder.finalize,
+                subAbort.signal,
+              );
+            }
           } else {
             // Native attempt — needs an API-key-stamped URL because we can't
             // pass an Authorization header to <video src=…>. Without a key,
@@ -455,10 +659,11 @@ export function PlayerPage() {
                 }
                 const subAbort = new AbortController();
                 mkvSubStreamAbortRef.current = subAbort;
+                mkvSubBackgroundActiveRef.current = true;
                 debugLog(
                   `[subs] starting background stream offset=${header.buf.length} eof=${header.fileSize}`,
                 );
-                void streamMkvSubsForNative(
+                void streamMkvSubsInBackground(
                   fileId,
                   header.buf.length,
                   feeder.feedChunk,
@@ -528,13 +733,15 @@ export function PlayerPage() {
                 label: entry.label,
                 cues: entry.cues,
                 // Hand the raw ASS source to JASSUB. SRT/VTT keep using the
-                // plain-text overlay (which is faster and respects the
-                // user's typography settings). The script is rewritten to
-                // force dialogue → bottom-center; positioned signs stay put.
+                // plain-text overlay (which is faster and respects the user's
+                // typography settings). Font references are normalised to the
+                // bundled fallback so libass doesn't stall scanning the OS for
+                // a face it'll never find; everything else (alignment, color,
+                // positioning, karaoke, fades) is left exactly as authored.
                 source: "external",
                 format: subtitleFormatFromExtension(ext),
                 assSource: isAss
-                  ? forceCenterDialogueInAss(entry.text)
+                  ? stripAssFontReferences(entry.text)
                   : undefined,
                 assRenderer: isAss ? "jassub" : undefined,
               } as SubtitleTrack;
@@ -570,13 +777,20 @@ export function PlayerPage() {
       mkvExtractAbortRef.current?.abort();
       mkvSubStreamAbortRef.current?.abort();
       mkvSubStreamAbortRef.current = null;
+      mkvSubBackgroundActiveRef.current = false;
       mkvSubFeederRef.current = null;
       if (nativeWatchdogRef.current !== null) {
         window.clearTimeout(nativeWatchdogRef.current);
         nativeWatchdogRef.current = null;
       }
     };
-  }, [folderId, fileId, reportError, restartRequested]);
+  }, [
+    folderId,
+    fileId,
+    reportError,
+    restartRequested,
+    requestedAudioTrackNumber,
+  ]);
 
   // Clean up blob URLs and MSE controller on unmount.
   useEffect(
@@ -590,38 +804,245 @@ export function PlayerPage() {
     [],
   );
 
-  // MSE: when the player exposes its <video> ref, attach the controller.
-  const handleVideoRef = useCallback(
-    (videoEl: HTMLVideoElement | null) => {
-      if (!videoEl || !isMkvMse || !file) return;
-      // Don't re-create if already running for this file
-      if (mseControllerRef.current) return;
-
+  /**
+   * Builds and starts a fresh MseController bound to `videoEl`. The
+   * `audioTrackNumber` is seeded from the `?audio=` URL param at mount time,
+   * which is how a dub switch (full page reload via `handlePickAudioTrack
+   * Number`) ends up baking the chosen track into the fMP4 init segment.
+   *
+   * `resumeAtSeconds` lets a one-shot `canplay` handler land the playhead
+   * at a specific time — currently unused outside `handleVideoRef` (which
+   * passes `videoEl.currentTime`, 0 on a fresh mount).
+   */
+  const startMseController = useCallback(
+    (
+      videoEl: HTMLVideoElement,
+      audioTrackNumber: number | null,
+      resumeAtSeconds: number,
+    ) => {
       const ctrl = new MkvMseController();
       mseControllerRef.current = ctrl;
-
       ctrl.onReady = () => {
         // MSE controller has set videoEl.src directly via DOM.
         // Do NOT call setStreamUrl here — that would cause React to
         // re-render DrivePlayer with a new src prop, which re-triggers
         // video.src assignment and aborts the MediaSource connection.
-        // The loading state is already handled by isMkvMse.
       };
       ctrl.onError = (err) => {
         // eslint-disable-next-line no-console
         console.error("MKV MSE error:", err);
+        // Dub-switch reload that landed on an MSE codec combination the
+        // browser refuses (the common case: HEVC video + AC-3 audio, which
+        // Chrome plays each-of-individually for native MKV but refuses to
+        // bundle in one fMP4 init segment). Silently roll back to the
+        // muxer-default audio via a `navigate(replace)` — the user gets
+        // their original native playback back instead of being parked on
+        // an error screen with no obvious next action.
+        //
+        // `replace: true` so the failed `?audio=…` URL doesn't sit in
+        // history; the back button still takes the user to the library.
+        const codecMessage = err?.message ?? "";
+        const isCodecError = /codec|isn't supported/i.test(codecMessage);
+        if (requestedAudioTrackNumber != null && isCodecError) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[playback] MSE rejected the codec combo for audio=` +
+            `${requestedAudioTrackNumber}; reverting to muxer-default audio. ` +
+            `Reason: ${codecMessage}`,
+          );
+          const params = new URLSearchParams(searchParams);
+          params.delete("audio");
+          const qs = params.toString();
+          navigate(
+            `/play/${folderId}/${fileId}${qs ? `?${qs}` : ""}`,
+            { replace: true },
+          );
+          return;
+        }
         reportError(err);
       };
-      // Piggyback subtitle extraction on the same data stream.
       const feeder = mkvSubFeederRef.current;
-      if (feeder) {
+      if (feeder && !mkvSubBackgroundActiveRef.current) {
         ctrl.onRawChunk = (data) => feeder.feedChunk(data);
         ctrl.onStreamComplete = () => feeder.finalize();
       }
-
-      void ctrl.start(fileId, videoEl, mkvHeaderRef.current ?? undefined);
+      if (resumeAtSeconds > 0) {
+        const onCanPlay = () => {
+          try {
+            videoEl.currentTime = resumeAtSeconds;
+          } catch {
+            // best-effort — element may have unmounted
+          }
+          videoEl.removeEventListener("canplay", onCanPlay);
+        };
+        videoEl.addEventListener("canplay", onCanPlay);
+      }
+      const selectedTrack = audioTrackNumber != null
+        ? mkvAudioTracks.find((t) => t.number === audioTrackNumber)
+        : undefined;
+      const externalAudio =
+        selectedTrack?.externalAudioSupported === true &&
+        selectedTrack.mseAudioSupported !== true
+          ? "webcodecs"
+          : undefined;
+      if (selectedTrack) {
+        // eslint-disable-next-line no-console
+        console.info(
+          `[playback] audio path track=${selectedTrack.number} ` +
+          `mse=${selectedTrack.mseAudioSupported === true} ` +
+          `externalAudio=${selectedTrack.externalAudioSupported === true} ` +
+          `chosen=${externalAudio === "webcodecs" ? "external:webcodecs" : "mse"}`,
+        );
+      }
+      void ctrl.start(
+        fileId,
+        videoEl,
+        mkvHeaderRef.current ?? undefined,
+        audioTrackNumber != null || externalAudio
+          ? { audioTrackNumber: audioTrackNumber ?? undefined, externalAudio }
+          : undefined,
+      );
     },
-    [isMkvMse, file, fileId, reportError],
+    [
+      fileId,
+      folderId,
+      navigate,
+      mkvAudioTracks,
+      reportError,
+      requestedAudioTrackNumber,
+      searchParams,
+    ],
+  );
+
+  // MSE: when the player exposes its <video> ref, attach the controller.
+  //
+  // `videoEl.currentTime` does double duty as the resume-after-mount point.
+  // On the first mount it's 0 (DrivePlayer's loadedmetadata path applies
+  // `initialSeek` separately), but on a native→MSE handover triggered by a
+  // dub switch it carries the moment the user clicked, so playback continues
+  // there instead of restarting from 0.
+  const handleVideoRef = useCallback(
+    (videoEl: HTMLVideoElement | null) => {
+      if (!videoEl || !isMkvMse || !file) return;
+      if (mseControllerRef.current) return;
+      const resumeAt = videoEl.currentTime || 0;
+      startMseController(videoEl, selectedMkvAudioTrackNumber, resumeAt);
+    },
+    [isMkvMse, file, selectedMkvAudioTrackNumber, startMseController],
+  );
+
+  /**
+   * User picked a dub from the SettingsPopover.
+   *
+   * Fast path (MSE): the controller exposes `switchAudio(trackNumber)` which
+   * resets just the audio SourceBuffer (`changeType` + new init segment) and
+   * fires a parallel range-fetch to backfill audio between `currentTime`
+   * and the main stream's byte position. The video buffer is untouched, so
+   * the picture never blinks — VLC-style instant switch.
+   *
+   * Slow path (fallback): when the controller isn't available (codec combo
+   * couldn't be probed, controller errored out, etc.) we fall back to the
+   * old route-reload model — same `?audio=<n>` URL contract so the new
+   * load picks the right track from scratch.
+   *
+   * Tracks the muxer can't repack (DTS/TrueHD/non-whitelisted codecs) bail
+   * with a console warning regardless of path.
+   */
+  const handlePickAudioTrackNumber = useCallback(
+    (trackNumber: number) => {
+      if (trackNumber === selectedMkvAudioTrackNumber) return;
+      const target = mkvAudioTracks.find((t) => t.number === trackNumber);
+      if (!target) return;
+      if (!target.remuxable) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[playback] dub "${target.label}" uses codec "${target.codecId}" ` +
+          `which Nyrima's MSE remuxer can't repack; staying on the current ` +
+          `dub. (No reliable client-side way to switch into this codec.)`,
+        );
+        return;
+      }
+      if (target.browserSupported === false) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[playback] dub "${target.label}" can't be muxed with this ` +
+          `file's video codec in MSE; switch aborted to avoid a failed ` +
+          `swap.`,
+        );
+        return;
+      }
+
+      const ctrl = mseControllerRef.current;
+      if (ctrl && isMkvMse) {
+        // Fast path: in-place swap via the controller's split-buffer API.
+        // Optimistically update the UI selection so the picker pill flips
+        // immediately; if `switchAudio` rejects (rare — same-track, no
+        // header, codec unsupported), the controller logs and we revert.
+        const prev = selectedMkvAudioTrackNumber;
+        setSelectedMkvAudioTrackNumber(trackNumber);
+        // Keep the URL in sync so a refresh / back-forward restores the
+        // chosen dub. `replace: true` so we don't pollute history with a
+        // new entry per pick.
+        setSearchParams(
+          (params) => {
+            params.set("audio", String(trackNumber));
+            return params;
+          },
+          { replace: true },
+        );
+        debugLog(
+          `[playback] in-place dub switch ${prev} → ${trackNumber} ` +
+          `(target=${target.label})`,
+        );
+        void ctrl
+          .switchAudio(trackNumber)
+          .then((ok) => {
+            if (!ok) setSelectedMkvAudioTrackNumber(prev);
+          })
+          .catch((err: unknown) => {
+            setSelectedMkvAudioTrackNumber(prev);
+            // eslint-disable-next-line no-console
+            console.warn("[playback] in-place switchAudio failed:", err);
+          });
+        return;
+      }
+
+      // Slow path — controller unavailable (native MKV mode, or MSE not
+      // running yet). Preserve the snapshot + reload contract from before
+      // the split-buffer work landed.
+      const v = videoElRef.current;
+      if (v && file) {
+        void savePlaybackPosition({
+          fileId: file.id,
+          positionSeconds: v.currentTime,
+          durationSeconds: v.duration || 0,
+          updatedAt: Date.now(),
+          name: file.name,
+          folderId,
+          mimeType: file.mimeType,
+        });
+      }
+
+      const params = new URLSearchParams(searchParams);
+      params.set("audio", String(trackNumber));
+      params.delete("restart");
+      debugLog(
+        `[playback] dub switch ${selectedMkvAudioTrackNumber} → ${trackNumber}: ` +
+        `navigating with ?audio=${trackNumber} (target=${target.label})`,
+      );
+      navigate(`/play/${folderId}/${fileId}?${params.toString()}`);
+    },
+    [
+      selectedMkvAudioTrackNumber,
+      mkvAudioTracks,
+      isMkvMse,
+      file,
+      folderId,
+      fileId,
+      navigate,
+      searchParams,
+      setSearchParams,
+    ],
   );
 
   // Transition native MKV → MSE remux. Safe to call from both the watchdog
@@ -868,6 +1289,16 @@ export function PlayerPage() {
   }, [prevVideo, folderId, navigate]);
 
   // Early-out screens -------------------------------------------------------
+  if (invalidRouteIds) {
+    return (
+      <PlayerErrorCard
+        title="Invalid video link"
+        body="This Nyrima URL has a malformed Drive folder or file ID. Open the video from a valid Drive folder link."
+        onBack={() => navigate("/")}
+      />
+    );
+  }
+
   if (loading) {
     return (
       <div className="ny-player-loading">
@@ -1103,6 +1534,7 @@ export function PlayerPage() {
                 subtitleTracks={subtitleTracks}
                 title={displayTitle || file?.name}
                 initialSeek={initialSeek}
+                silentResume={isDubSwitchReload}
                 onMediaError={handleMediaError}
                 onTimeUpdate={handleTimeUpdate}
                 onCanPlay={handleCanPlay}
@@ -1116,6 +1548,9 @@ export function PlayerPage() {
                 prevVideo={prevAdapter}
                 onNext={handleNext}
                 onPrev={handlePrev}
+                mkvAudioTracks={mkvAudioTracks}
+                selectedMkvAudioTrackNumber={selectedMkvAudioTrackNumber}
+                onPickAudioTrackNumber={handlePickAudioTrackNumber}
                 theatreMode={theater}
                 onToggleTheatre={() => setTheater((t) => !t)}
                 ambientSourceUrl={currentPosterUrl}
@@ -1363,16 +1798,105 @@ function formatTimecodeForFilename(sec: number): string {
   return h > 0 ? `${h}h${mm}m${ss}s` : m > 0 ? `${m}m${ss}s` : `${s}s`;
 }
 
+/**
+ * Annotate each MKV audio track with `browserSupported`, derived from
+ * `MediaSource.isTypeSupported` against the muxed `video/mp4; codecs="…"`
+ * mime type the MSE remuxer would generate.
+ *
+ * Why probe at all: Chrome's MSE has odd allow-list combinations — it'll
+ * happily decode HEVC + AAC and AC-3 + AVC, but refuses HEVC + AC-3
+ * together. Without this probe the user clicks AC-3, the page reloads
+ * into a forced-MSE attempt, the controller's pre-flight check fails, and
+ * we have to bounce them back via the reactive recovery path with two
+ * scary console errors. The probe runs synchronously off the already-
+ * parsed header buffer (no extra network), so the cost is negligible.
+ *
+ * `headerBuf` may be undefined if the header fetch failed earlier; in
+ * that case we conservatively mark every non-default track as
+ * `browserSupported: false` so a click can't silently fail later.
+ *
+ * The muxer-default track always reports `true` — native playback is
+ * already proving it works, no probe needed.
+ */
+async function probeMkvAudioTrackSupport(
+  headerBuf: Uint8Array | undefined,
+  audioTracks: MkvAudioTrack[],
+): Promise<MkvAudioTrack[]> {
+  if (audioTracks.length === 0) return audioTracks;
+  const defaultNumber = audioTracks[0]?.number;
+  if (typeof MediaSource === "undefined") {
+    // SSR / non-browser env: don't disable anything.
+    return audioTracks.map((t) => ({ ...t, browserSupported: true }));
+  }
+  const probed = await Promise.all(audioTracks.map(async (t) => {
+    if (t.number === defaultNumber) {
+      if (!headerBuf) return { ...t, browserSupported: true };
+    }
+    if (!t.remuxable) {
+      // Can't even build an init segment — leave the flag undefined so the
+      // existing `remuxable: false` path handles the UI.
+      return { ...t };
+    }
+    if (!headerBuf) {
+      return { ...t, browserSupported: false };
+    }
+    try {
+      const info = parseMkvMediaInfo(headerBuf, {
+        audioTrackNumber: t.number,
+      });
+      if (!info.audio) return { ...t, browserSupported: false };
+      // Split-buffer probe: each SourceBuffer is independent, so we ask the
+      // browser per-track. The old single-buffer `buildMimeType` combined
+      // them and made HEVC+AC-3 look unswitchable even though Chrome accepts
+      // each codec on its own.
+      const videoMime = buildVideoMimeType(info.video);
+      const audioMime = buildAudioMimeType(info.audio);
+      const mseSupported =
+        MediaSource.isTypeSupported(videoMime) &&
+        MediaSource.isTypeSupported(audioMime);
+      const externalAudioSupported =
+        await ExternalMkvAudioRenderer.isSupported(info.audio);
+      const supported = mseSupported || externalAudioSupported;
+      // eslint-disable-next-line no-console
+      console.info(
+        `[playback] codec probe track=${t.number} video="${videoMime}" ` +
+        `audio="${audioMime}" mse=${mseSupported} ` +
+        `externalAudio=${externalAudioSupported} supported=${supported}`,
+      );
+      return {
+        ...t,
+        browserSupported: supported,
+        mseAudioSupported: mseSupported,
+        externalAudioSupported,
+      };
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[playback] codec probe failed for track=${t.number}:`,
+        e,
+      );
+      return { ...t, browserSupported: false };
+    }
+  }));
+
+  // The muxer-default is natively playable, but keep richer probe metadata
+  // (MSE-vs-external support) when the header was available.
+  return probed.map((t) =>
+    t.number === defaultNumber && t.browserSupported === false
+      ? { ...t, browserSupported: true }
+      : t,
+  );
+}
+
 // ---------------------------------------------------------------------------
-// Background subtitle stream for natively-played MKVs.
+// Background subtitle stream for MKVs.
 // ---------------------------------------------------------------------------
 
 /**
- * When an MKV plays natively, the browser's <video> element handles its own
- * byte fetching for playback and we never see those bytes in JS. To still
- * extract embedded subtitle cues for the full file we open a SEPARATE
- * streaming Range request from the end of the header to EOF, parsing each
- * chunk through the feeder.
+ * Native MKV playback hides media bytes inside the browser, and MSE playback
+ * can pause byte intake while SourceBuffers are already far ahead. In both
+ * modes, this low-priority Range stream lets embedded subtitle extraction keep
+ * moving independently of playback backpressure.
  *
  * Cost: a second Drive stream connection. We mitigate by:
  *   - routing through the queue at low priority (kind: "subtitle"), so
@@ -1381,7 +1905,7 @@ function formatTimecodeForFilename(sec: number): string {
  *   - the OAuth path means the bandwidth is billed against the user's own
  *     account, not the throttled public-key quota
  */
-async function streamMkvSubsForNative(
+async function streamMkvSubsInBackground(
   fileId: string,
   startOffset: number,
   feedChunk: (data: Uint8Array) => boolean,
@@ -1424,6 +1948,6 @@ async function streamMkvSubsForNative(
   } catch (e) {
     if (signal.aborted) return;
     // eslint-disable-next-line no-console
-    console.warn("[subs] native-mode background stream failed:", e);
+    console.warn("[subs] background subtitle stream failed:", e);
   }
 }
