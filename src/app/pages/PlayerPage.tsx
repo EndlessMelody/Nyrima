@@ -427,14 +427,15 @@ export function PlayerPage() {
               onProgress: (mkvSubs) => {
                 if (cancelled) return;
                 const mkvTracks: SubtitleTrack[] = mkvSubs.map((s) => {
-                  // Hand the (possibly partial) ASS script to libass as soon
-                  // as the extractor produces it. The script grows as clusters
-                  // arrive; JassubOverlay debounces setTrack so the worker
-                  // isn't churned per chunk. This is what lets fansub
-                  // typesetting (top-center romaji, bottom-right translation,
-                  // colored signs, italics) appear from the first cue rather
-                  // than only after the whole MKV has finished streaming.
-                  const useJassub = !!s.assSource && !s.imageBased;
+                  // Keep embedded ASS on the CSS cue overlay until extraction
+                  // finalizes. A still-growing ASS script forces JASSUB to
+                  // reparse/reload the track repeatedly, which makes active
+                  // lines blink during playback. Once complete, libass gets a
+                  // stable script and owns the full fansub typesetting.
+                  const useJassub =
+                    !!s.assSource &&
+                    s.assSourceComplete === true &&
+                    !s.imageBased;
                   // PGS tracks no longer block the picker — surface them as
                   // selectable once finalize() has produced compositions.
                   // While extraction is in progress, the track shows as
@@ -497,7 +498,8 @@ export function PlayerPage() {
               const willHonor =
                 !!requestedTrack &&
                 ((requestedTrack.remuxable &&
-                  requestedTrack.browserSupported !== false) ||
+                  (requestedTrack.browserSupported !== false ||
+                    isExperimentalAc3Track(requestedTrack))) ||
                   requestedTrack.number === probedTracks[0]?.number);
               const initial = willHonor
                 ? requestedTrack
@@ -526,10 +528,10 @@ export function PlayerPage() {
           // to honor the user's dub pick is to bake it into the MSE init
           // segment.
           //
-          // We force MSE only when:
+          // We force MSE when:
           //   - the target track is in the MSE remuxer's codec whitelist, AND
-          //   - the browser's `isTypeSupported` accepts the muxed combo with
-          //     the file's video codec.
+          //   - the browser's probe accepts it, OR the track is AC-3 and we
+          //     deliberately want to exercise the experimental real path.
           //
           // Otherwise the MSE attempt would fail at the controller's
           // pre-flight check, the user would see two scary console errors,
@@ -548,7 +550,8 @@ export function PlayerPage() {
             if (
               target &&
               target.remuxable &&
-              target.browserSupported !== false &&
+              (target.browserSupported !== false ||
+                isExperimentalAc3Track(target)) &&
               !isMuxerDefault
             ) {
               debugLog(
@@ -565,7 +568,11 @@ export function PlayerPage() {
                 `the MSE remuxer's whitelist; native playback will likely ` +
                 `pick the muxer-default track instead.`,
               );
-            } else if (target && target.browserSupported === false) {
+            } else if (
+              target &&
+              target.browserSupported === false &&
+              !isExperimentalAc3Track(target)
+            ) {
               // eslint-disable-next-line no-console
               console.warn(
                 `[playback] ?audio=${requestedAudioTrackNumber} requests ` +
@@ -844,6 +851,19 @@ export function PlayerPage() {
         const codecMessage = err?.message ?? "";
         const isCodecError = /codec|isn't supported/i.test(codecMessage);
         if (requestedAudioTrackNumber != null && isCodecError) {
+          const requestedTrack = mkvAudioTracks.find(
+            (t) => t.number === requestedAudioTrackNumber,
+          );
+          if (requestedTrack && isExperimentalAc3Track(requestedTrack)) {
+            // eslint-disable-next-line no-console
+            console.warn(
+              `[playback] experimental AC-3 path failed for audio=` +
+              `${requestedAudioTrackNumber}; keeping the selected route for ` +
+              `debugging instead of auto-reverting. Reason: ${codecMessage}`,
+            );
+            reportError(err);
+            return;
+          }
           // eslint-disable-next-line no-console
           console.warn(
             `[playback] MSE rejected the codec combo for audio=` +
@@ -880,18 +900,26 @@ export function PlayerPage() {
       const selectedTrack = audioTrackNumber != null
         ? mkvAudioTracks.find((t) => t.number === audioTrackNumber)
         : undefined;
+      const forceExperimentalExternalAc3 =
+        !!selectedTrack && isExperimentalAc3Track(selectedTrack);
       const externalAudio =
-        selectedTrack?.externalAudioSupported === true &&
+        (selectedTrack?.externalAudioSupported === true ||
+          forceExperimentalExternalAc3) &&
         selectedTrack.mseAudioSupported !== true
           ? "webcodecs"
           : undefined;
       if (selectedTrack) {
+        const externalLabel =
+          selectedTrack.codecId.toUpperCase().replace(/\s/g, "") === "A_AC3"
+            ? "external:wasm"
+            : "external:webcodecs";
         // eslint-disable-next-line no-console
         console.info(
           `[playback] audio path track=${selectedTrack.number} ` +
           `mse=${selectedTrack.mseAudioSupported === true} ` +
           `externalAudio=${selectedTrack.externalAudioSupported === true} ` +
-          `chosen=${externalAudio === "webcodecs" ? "external:webcodecs" : "mse"}`,
+          `chosen=${externalAudio === "webcodecs" ? externalLabel : "mse"}` +
+          `${forceExperimentalExternalAc3 ? " experimental=ac3" : ""}`,
         );
       }
       void ctrl.start(
@@ -963,17 +991,49 @@ export function PlayerPage() {
         return;
       }
       if (target.browserSupported === false) {
-        // eslint-disable-next-line no-console
-        console.warn(
-          `[playback] dub "${target.label}" can't be muxed with this ` +
-          `file's video codec in MSE; switch aborted to avoid a failed ` +
-          `swap.`,
-        );
-        return;
+        if (isExperimentalAc3Track(target)) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[playback] dub "${target.label}" failed the conservative ` +
+            `browser probe, but AC-3 testing is enabled; attempting the ` +
+            `real MSE/WebCodecs path.`,
+          );
+        } else {
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[playback] dub "${target.label}" can't be muxed with this ` +
+            `file's video codec in MSE; switch aborted to avoid a failed ` +
+            `swap.`,
+          );
+          return;
+        }
       }
 
       const ctrl = mseControllerRef.current;
       if (ctrl && isMkvMse) {
+        const restartWithTrack = () => {
+          const v = videoElRef.current;
+          if (v && file) {
+            void savePlaybackPosition({
+              fileId: file.id,
+              positionSeconds: v.currentTime,
+              durationSeconds: v.duration || 0,
+              updatedAt: Date.now(),
+              name: file.name,
+              folderId,
+              mimeType: file.mimeType,
+            });
+          }
+          const params = new URLSearchParams(searchParams);
+          params.set("audio", String(trackNumber));
+          params.delete("restart");
+          debugLog(
+            `[playback] in-place dub switch unavailable; restarting with ` +
+            `?audio=${trackNumber} (target=${target.label})`,
+          );
+          navigate(`/play/${folderId}/${fileId}?${params.toString()}`);
+        };
+
         // Fast path: in-place swap via the controller's split-buffer API.
         // Optimistically update the UI selection so the picker pill flips
         // immediately; if `switchAudio` rejects (rare — same-track, no
@@ -997,12 +1057,16 @@ export function PlayerPage() {
         void ctrl
           .switchAudio(trackNumber)
           .then((ok) => {
-            if (!ok) setSelectedMkvAudioTrackNumber(prev);
+            if (!ok) {
+              setSelectedMkvAudioTrackNumber(prev);
+              restartWithTrack();
+            }
           })
           .catch((err: unknown) => {
             setSelectedMkvAudioTrackNumber(prev);
             // eslint-disable-next-line no-console
             console.warn("[playback] in-place switchAudio failed:", err);
+            restartWithTrack();
           });
         return;
       }
@@ -1818,6 +1882,14 @@ function formatTimecodeForFilename(sec: number): string {
  * The muxer-default track always reports `true` — native playback is
  * already proving it works, no probe needed.
  */
+function isExperimentalAc3Track(track: MkvAudioTrack): boolean {
+  return (
+    track.remuxable &&
+    track.browserSupported === false &&
+    track.codecId.toUpperCase().replace(/\s/g, "") === "A_AC3"
+  );
+}
+
 async function probeMkvAudioTrackSupport(
   headerBuf: Uint8Array | undefined,
   audioTracks: MkvAudioTrack[],

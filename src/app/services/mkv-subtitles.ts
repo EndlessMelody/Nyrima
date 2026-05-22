@@ -397,7 +397,9 @@ export async function extractMkvSubtitles(
     finalized = true;
     leftover = null;
     for (const r of results) {
-      finalizeCues(r.cues);
+      if (!isAssCodec(r.codecId)) {
+        finalizeCues(r.cues);
+      }
       if (r.assSource) {
         r.assSourceComplete = true;
       }

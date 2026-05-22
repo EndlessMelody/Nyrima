@@ -10,11 +10,19 @@
  *   6. Repeat until EOF
  *
  * API call budget: 1 header Range request + 1 streaming fetch = 2 total.
- * (If a pre-fetched header is provided, only 1 streaming fetch.)
+ * (If a pre-fetched header is provided, only 1 streaming fetch.) AC-3 tracks
+ * may spend one tiny extra range when attachments push the first sync frame
+ * beyond the header preload, so the MP4 `dac3` box can be exact.
  */
 
-import { readElement, iterateElements, MKV_ID } from "../ebml";
-import { parseMkvMediaInfo, extractClusterSamples } from "./demuxer";
+import { readElement, MKV_ID } from "../ebml";
+import {
+  parseMkvMediaInfo,
+  extractClusterSamples,
+  extractClusterSamplesFromRange,
+  findFirstClusterOffset,
+  parseAc3SpecificBoxFields,
+} from "./demuxer";
 import {
   generateVideoInitSegment,
   generateAudioInitSegment,
@@ -34,6 +42,7 @@ import { ExternalMkvAudioRenderer } from "./external-audio-renderer";
 import type { MkvMediaInfo, AudioTrackInfo, DemuxedSample } from "./types";
 
 const HEADER_FETCH_SIZE = 4 * 1024 * 1024; // 4 MB — enough for header + several clusters
+const AC3_CONFIG_PROBE_SIZE = 1024 * 1024;
 const STREAM_PROCESS_SIZE = 2 * 1024 * 1024; // accumulate 2 MB from stream before processing
 /** Soft target for how often `processChunk` should pause to let the browser
  *  paint / dispatch input / drain SourceBuffer queues. Anything north of
@@ -45,12 +54,25 @@ const PROCESS_CHUNK_YIELD_MS = 16;
 // allocation ("Array buffer allocation failed"). When we cross the cap we
 // abort the controller cleanly rather than OOM the tab.
 const STREAM_MAX_ACCUMULATED = 64 * 1024 * 1024; // 64 MB
+/** Largest plausible non-Cluster top-level element. Real Cues/Attachments/Tags
+ *  rarely cross 10 MB; anything bigger between clusters means we landed in
+ *  mid-cluster content and `dataLengthRaw` decoded from garbage bytes. */
+const NON_CLUSTER_MAX_DECLARED_SIZE = 32 * 1024 * 1024;
 const BUFFER_AHEAD_SEC = 30;                // how far ahead to keep buffered
 const BUFFER_BEHIND_SEC = 60;               // how far behind to keep
 const BUFFER_RANGE_TOLERANCE_SEC = 0.25;    // bridge tiny fMP4 timestamp gaps
+const MAX_PENDING_APPEND_SEGMENTS = 16;
+const MAX_PENDING_APPEND_BYTES = 24 * 1024 * 1024;
+const APPEND_BACKPRESSURE_SLEEP_MS = 50;
 const THROTTLE_STALL_ESCAPE_MS = 2500;      // don't sleep if playback is stuck
 const AUDIO_TIMELINE_NORMALIZE_THRESHOLD_MS = 500;
+const INITIAL_TIMELINE_NORMALIZE_MAX_PLAYHEAD_MS = 2_000;
 const THROTTLE_BYPASS_LOG_INTERVAL_MS = 5000;
+const SEEK_AUDIO_CATCH_UP_AHEAD_MS = 20_000;
+const SEEK_AUDIO_CATCH_UP_MAX_BYTES = 32 * 1024 * 1024;
+const SEEK_MEDIA_CATCH_UP_AHEAD_MS = 30_000;
+const SEEK_MEDIA_CATCH_UP_MAX_BYTES = 48 * 1024 * 1024;
+const SEEK_VIDEO_BUFFER_WAIT_MS = 5_000;
 
 // Stop reading the stream entirely when the video has been paused this long.
 // We don't tear down the connection — we just stop pulling bytes. Drive will
@@ -58,6 +80,23 @@ const THROTTLE_BYPASS_LOG_INTERVAL_MS = 5000;
 // will reopen from the current offset. This keeps a paused tab from chewing
 // through quota for a video the user may never resume.
 const PAUSE_IDLE_MS = 60_000;
+const FORCED_PROCESS_MARGIN = 512 * 1024;
+const STREAM_FORCE_PROCESS_MAX = STREAM_MAX_ACCUMULATED + 4 * 1024 * 1024;
+const EBML_MAX_HEADER_BYTES = 12;
+const CLUSTER_ID_TAIL_BYTES = 3;
+
+interface PartialClusterState {
+  clusterFileOffset: number;
+  dataEndFileOffset: number | null;
+  clusterTimeMs: number;
+  indexed: boolean;
+}
+
+interface ClusterIndexEntry {
+  fileOffset: number;
+  ptsMs: number;
+  hasVideoKeyframe: boolean;
+}
 
 export class MkvMseController {
   private mediaSource: MediaSource | null = null;
@@ -80,6 +119,7 @@ export class MkvMseController {
   private fetchOffset = 0;
   private videoSeq = 0;
   private audioSeq = 0;
+  private videoNextDtsMs: number | null = null;
   private destroyed = false;
   private fetching = false;
   private videoAppendQueue: Uint8Array[] = [];
@@ -94,6 +134,10 @@ export class MkvMseController {
    *  call will see. Used to compute per-cluster file offsets so the cluster
    *  index can drive a precise audio catch-up after a switch. */
   private nextChunkFileOffset = 0;
+  /** Streaming state for a Cluster too large to hold until its declared end.
+   *  We parse complete child blocks as they arrive and keep only the
+   *  unfinished child tail between reads. */
+  private partialCluster: PartialClusterState | null = null;
   /**
    * Sparse cluster index built incrementally as the main stream parses
    * clusters. Each entry is `(fileOffset, ptsMs)` of a cluster start. When
@@ -101,7 +145,7 @@ export class MkvMseController {
    * cluster ≤ `currentTime` and start a parallel range-fetch from there
    * so the new audio fills the buffer back to where the main stream is.
    */
-  private clusterIndex: { fileOffset: number; ptsMs: number }[] = [];
+  private clusterIndex: ClusterIndexEntry[] = [];
   /** True while a switchAudio() is in flight; new appends to audioSB are
    *  prefixed with the freshly-emitted init segment. */
   private audioSwitching = false;
@@ -128,9 +172,22 @@ export class MkvMseController {
   private normalizeInitialAudioTimeline = true;
   private initialAudioTimelineAnchored = false;
   private initialAudioPtsOffsetMs = 0;
+  /**
+   * Companion to the audio-side normalization: when the very first video
+   * cluster's PTS is well past zero (which happens when a resync inside
+   * processChunk skipped past the early clusters, or when a muxer wrote a
+   * non-zero base timecode), we shift the VIDEO timeline back to zero too,
+   * and pin the audio shift to the same value so the two tracks stay in
+   * sync. Without this, the user-perceived `<video>` buffer starts at e.g.
+   * 13.4s while audio is shifted to 0 — currentTime sits at 0 with no
+   * video data, and playback buffers forever.
+   */
+  private initialVideoTimelineAnchored = false;
+  private initialVideoPtsOffsetMs = 0;
   /** Side range-fetch reader used by `switchAudio` to backfill audio between
    *  `currentTime` and the main stream's position. */
   private audioCatchUpAbort: AbortController | null = null;
+  private audioCatchUpSerial = 0;
   /** Optional VLC-style audio path: WebCodecs decodes FLAC outside MSE. */
   private externalAudio: ExternalMkvAudioRenderer | null = null;
   private videoElement: HTMLVideoElement | null = null;
@@ -138,6 +195,7 @@ export class MkvMseController {
   private streamReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   /** Aborts the active fetch when destroy() runs or the user navigates away. */
   private abortController: AbortController | null = null;
+  private streamRestartOffset: number | null = null;
   /** Set when document.visibilityState becomes "hidden" (or video paused too
    *  long); the streaming loop suspends until this clears. */
   private suspended = false;
@@ -146,6 +204,8 @@ export class MkvMseController {
   /** Cleanup functions registered while running; called from destroy(). */
   private cleanups: Array<() => void> = [];
   private lastThrottleBypassLogAt = 0;
+  private externalAudioSeekCatchUpTimer: number | null = null;
+  private mediaSeekCatchUpActive = false;
 
   /** Set the first time onError fires; suppresses subsequent error fan-out. */
   private errored = false;
@@ -210,10 +270,18 @@ export class MkvMseController {
     this.fileId = fileId;
     this.videoElement = videoElement;
     this.destroyed = false;
+    this.videoSeq = 0;
+    this.audioSeq = 0;
+    this.videoNextDtsMs = null;
     this.normalizeInitialAudioTimeline = true;
     this.initialAudioTimelineAnchored = false;
     this.initialAudioPtsOffsetMs = 0;
+    this.initialVideoTimelineAnchored = false;
+    this.initialVideoPtsOffsetMs = 0;
+    this.partialCluster = null;
     this.lastThrottleBypassLogAt = 0;
+    this.streamRestartOffset = null;
+    this.mediaSeekCatchUpActive = false;
     this.abortController = new AbortController();
     this.installBackpressureHooks(videoElement);
 
@@ -248,13 +316,30 @@ export class MkvMseController {
       this.info = parseMkvMediaInfo(buf, {
         audioTrackNumber: opts?.audioTrackNumber,
       });
+      await this.hydrateAc3ConfigFromClusterProbe();
+      if (this.destroyed || !this.info) return;
       this.audioEmitFilter = this.info.audio?.trackNumber ?? null;
 
       const wantsExternalAudio =
         opts?.externalAudio === "webcodecs" && !!this.info.audio;
-      const useExternalAudio = wantsExternalAudio && this.info.audio
+      const externalSupported = wantsExternalAudio && this.info.audio
         ? await ExternalMkvAudioRenderer.isSupported(this.info.audio)
         : false;
+      const useExternalAudio =
+        wantsExternalAudio &&
+        !!this.info.audio &&
+        (externalSupported || this.info.audio.codec === "ac3");
+      if (
+        wantsExternalAudio &&
+        this.info.audio?.codec === "ac3" &&
+        !externalSupported
+      ) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[mse] WebCodecs AC-3 support probe failed; attempting external ` +
+          `audio renderer anyway for test mode.`,
+        );
+      }
       if (useExternalAudio && this.info.audio && this.videoElement) {
         this.externalAudio = new ExternalMkvAudioRenderer(
           this.info.audio,
@@ -288,7 +373,7 @@ export class MkvMseController {
       // start at firstClusterOffset; everything beyond that comes from
       // the live stream and starts at the buffer's end.
       this.nextChunkFileOffset = this.info.firstClusterOffset;
-      this.fetchOffset = buf.length;
+      this.fetchOffset = Math.max(buf.length, this.info.firstClusterOffset);
 
       // 4. Create MediaSource
       markPlayback("remux:start");
@@ -317,14 +402,32 @@ export class MkvMseController {
             return;
           }
           if (!this.externalAudio && audioMime && !MediaSource.isTypeSupported(audioMime)) {
-            // eslint-disable-next-line no-console
-            console.error(`[mse] audio codec UNSUPPORTED: ${audioMime}`);
-            this.fireError(
-              new Error(
-                `This file's audio codec (${audioMime}) isn't supported by your browser.`,
-              ),
-            );
-            return;
+            if (this.info.audio?.codec === "ac3") {
+              // eslint-disable-next-line no-console
+              console.warn(
+                `[mse] audio codec probe rejected ${audioMime}, but AC-3 ` +
+                `testing is enabled; attempting addSourceBuffer anyway.`,
+              );
+            } else {
+              // eslint-disable-next-line no-console
+              console.error(`[mse] audio codec UNSUPPORTED: ${audioMime}`);
+              this.fireError(
+                new Error(
+                  `This file's audio codec (${audioMime}) isn't supported by your browser.`,
+                ),
+              );
+              return;
+            }
+          }
+
+          const durationSeconds = this.info.durationMs / 1000;
+          if (Number.isFinite(durationSeconds) && durationSeconds > 0) {
+            try {
+              this.mediaSource.duration = durationSeconds;
+            } catch (e) {
+              // eslint-disable-next-line no-console
+              console.warn("[mse] failed to publish media duration:", e);
+            }
           }
 
           this.videoSourceBuffer = this.mediaSource.addSourceBuffer(videoMime);
@@ -378,6 +481,21 @@ export class MkvMseController {
             if (this.destroyed) return;
           }
 
+          // If the first Cluster begins just past the preloaded header window,
+          // or header parsing stopped at a partial element that starts after
+          // the stream offset, do not re-fetch the bytes before that element.
+          // Re-feeding those bytes ahead of `leftoverBuf` makes the parser
+          // see arbitrary mid-element data as a fresh EBML element and the
+          // accumulator grows until the overflow guard trips.
+          if (this.nextChunkFileOffset > this.fetchOffset) {
+            // eslint-disable-next-line no-console
+            console.info(
+              `[mse] advancing stream offset from ${this.fetchOffset} ` +
+              `to ${this.nextChunkFileOffset} to align with next EBML element`,
+            );
+            this.fetchOffset = this.nextChunkFileOffset;
+          }
+
           // Continue with a single streaming fetch for the rest of the file.
           this.progressiveStream();
         } catch (e) {
@@ -389,6 +507,70 @@ export class MkvMseController {
       this.onReady?.(this.objectUrl, this.info.durationMs);
     } catch (e) {
       this.fireError(e instanceof Error ? e : new Error(String(e)));
+    }
+  }
+
+  private async hydrateAc3ConfigFromClusterProbe(): Promise<void> {
+    const info = this.info;
+    const audio = info?.audio;
+    if (
+      !info ||
+      !audio ||
+      audio.codec !== "ac3" ||
+      audio.ac3 ||
+      info.firstClusterOffset <= 0 ||
+      this.fileSize <= 0
+    ) {
+      return;
+    }
+
+    const start = Math.min(info.firstClusterOffset, this.fileSize - 1);
+    const end = Math.min(this.fileSize - 1, start + AC3_CONFIG_PROBE_SIZE - 1);
+    if (end <= start) return;
+
+    try {
+      const { buf } = await this.fetchRange(start, end);
+      if (this.destroyed || !this.info) return;
+      const clusterOffset = findFirstClusterOffset(buf, 0, buf.length);
+      if (clusterOffset == null) return;
+      const cluster = readElement(buf, clusterOffset);
+      if (!cluster || cluster.id !== MKV_ID.Cluster) return;
+
+      const samples = extractClusterSamples(buf, cluster, this.info);
+      for (const sample of samples) {
+        if (
+          sample.isVideo ||
+          sample.trackNumber !== this.info.audio?.trackNumber
+        ) {
+          continue;
+        }
+        const ac3 = parseAc3SpecificBoxFields(sample.data);
+        if (!ac3) continue;
+
+        const nextAudio = { ...this.info.audio, ac3 };
+        this.info = {
+          ...this.info,
+          audio: nextAudio,
+          audioTracks: this.info.audioTracks.map((track) =>
+            track.trackNumber === nextAudio.trackNumber
+              ? { ...track, ac3 }
+              : track,
+          ),
+        };
+        // eslint-disable-next-line no-console
+        console.info(
+          `[mse] AC-3 config from first sync frame: ` +
+          `track=${nextAudio.trackNumber} fscod=${ac3.fscod} ` +
+          `bsid=${ac3.bsid} bsmod=${ac3.bsmod} acmod=${ac3.acmod} ` +
+          `lfeon=${ac3.lfeon} bitRateCode=${ac3.bitRateCode}`,
+        );
+        return;
+      }
+    } catch (e) {
+      // Fall back to a valid conservative dac3 box; AC-3 frame headers still
+      // carry the real stream facts for decoders that proceed past init.
+      // eslint-disable-next-line no-console
+      console.warn("[mse] AC-3 config probe failed:", e);
     }
   }
 
@@ -407,6 +589,10 @@ export class MkvMseController {
     if (this.audioCatchUpAbort) {
       try { this.audioCatchUpAbort.abort(); } catch { /* ignore */ }
       this.audioCatchUpAbort = null;
+    }
+    if (this.externalAudioSeekCatchUpTimer !== null) {
+      window.clearTimeout(this.externalAudioSeekCatchUpTimer);
+      this.externalAudioSeekCatchUpTimer = null;
     }
     if (this.externalAudio) {
       this.externalAudio.close();
@@ -448,6 +634,8 @@ export class MkvMseController {
     this.headerBuf = null;
     this.clusterIndex = [];
     this.leftoverBuf = null;
+    this.streamRestartOffset = null;
+    this.mediaSeekCatchUpActive = false;
   }
 
   /**
@@ -493,6 +681,53 @@ export class MkvMseController {
       if (pauseTimer !== null) window.clearTimeout(pauseTimer);
     });
 
+    const scheduleExternalAudioSeekCatchUp = (trigger: "seeking" | "seeked") => {
+      if (!this.externalAudio || this.destroyed) return;
+      const catchUpSerial = ++this.audioCatchUpSerial;
+      if (this.audioCatchUpAbort) {
+        try { this.audioCatchUpAbort.abort(); } catch { /* ignore */ }
+        this.audioCatchUpAbort = null;
+      }
+      if (this.externalAudioSeekCatchUpTimer !== null) {
+        window.clearTimeout(this.externalAudioSeekCatchUpTimer);
+      }
+      // `seeking` fires before the external renderer's own reset listener in
+      // this controller's registration order. Debounce the refill so it lands
+      // after Web Audio nodes and AC-3 decoder state have been cleared. Keep
+      // `seeked` too; quick in-buffer jumps will replace this timer with the
+      // final settled playhead.
+      const delayMs = trigger === "seeking" ? 120 : 40;
+      this.externalAudioSeekCatchUpTimer = window.setTimeout(() => {
+        this.externalAudioSeekCatchUpTimer = null;
+        if (!this.externalAudio || this.destroyed || !this.videoElement) return;
+        const playheadMs = this.videoElement.currentTime * 1000;
+        this.audioCatchUpTargetMs = playheadMs;
+        const hasVideoAtTarget = this.isVideoBufferedAt(playheadMs / 1000);
+        const catchUp = hasVideoAtTarget
+          ? this.startAudioCatchUp(playheadMs, "seek", catchUpSerial)
+          : this.startMediaSeekCatchUp(playheadMs, catchUpSerial);
+        catchUp.catch((e) => {
+          if (isAbortError(e)) return;
+          // eslint-disable-next-line no-console
+          console.warn("[mse] external seek catch-up failed:", e);
+        });
+      }, delayMs);
+    };
+    const onExternalAudioSeeking = () =>
+      scheduleExternalAudioSeekCatchUp("seeking");
+    const onExternalAudioSeeked = () =>
+      scheduleExternalAudioSeekCatchUp("seeked");
+    videoEl.addEventListener("seeking", onExternalAudioSeeking);
+    videoEl.addEventListener("seeked", onExternalAudioSeeked);
+    this.cleanups.push(() => {
+      videoEl.removeEventListener("seeking", onExternalAudioSeeking);
+      videoEl.removeEventListener("seeked", onExternalAudioSeeked);
+      if (this.externalAudioSeekCatchUpTimer !== null) {
+        window.clearTimeout(this.externalAudioSeekCatchUpTimer);
+        this.externalAudioSeekCatchUpTimer = null;
+      }
+    });
+
     const unsubscribeCooldown = useRateLimitStore.subscribe((s, prev) => {
       if (s.isCooling !== prev.isCooling) refresh();
     });
@@ -519,6 +754,44 @@ export class MkvMseController {
     }
   }
 
+  private async waitWhileMediaSeekCatchUpActive(): Promise<void> {
+    while (!this.destroyed && this.mediaSeekCatchUpActive) {
+      await sleep(50);
+    }
+  }
+
+  private requestStreamRestart(offset: number): void {
+    const bounded = Math.max(0, Math.min(offset, this.fileSize));
+    this.streamRestartOffset = bounded;
+    this.leftoverBuf = null;
+    this.partialCluster = null;
+    this.videoNextDtsMs = null;
+    try {
+      void this.streamReader?.cancel();
+    } catch {
+      // ignore; the streaming loop will notice streamRestartOffset anyway
+    }
+    if (!this.fetching && this.mediaSource?.readyState === "open") {
+      void this.progressiveStream();
+    }
+  }
+
+  private consumeStreamRestartOffset(): number | null {
+    const offset = this.streamRestartOffset;
+    if (offset == null) return null;
+    this.streamRestartOffset = null;
+    this.fetchOffset = offset;
+    this.nextChunkFileOffset = offset;
+    this.leftoverBuf = null;
+    this.partialCluster = null;
+    this.videoNextDtsMs = null;
+    // eslint-disable-next-line no-console
+    console.info(
+      `[mse] restarting media stream from byte ${offset} after seek recovery`,
+    );
+    return offset;
+  }
+
   // -------------------------------------------------------------------------
   // Streaming fetch — ONE request for the entire remaining file
   // -------------------------------------------------------------------------
@@ -534,6 +807,9 @@ export class MkvMseController {
    */
   private async progressiveStream(): Promise<void> {
     if (this.fetching || this.destroyed) return;
+    if (this.streamRestartOffset != null) {
+      this.consumeStreamRestartOffset();
+    }
     if (this.fetchOffset >= this.fileSize) {
       this.finalizeStream();
       return;
@@ -545,6 +821,10 @@ export class MkvMseController {
 
     while (streamAttempt <= MAX_STREAM_RETRIES && !this.destroyed) {
       try {
+        if (this.streamRestartOffset != null) {
+          this.consumeStreamRestartOffset();
+          streamAttempt = 0;
+        }
         const url = buildMediaUrl(this.fileId);
         const res = await authedFetch(
           url,
@@ -592,6 +872,11 @@ export class MkvMseController {
               await this.waitWhileSuspended();
               if (this.destroyed) break;
             }
+            if (this.mediaSeekCatchUpActive) {
+              await this.waitWhileMediaSeekCatchUpActive();
+              if (this.destroyed) break;
+              if (this.streamRestartOffset != null) break;
+            }
 
             const { done, value } = await reader.read();
             if (done) break;
@@ -603,14 +888,87 @@ export class MkvMseController {
             // (common with HEVC + FLAC where extractClusterSamples can't make
             // progress) doesn't run the tab out of memory. Abort cleanly
             // instead of OOM-ing.
-            const nextLen = (accumulated?.length ?? 0) + value.length;
+            let nextLen = (accumulated?.length ?? 0) + value.length;
+            if (
+              nextLen > STREAM_MAX_ACCUMULATED &&
+              accumulated &&
+              accumulated.length > 0
+            ) {
+              if (nextLen <= STREAM_FORCE_PROCESS_MAX) {
+                // We are just over the soft guard. Include this stream packet
+                // and parse immediately; it may be the packet that completes
+                // the pending EBML child element.
+                // eslint-disable-next-line no-console
+                console.warn(
+                  `[mse] accumulator crossed soft cap; parsing with incoming chunk: ` +
+                  this.describeAccumulationState(accumulated, value),
+                );
+                try {
+                  accumulated = concatBuffers(accumulated, value);
+                } catch (e) {
+                  this.fireError(
+                    e instanceof Error
+                      ? new Error(`Out of memory while buffering stream: ${e.message}`)
+                      : new Error("Out of memory while buffering stream"),
+                  );
+                  break;
+                }
+                await this.waitUntilBufferNeeded();
+                if (this.destroyed) break;
+                await this.processChunk(accumulated);
+                if (this.destroyed) break;
+
+                const leftoverBuf = this.leftoverBuf as Uint8Array | null;
+                this.leftoverBuf = null;
+                accumulated = leftoverBuf;
+                const leftoverBytes =
+                  leftoverBuf === null ? 0 : (leftoverBuf as Uint8Array).length;
+                minProcessSize = leftoverBytes > 0
+                  ? Math.min(
+                      leftoverBytes + FORCED_PROCESS_MARGIN,
+                      STREAM_MAX_ACCUMULATED - FORCED_PROCESS_MARGIN,
+                    )
+                  : STREAM_PROCESS_SIZE;
+                this.evictOldBuffers();
+                continue;
+              }
+
+              // Give the demuxer one last chance to consume what it already
+              // has before tripping the guard. Large Opus/HEVC clusters can
+              // leave us waiting on one child element; the next stream packet
+              // may complete it, but `nextLen` can cross the cap before the
+              // normal minProcessSize threshold fires.
+              // eslint-disable-next-line no-console
+              console.warn(
+                `[mse] accumulator near cap; forcing parse before overflow: ` +
+                this.describeAccumulationState(accumulated, value),
+              );
+              await this.waitUntilBufferNeeded();
+              if (this.destroyed) break;
+              await this.processChunk(accumulated);
+              if (this.destroyed) break;
+
+              const leftoverBuf = this.leftoverBuf as Uint8Array | null;
+              this.leftoverBuf = null;
+              accumulated = leftoverBuf;
+              const leftoverBytes =
+                leftoverBuf === null ? 0 : (leftoverBuf as Uint8Array).length;
+              minProcessSize = leftoverBytes > 0
+                ? Math.min(
+                    leftoverBytes + FORCED_PROCESS_MARGIN,
+                    STREAM_MAX_ACCUMULATED - FORCED_PROCESS_MARGIN,
+                  )
+                : STREAM_PROCESS_SIZE;
+              nextLen = (accumulated?.length ?? 0) + value.length;
+            }
+
             if (nextLen > STREAM_MAX_ACCUMULATED) {
               this.fireError(
                 new Error(
                   `MSE remux buffer overflow (${(nextLen / 1024 / 1024).toFixed(1)} MB). ` +
-                  `This usually means the file's codec combo (often HEVC + FLAC) ` +
-                  `produces clusters our remuxer can't parse. Try a different file ` +
-                  `or, if your browser supports the codec, force native playback.`,
+                  `This usually means the file has unusually large MKV elements ` +
+                  `or a codec combo our remuxer can't parse. ` +
+                  this.describeAccumulationState(accumulated, value),
                 ),
               );
               break;
@@ -662,7 +1020,12 @@ export class MkvMseController {
             }
           }
 
-          if (accumulated && accumulated.length > 0 && !this.destroyed) {
+          if (
+            accumulated &&
+            accumulated.length > 0 &&
+            !this.destroyed &&
+            this.streamRestartOffset == null
+          ) {
             await this.processChunk(accumulated);
           }
 
@@ -672,6 +1035,12 @@ export class MkvMseController {
           } catch {
             // ignore
           }
+        }
+
+        if (this.streamRestartOffset != null && !this.destroyed) {
+          this.consumeStreamRestartOffset();
+          streamAttempt = 0;
+          continue;
         }
 
         // If we reach here without an error, the stream completed successfully.
@@ -741,6 +1110,9 @@ export class MkvMseController {
     let lastCt = this.videoElement?.currentTime ?? 0;
     let lastAdvanceAt = performance.now();
     while (this.videoElement && !this.destroyed) {
+      await this.waitForAppendBackpressure();
+      if (this.destroyed) break;
+
       const playableEnd = this.getPlayableBufferEnd();
       const ct = this.videoElement.currentTime;
       const lead = playableEnd - ct;
@@ -791,6 +1163,43 @@ export class MkvMseController {
     }
   }
 
+  private async waitForAppendBackpressure(): Promise<void> {
+    let logged = false;
+    while (
+      !this.destroyed &&
+      this.mediaSource?.readyState === "open" &&
+      this.hasAppendBackpressure()
+    ) {
+      if (!logged) {
+        // eslint-disable-next-line no-console
+        console.info(
+          `[mse] append backpressure: videoQueue=${this.videoAppendQueue.length} ` +
+          `audioQueue=${this.audioAppendQueue.length} ` +
+          `pending=${formatByteCount(this.pendingAppendBytes())}; ` +
+          `waiting for SourceBuffers to drain`,
+        );
+        logged = true;
+      }
+      this.drainVideoQueue();
+      this.drainAudioQueue();
+      await sleep(APPEND_BACKPRESSURE_SLEEP_MS);
+    }
+  }
+
+  private hasAppendBackpressure(): boolean {
+    const pendingSegments =
+      this.videoAppendQueue.length + this.audioAppendQueue.length;
+    if (pendingSegments > MAX_PENDING_APPEND_SEGMENTS) return true;
+    return this.pendingAppendBytes() > MAX_PENDING_APPEND_BYTES;
+  }
+
+  private pendingAppendBytes(): number {
+    let total = 0;
+    for (const seg of this.videoAppendQueue) total += seg.byteLength;
+    for (const seg of this.audioAppendQueue) total += seg.byteLength;
+    return total;
+  }
+
   private logThrottleBypass(message: string): void {
     const now = performance.now();
     if (now - this.lastThrottleBypassLogAt < THROTTLE_BYPASS_LOG_INTERVAL_MS) {
@@ -816,9 +1225,12 @@ export class MkvMseController {
     }
     if (!this.audioSourceBuffer) return vEnd;
     const aEnd = bufferedRangeEndAt(this.audioSourceBuffer, anchor);
-    if (vEnd === 0) return aEnd;
-    if (aEnd === 0) return vEnd;
+    if (vEnd === 0 || aEnd === 0) return 0;
     return Math.min(vEnd, aEnd);
+  }
+
+  private isVideoBufferedAt(anchorSec: number): boolean {
+    return bufferedRangeEndAt(this.videoSourceBuffer, anchorSec) > anchorSec;
   }
 
   private finalizeStream(): void {
@@ -852,27 +1264,71 @@ export class MkvMseController {
       audioOnly?: boolean;
       chunkBaseFileOffset?: number;
       updateLeftover?: boolean;
+      shouldContinue?: () => boolean;
+      audioPtsMinMs?: number;
+      audioPtsMaxMs?: number;
+      videoPtsMinMs?: number;
+      videoPtsMaxMs?: number;
+      suppressRawChunk?: boolean;
+      updateClusterIndex?: boolean;
+      randomAccessVideo?: boolean;
     } = {},
   ): Promise<void> {
     if (!this.info) return;
     const audioOnly = opts.audioOnly === true;
     const updateLeftover = opts.updateLeftover !== false;
     const baseOffset = opts.chunkBaseFileOffset ?? this.nextChunkFileOffset;
+    const shouldContinue = opts.shouldContinue;
+    if (shouldContinue && !shouldContinue()) return;
+    const isMainStreamChunk =
+      !audioOnly && !opts.suppressRawChunk && updateLeftover;
+    if (isMainStreamChunk) {
+      await this.waitWhileMediaSeekCatchUpActive();
+      if (this.destroyed) return;
+    }
 
     // The main streaming path piggybacks subtitle extraction onto the raw
     // bytes — skip this for catch-up so we don't double-feed the extractor.
-    if (!audioOnly) this.onRawChunk?.(data);
+    if (!audioOnly && !opts.suppressRawChunk) this.onRawChunk?.(data);
 
     const chunkStarted = performance.now();
     let lastYield = chunkStarted;
     let clustersThisChunk = 0;
     let offset = 0;
+
+    if (!audioOnly && updateLeftover && this.partialCluster) {
+      const partial = this.processPartialClusterContinuation(data, baseOffset);
+      clustersThisChunk += partial.completed ? 1 : 0;
+      if (partial.waitingForMore) return;
+      offset = partial.nextOffset;
+    }
+
     while (offset < data.length) {
+      if (shouldContinue && !shouldContinue()) return;
+      if (isMainStreamChunk && this.mediaSeekCatchUpActive) {
+        await this.waitWhileMediaSeekCatchUpActive();
+        if (this.destroyed) return;
+      }
       if (data[offset] === 0x00) { offset++; continue; }
 
       const el = readElement(data, offset);
       if (!el) {
         if (offset < data.length && updateLeftover) {
+          const remaining = data.length - offset;
+          if (remaining > EBML_MAX_HEADER_BYTES) {
+            const resync = this.resyncToNextClusterOrKeepTail(
+              data,
+              baseOffset,
+              offset,
+              `invalid EBML element header at file offset ${baseOffset + offset}`,
+              offset,
+            );
+            if (resync !== null) {
+              offset = resync;
+              continue;
+            }
+            return;
+          }
           this.leftoverBuf = data.slice(offset);
           this.nextChunkFileOffset = baseOffset + offset;
         }
@@ -880,85 +1336,136 @@ export class MkvMseController {
       }
 
       if (el.id === MKV_ID.Cluster) {
-        // If the cluster's declared size extends past the chunk, defer it.
-        // Processing a partial cluster does two bad things: (1) the
-        // truncated tail SimpleBlock yields a sample with a length-prefix
-        // longer than its actual bytes — Chrome's HEVC parser rejects the
-        // media fragment as malformed NAL framing; (2) the next chunk
-        // starts mid-cluster and re-reads arbitrary bytes as if they were
-        // an EBML element. HEVC clusters routinely run 2-5 MB on BD-rip
-        // content, well over STREAM_PROCESS_SIZE, so this fires on most
-        // chunk boundaries with HEVC sources.
+        // If the cluster's declared size extends past the chunk, stream its
+        // complete child blocks instead of waiting for the entire Cluster.
+        // Some Opus dual-audio files write very large Clusters; holding them
+        // whole makes the 64 MB accumulator guard fire even though every
+        // SimpleBlock inside is perfectly usable as soon as it is complete.
         //
-        // `dataLengthRaw === -1` means an unknown-size cluster — rare, but
-        // we have no choice but to process whatever's available, since
-        // there's no end marker until EOF.
+        // Unknown-size Clusters need the same treatment. `readElement()` can
+        // only clamp an unknown-size element to the current buffer, so treating
+        // it as whole would drop a tail block at the buffer boundary and leave
+        // the next Range response starting in the middle of payload bytes.
         if (
-          el.dataLengthRaw >= 0 &&
+          el.dataLengthRaw === -1 ||
           el.dataOffset + el.dataLengthRaw > data.length
         ) {
-          if (updateLeftover) {
-            this.leftoverBuf = data.slice(offset);
-            this.nextChunkFileOffset = baseOffset + offset;
+          if (audioOnly) {
+            try {
+              const parsed = extractClusterSamplesFromRange(
+                data,
+                el.dataOffset,
+                data.length,
+                0,
+                this.info,
+              );
+              this.emitClusterSamples(
+                parsed.samples,
+                true,
+                baseOffset + el.elementOffset,
+                undefined,
+                {
+                  audioPtsMinMs: opts.audioPtsMinMs,
+                  audioPtsMaxMs: opts.audioPtsMaxMs,
+                  videoPtsMinMs: opts.videoPtsMinMs,
+                  videoPtsMaxMs: opts.videoPtsMaxMs,
+                  updateClusterIndex: opts.updateClusterIndex,
+                  randomAccessVideo: opts.randomAccessVideo,
+                },
+              );
+              clustersThisChunk++;
+              if (parsed.reachedClusterBoundary) {
+                offset = parsed.consumedOffset;
+                continue;
+              }
+            } catch (e) {
+              // eslint-disable-next-line no-console
+              console.warn("Audio catch-up Cluster parse error (skipping):", e);
+            }
+            return;
+          }
+          if (!updateLeftover) {
+            try {
+              const parsed = extractClusterSamplesFromRange(
+                data,
+                el.dataOffset,
+                data.length,
+                0,
+                this.info,
+              );
+              this.emitClusterSamples(
+                parsed.samples,
+                false,
+                baseOffset + el.elementOffset,
+                undefined,
+                {
+                  audioPtsMinMs: opts.audioPtsMinMs,
+                  audioPtsMaxMs: opts.audioPtsMaxMs,
+                  videoPtsMinMs: opts.videoPtsMinMs,
+                  videoPtsMaxMs: opts.videoPtsMaxMs,
+                  updateClusterIndex: opts.updateClusterIndex,
+                  randomAccessVideo: opts.randomAccessVideo,
+                },
+              );
+              clustersThisChunk++;
+              if (parsed.reachedClusterBoundary) {
+                offset = parsed.consumedOffset;
+                continue;
+              }
+            } catch (e) {
+              // eslint-disable-next-line no-console
+              console.warn("Media catch-up Cluster parse error (skipping):", e);
+            }
+            return;
+          }
+          if (updateLeftover && !audioOnly) {
+            // Bound a malformed Cluster size (declared end past EOF) so the
+            // streaming child-parser stops at the real end of the file
+            // instead of waiting forever for bytes that don't exist.
+            const declaredEnd =
+              el.dataLengthRaw === -1
+                ? null
+                : baseOffset + el.dataOffset + el.dataLengthRaw;
+            const boundedEnd =
+              declaredEnd != null &&
+              this.fileSize > 0 &&
+              declaredEnd > this.fileSize
+                ? null // treat as unknown-size; parser will stop at next Cluster
+                : declaredEnd;
+            this.partialCluster = {
+              clusterFileOffset: baseOffset + el.elementOffset,
+              dataEndFileOffset: boundedEnd,
+              clusterTimeMs: 0,
+              indexed: false,
+            };
+            const partial = this.processPartialClusterContinuation(
+              data,
+              baseOffset,
+              el.dataOffset,
+            );
+            clustersThisChunk++;
+            if (partial.waitingForMore) return;
+            offset = partial.nextOffset;
+            continue;
           }
           return;
         }
         try {
           const samples = extractClusterSamples(data, el, this.info);
-          if (samples.length > 0) {
-            // Track the cluster's start PTS for catch-up lookups.
-            if (!audioOnly) {
-              const firstPts = samples[0].pts;
-              const clusterFileOffset = baseOffset + el.elementOffset;
-              const lastEntry = this.clusterIndex[this.clusterIndex.length - 1];
-              if (!lastEntry || lastEntry.fileOffset !== clusterFileOffset) {
-                this.clusterIndex.push({
-                  fileOffset: clusterFileOffset,
-                  ptsMs: firstPts,
-                });
-              }
-            }
-
-            const videoSamples = samples.filter((s) => s.isVideo);
-            const audioSamples = samples.filter(
-              (s) =>
-                !s.isVideo &&
-                (this.audioEmitFilter == null ||
-                  s.trackNumber === this.audioEmitFilter),
-            );
-
-            if (!audioOnly && videoSamples.length > 0) {
-              this.videoSeq++;
-              const seg = generateVideoMediaSegment(
-                videoSamples,
-                this.videoSeq,
-                this.info.video,
-              );
-              if (this.videoSeq === 1) markPlayback("remux:first-segment-ready");
-              if (seg.length > 0) this.enqueueVideoAppend(seg);
-            }
-
-            if (this.externalAudio && audioSamples.length > 0) {
-              this.externalAudio.enqueueSamples(audioSamples);
-              if (
-                this.audioCatchUpTargetMs > 0 &&
-                this.externalAudio.bufferedUntilSec * 1000 >=
-                  this.audioCatchUpTargetMs
-              ) {
-                this.audioCatchUpTargetMs = 0;
-              }
-            } else if (this.info.audio && audioSamples.length > 0) {
-              this.audioSeq++;
-              const normalizedAudioSamples =
-                this.normalizeAudioSamplesForInitialTimeline(audioSamples);
-              const seg = generateAudioMediaSegment(
-                normalizedAudioSamples,
-                this.audioSeq,
-                this.info.audio,
-              );
-              if (seg.length > 0) this.enqueueAudioAppend(seg);
-            }
-          }
+          this.emitClusterSamples(
+            samples,
+            audioOnly,
+            baseOffset + el.elementOffset,
+            undefined,
+            {
+              audioPtsMinMs: opts.audioPtsMinMs,
+              audioPtsMaxMs: opts.audioPtsMaxMs,
+              videoPtsMinMs: opts.videoPtsMinMs,
+              videoPtsMaxMs: opts.videoPtsMaxMs,
+              updateClusterIndex: opts.updateClusterIndex,
+              randomAccessVideo: opts.randomAccessVideo,
+            },
+          );
         } catch (e) {
           // eslint-disable-next-line no-console
           console.warn("Cluster parse error (skipping):", e);
@@ -976,17 +1483,61 @@ export class MkvMseController {
         if (performance.now() - lastYield >= PROCESS_CHUNK_YIELD_MS) {
           await yieldToMain();
           if (this.destroyed) return;
+          if (isMainStreamChunk && this.mediaSeekCatchUpActive) {
+            await this.waitWhileMediaSeekCatchUpActive();
+            if (this.destroyed) return;
+          }
           lastYield = performance.now();
         }
       } else {
-        if (el.dataOffset + el.dataLength > data.length) {
+        // Sanity: an element whose declared end runs past EOF, OR whose
+        // declared size dwarfs anything a real non-Cluster element would
+        // hold, means the parser is misaligned (e.g. the previous Cluster's
+        // declared size was wrong, or junk bytes between clusters parsed as
+        // a bogus EBML header). Without this guard, `rawEnd > data.length`
+        // is permanently true and `leftoverBuf` accumulates until the 64 MB
+        // overflow guard kills playback. Recover by scanning forward for
+        // the next Cluster signature.
+        const declaredEndPastEof =
+          el.dataLengthRaw !== -1 &&
+          this.fileSize > 0 &&
+          baseOffset + el.dataOffset + el.dataLengthRaw > this.fileSize;
+        const declaredSizeImplausible =
+          el.dataLengthRaw !== -1 &&
+          el.dataLengthRaw > NON_CLUSTER_MAX_DECLARED_SIZE;
+        if (declaredEndPastEof || declaredSizeImplausible) {
+          if (!updateLeftover) return;
+          const reason = declaredEndPastEof
+            ? `past EOF ${this.fileSize}`
+            : `> ${NON_CLUSTER_MAX_DECLARED_SIZE} sane cap`;
+          const resync = this.resyncToNextClusterOrKeepTail(
+            data,
+            baseOffset,
+            offset,
+            `element id=0x${el.id.toString(16)} at file offset ` +
+              `${baseOffset + offset} declares ${el.dataLengthRaw} bytes ` +
+              `(${reason})`,
+            offset + 1,
+          );
+          if (resync !== null) {
+            offset = resync;
+            continue;
+          }
+          return;
+        }
+
+        const rawEnd =
+          el.dataLengthRaw === -1
+            ? el.elementOffset + el.elementLength
+            : el.dataOffset + el.dataLengthRaw;
+        if (rawEnd > data.length) {
           if (updateLeftover) {
             this.leftoverBuf = data.slice(offset);
             this.nextChunkFileOffset = baseOffset + offset;
           }
           return;
         }
-        offset += el.elementLength;
+        offset = rawEnd;
       }
     }
 
@@ -1007,6 +1558,221 @@ export class MkvMseController {
         `[mse] slow chunk: ${wall.toFixed(0)} ms for ${(data.length / 1024 / 1024).toFixed(2)} MB ` +
         `(${clustersThisChunk} cluster${clustersThisChunk === 1 ? "" : "s"})`,
       );
+    }
+  }
+
+  private resyncToNextClusterOrKeepTail(
+    data: Uint8Array,
+    baseOffset: number,
+    offset: number,
+    reason: string,
+    scanStart: number,
+  ): number | null {
+    const resync = findFirstClusterOffset(data, scanStart, data.length);
+    if (resync !== null) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[mse] resync: ${reason}; skipping ${resync - offset} bytes to ` +
+        `next Cluster`,
+      );
+      return resync;
+    }
+
+    // No Cluster ID in this buffer. Keep only the trailing 3 bytes so a
+    // 4-byte Cluster signature spanning the boundary can still be matched on
+    // the next read — and so a random mid-payload byte sequence cannot become
+    // a forever-growing "partial element" in the stream accumulator.
+    const dropTo = Math.max(offset, data.length - CLUSTER_ID_TAIL_BYTES);
+    this.leftoverBuf = dropTo < data.length ? data.slice(dropTo) : null;
+    this.nextChunkFileOffset = baseOffset + dropTo;
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[mse] resync: ${reason}; no Cluster ID in current buffer; dropped ` +
+      `${dropTo - offset} bytes (offset now ${baseOffset + dropTo})`,
+    );
+    return null;
+  }
+
+  private processPartialClusterContinuation(
+    data: Uint8Array,
+    baseOffset: number,
+    startOffset = 0,
+  ): { nextOffset: number; waitingForMore: boolean; completed: boolean } {
+    if (!this.info || !this.partialCluster) {
+      return { nextOffset: startOffset, waitingForMore: false, completed: false };
+    }
+
+    const state = this.partialCluster;
+    const clusterEndInBuffer = state.dataEndFileOffset == null
+      ? data.length
+      : Math.max(0, Math.min(data.length, state.dataEndFileOffset - baseOffset));
+    const parseEnd = Math.max(startOffset, clusterEndInBuffer);
+
+    if (parseEnd > startOffset) {
+      try {
+        const parsed = extractClusterSamplesFromRange(
+          data,
+          startOffset,
+          parseEnd,
+          state.clusterTimeMs,
+          this.info,
+        );
+        state.clusterTimeMs = parsed.clusterTimeMs;
+        this.emitClusterSamples(parsed.samples, false, state.clusterFileOffset, state);
+
+        if (parsed.reachedClusterBoundary) {
+          this.partialCluster = null;
+          this.leftoverBuf = null;
+          this.nextChunkFileOffset = baseOffset + parsed.consumedOffset;
+          return {
+            nextOffset: parsed.consumedOffset,
+            waitingForMore: false,
+            completed: true,
+          };
+        }
+
+        if (parsed.consumedOffset < parseEnd) {
+          this.leftoverBuf = data.slice(parsed.consumedOffset);
+          this.nextChunkFileOffset = baseOffset + parsed.consumedOffset;
+          return {
+            nextOffset: parsed.consumedOffset,
+            waitingForMore: true,
+            completed: false,
+          };
+        }
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn("Partial Cluster parse error (skipping):", e);
+        this.partialCluster = null;
+        this.leftoverBuf = null;
+        this.nextChunkFileOffset = baseOffset + parseEnd;
+        return { nextOffset: parseEnd, waitingForMore: false, completed: true };
+      }
+    }
+
+    if (
+      state.dataEndFileOffset != null &&
+      baseOffset + clusterEndInBuffer >= state.dataEndFileOffset
+    ) {
+      this.partialCluster = null;
+      this.leftoverBuf = null;
+      this.nextChunkFileOffset = baseOffset + clusterEndInBuffer;
+      return {
+        nextOffset: clusterEndInBuffer,
+        waitingForMore: false,
+        completed: true,
+      };
+    }
+
+    this.leftoverBuf = null;
+    this.nextChunkFileOffset = baseOffset + parseEnd;
+    return { nextOffset: parseEnd, waitingForMore: true, completed: false };
+  }
+
+  private recordClusterIndex(entry: ClusterIndexEntry): void {
+    const existing = this.clusterIndex.find(
+      (candidate) => candidate.fileOffset === entry.fileOffset,
+    );
+    if (existing) {
+      existing.hasVideoKeyframe ||= entry.hasVideoKeyframe;
+      existing.ptsMs = Math.min(existing.ptsMs, entry.ptsMs);
+      return;
+    }
+
+    const insertAt = this.clusterIndex.findIndex(
+      (candidate) => candidate.ptsMs > entry.ptsMs,
+    );
+    if (insertAt === -1) this.clusterIndex.push(entry);
+    else this.clusterIndex.splice(insertAt, 0, entry);
+  }
+
+  private emitClusterSamples(
+    samples: DemuxedSample[],
+    audioOnly: boolean,
+    clusterFileOffset: number,
+    partialState?: PartialClusterState,
+    opts: {
+      audioPtsMinMs?: number;
+      audioPtsMaxMs?: number;
+      videoPtsMinMs?: number;
+      videoPtsMaxMs?: number;
+      updateClusterIndex?: boolean;
+      randomAccessVideo?: boolean;
+    } = {},
+  ): void {
+    if (!this.info || samples.length === 0) return;
+
+    // Track the cluster's start PTS for catch-up lookups.
+    if (!audioOnly && opts.updateClusterIndex !== false) {
+      const shouldIndex = partialState ? !partialState.indexed : true;
+      if (shouldIndex) {
+        this.recordClusterIndex({
+          fileOffset: clusterFileOffset,
+          ptsMs: samples[0].pts,
+          hasVideoKeyframe: samples.some((s) => s.isVideo && s.isKeyframe),
+        });
+        if (partialState) partialState.indexed = true;
+      }
+    }
+
+    const videoSamples = samples.filter(
+      (s) =>
+        s.isVideo &&
+        sampleOverlapsPtsWindow(s, opts.videoPtsMinMs, opts.videoPtsMaxMs),
+    );
+    const audioSamples = samples.filter(
+      (s) =>
+        !s.isVideo &&
+        (this.audioEmitFilter == null ||
+          s.trackNumber === this.audioEmitFilter) &&
+        sampleOverlapsPtsWindow(s, opts.audioPtsMinMs, opts.audioPtsMaxMs),
+    );
+
+    if (!audioOnly && videoSamples.length > 0) {
+      const normalizedVideoSamples =
+        this.normalizeVideoSamplesForInitialTimeline(videoSamples);
+      const baseDecodeTimeMs =
+        opts.randomAccessVideo
+          ? normalizedVideoSamples[0].pts
+          : this.videoNextDtsMs ?? normalizedVideoSamples[0].pts;
+      this.videoSeq++;
+      const seg = generateVideoMediaSegment(
+        normalizedVideoSamples,
+        this.videoSeq,
+        this.info.video,
+        baseDecodeTimeMs,
+      );
+      if (!opts.randomAccessVideo) {
+        this.videoNextDtsMs =
+          baseDecodeTimeMs +
+          sampleRunDurationMs(
+            normalizedVideoSamples,
+            this.info.video.defaultDurationNs,
+            33,
+          );
+      }
+      if (this.videoSeq === 1) markPlayback("remux:first-segment-ready");
+      if (seg.length > 0) this.enqueueVideoAppend(seg);
+    }
+
+    if (this.externalAudio && audioSamples.length > 0) {
+      this.externalAudio.enqueueSamples(audioSamples);
+      if (
+        this.audioCatchUpTargetMs > 0 &&
+        this.externalAudio.bufferedUntilSec * 1000 >= this.audioCatchUpTargetMs
+      ) {
+        this.audioCatchUpTargetMs = 0;
+      }
+    } else if (this.info.audio && audioSamples.length > 0) {
+      this.audioSeq++;
+      const normalizedAudioSamples =
+        this.normalizeAudioSamplesForInitialTimeline(audioSamples);
+      const seg = generateAudioMediaSegment(
+        normalizedAudioSamples,
+        this.audioSeq,
+        this.info.audio,
+      );
+      if (seg.length > 0) this.enqueueAudioAppend(seg);
     }
   }
 
@@ -1128,6 +1894,34 @@ export class MkvMseController {
     });
   }
 
+  private async prepareVideoSeekAppend(): Promise<void> {
+    this.videoAppendQueue = [];
+    await this.waitForUpdateEndOn(this.videoSourceBuffer);
+    this.videoAppendQueue = [];
+    this.videoNextDtsMs = null;
+  }
+
+  private async waitForVideoBufferedAt(
+    anchorSec: number,
+    shouldContinue: () => boolean,
+  ): Promise<boolean> {
+    const deadline = performance.now() + SEEK_VIDEO_BUFFER_WAIT_MS;
+    while (
+      !this.destroyed &&
+      shouldContinue() &&
+      performance.now() < deadline
+    ) {
+      if (this.isVideoBufferedAt(anchorSec)) return true;
+      this.drainVideoQueue();
+      if (this.videoSourceBuffer?.updating) {
+        await this.waitForUpdateEndOn(this.videoSourceBuffer);
+      } else {
+        await sleep(50);
+      }
+    }
+    return this.isVideoBufferedAt(anchorSec);
+  }
+
   // -------------------------------------------------------------------------
   // Dub-switch API — split-buffer audio swap (the VLC-feel path)
   // -------------------------------------------------------------------------
@@ -1234,6 +2028,8 @@ export class MkvMseController {
       this.normalizeInitialAudioTimeline = false;
       this.initialAudioTimelineAnchored = true;
       this.initialAudioPtsOffsetMs = 0;
+      this.initialVideoTimelineAnchored = true;
+      this.initialVideoPtsOffsetMs = 0;
 
       if (!externalAudio) {
         const newInit = generateAudioInitSegment(newAudio);
@@ -1244,7 +2040,8 @@ export class MkvMseController {
       // playhead (minus a small lookback) to the main stream's current byte
       // position. Demuxes audio for the new TrackNumber and feeds the audio
       // buffer until it catches up.
-      this.startAudioCatchUp(playheadMs).catch((e) => {
+      this.startAudioCatchUp(playheadMs, "switch").catch((e) => {
+        if (isAbortError(e)) return;
         // eslint-disable-next-line no-console
         console.warn("[mse] audio catch-up failed:", e);
       });
@@ -1260,6 +2057,46 @@ export class MkvMseController {
     }
   }
 
+  private normalizeVideoSamplesForInitialTimeline(
+    samples: DemuxedSample[],
+  ): DemuxedSample[] {
+    if (
+      !this.normalizeInitialAudioTimeline ||
+      samples.length === 0 ||
+      this.audioCatchUpTargetMs > 0
+    ) {
+      return samples;
+    }
+    if (!this.shouldNormalizeInitialTimelineAtCurrentPlayhead()) {
+      this.disableInitialTimelineNormalizationForActivePlayhead();
+      return samples;
+    }
+
+    if (!this.initialVideoTimelineAnchored) {
+      const firstPts = samples[0].pts;
+      this.initialVideoPtsOffsetMs =
+        firstPts >= AUDIO_TIMELINE_NORMALIZE_THRESHOLD_MS ? firstPts : 0;
+      this.initialVideoTimelineAnchored = true;
+      if (this.initialVideoPtsOffsetMs > 0) {
+        // eslint-disable-next-line no-console
+        console.info(
+          `[mse] normalizing initial video timeline by ` +
+          `-${(this.initialVideoPtsOffsetMs / 1000).toFixed(3)}s ` +
+          `(first video cluster PTS was late — usually because resync ` +
+          `skipped early clusters); audio will be shifted by the same ` +
+          `amount to preserve A/V sync`,
+        );
+      }
+    }
+
+    if (this.initialVideoPtsOffsetMs <= 0) return samples;
+
+    return samples.map((s) => ({
+      ...s,
+      pts: Math.max(0, s.pts - this.initialVideoPtsOffsetMs),
+    }));
+  }
+
   private normalizeAudioSamplesForInitialTimeline(
     samples: DemuxedSample[],
   ): DemuxedSample[] {
@@ -1270,11 +2107,27 @@ export class MkvMseController {
     ) {
       return samples;
     }
+    if (!this.shouldNormalizeInitialTimelineAtCurrentPlayhead()) {
+      this.disableInitialTimelineNormalizationForActivePlayhead();
+      return samples;
+    }
 
     if (!this.initialAudioTimelineAnchored) {
-      const firstPts = samples[0].pts;
-      this.initialAudioPtsOffsetMs =
-        firstPts >= AUDIO_TIMELINE_NORMALIZE_THRESHOLD_MS ? firstPts : 0;
+      // If video has been shifted (resync case: both tracks start late),
+      // mirror its offset so audio stays in sync with video. Otherwise fall
+      // back to the original "shift only if audio starts late" behavior,
+      // which handles dual-audio MKVs where the secondary track's first
+      // PTS is several seconds past zero while video starts at zero.
+      if (
+        this.initialVideoTimelineAnchored &&
+        this.initialVideoPtsOffsetMs > 0
+      ) {
+        this.initialAudioPtsOffsetMs = this.initialVideoPtsOffsetMs;
+      } else {
+        const firstPts = samples[0].pts;
+        this.initialAudioPtsOffsetMs =
+          firstPts >= AUDIO_TIMELINE_NORMALIZE_THRESHOLD_MS ? firstPts : 0;
+      }
       this.initialAudioTimelineAnchored = true;
       if (this.initialAudioPtsOffsetMs > 0) {
         // eslint-disable-next-line no-console
@@ -1294,6 +2147,32 @@ export class MkvMseController {
     }));
   }
 
+  private shouldNormalizeInitialTimelineAtCurrentPlayhead(): boolean {
+    const playheadMs = (this.videoElement?.currentTime ?? 0) * 1000;
+    return playheadMs <= INITIAL_TIMELINE_NORMALIZE_MAX_PLAYHEAD_MS;
+  }
+
+  private disableInitialTimelineNormalizationForActivePlayhead(): void {
+    if (
+      this.initialVideoTimelineAnchored &&
+      this.initialAudioTimelineAnchored &&
+      this.initialVideoPtsOffsetMs === 0 &&
+      this.initialAudioPtsOffsetMs === 0
+    ) {
+      return;
+    }
+    this.initialVideoTimelineAnchored = true;
+    this.initialVideoPtsOffsetMs = 0;
+    this.initialAudioTimelineAnchored = true;
+    this.initialAudioPtsOffsetMs = 0;
+    // eslint-disable-next-line no-console
+    console.info(
+      `[mse] preserving MKV timeline at active playhead ` +
+      `${(this.videoElement?.currentTime ?? 0).toFixed(2)}s; ` +
+      `initial normalization is only safe near 0s`,
+    );
+  }
+
   /**
    * Side range-fetch that backfills audio between `playheadMs` and the main
    * stream's current byte position so a swap doesn't leave a silent gap.
@@ -1301,7 +2180,140 @@ export class MkvMseController {
    * offset; falls back to the latest indexed cluster when no earlier match
    * exists.
    */
-  private async startAudioCatchUp(playheadMs: number): Promise<void> {
+  private async startMediaSeekCatchUp(
+    playheadMs: number,
+    serial: number,
+  ): Promise<void> {
+    if (!this.info) return;
+    if (this.clusterIndex.length === 0) return;
+
+    const lookbackMs = 500;
+    const targetMs = Math.max(0, playheadMs - lookbackMs);
+    let pickIndex = 0;
+    let pick = this.clusterIndex[0];
+    for (let i = 0; i < this.clusterIndex.length; i++) {
+      const e = this.clusterIndex[i];
+      if (e.ptsMs <= targetMs) pick = e;
+      else break;
+      pickIndex = i;
+    }
+
+    let mediaPick = pick;
+    let mediaPickIndex = pickIndex;
+    for (let i = pickIndex; i >= 0; i--) {
+      const e = this.clusterIndex[i];
+      if (e.hasVideoKeyframe) {
+        mediaPick = e;
+        mediaPickIndex = i;
+        break;
+      }
+    }
+
+    const startOffset = mediaPick.fileOffset;
+    const desiredEndMs = playheadMs + SEEK_MEDIA_CATCH_UP_AHEAD_MS;
+    const endByTime = this.clusterIndex
+      .slice(mediaPickIndex + 1)
+      .find((e) => e.ptsMs >= desiredEndMs)?.fileOffset;
+    const endByBytes = startOffset + SEEK_MEDIA_CATCH_UP_MAX_BYTES;
+    const endOffset = Math.min(
+      Math.max(startOffset, this.fetchOffset),
+      endByTime ?? Number.POSITIVE_INFINITY,
+      endByBytes,
+      this.fileSize,
+    );
+    if (endOffset <= startOffset) return;
+
+    if (this.audioCatchUpAbort) {
+      try { this.audioCatchUpAbort.abort(); } catch { /* ignore */ }
+      this.audioCatchUpAbort = null;
+    }
+    this.mediaSeekCatchUpActive = true;
+
+    // Old forward-stream appends can be many minutes ahead of a backward seek.
+    // Drop queued-but-not-yet-appended video so the target window reaches MSE
+    // before the browser gives up waiting at the new playhead.
+    this.videoAppendQueue = [];
+
+    const catchUpAbort = new AbortController();
+    this.audioCatchUpAbort = catchUpAbort;
+    const linkedSignal = catchUpAbort.signal;
+    const shouldContinue = () =>
+      !this.destroyed &&
+      !linkedSignal.aborted &&
+      this.audioCatchUpSerial === serial;
+    const url = buildMediaUrl(this.fileId);
+
+    try {
+      if (!shouldContinue()) return;
+      const res = await authedFetch(
+        url,
+        {
+          headers: { Range: `bytes=${startOffset}-${endOffset - 1}` },
+          signal: linkedSignal,
+        },
+        { kind: "media-range", priority: "critical", signal: linkedSignal },
+      );
+      if (!shouldContinue()) return;
+      const ab = await res.arrayBuffer();
+      if (!shouldContinue()) return;
+      const data = new Uint8Array(ab);
+
+      // eslint-disable-next-line no-console
+      console.info(
+        `[mse] media catch-up (seek): ` +
+        `${((endOffset - startOffset) / 1024 / 1024).toFixed(2)} MB ` +
+        `from cluster@pts=${(mediaPick.ptsMs / 1000).toFixed(2)}s` +
+        `${mediaPick.hasVideoKeyframe ? "" : " (no earlier keyframe indexed)"}`,
+      );
+
+      await this.prepareVideoSeekAppend();
+      if (!shouldContinue()) return;
+
+      await this.processChunk(data, {
+        audioOnly: false,
+        chunkBaseFileOffset: startOffset,
+        updateLeftover: false,
+        shouldContinue,
+        suppressRawChunk: true,
+        updateClusterIndex: false,
+        randomAccessVideo: true,
+        audioPtsMinMs: targetMs,
+        audioPtsMaxMs: desiredEndMs,
+        videoPtsMinMs: Math.max(0, mediaPick.ptsMs - 250),
+        videoPtsMaxMs: desiredEndMs,
+      });
+      if (shouldContinue()) {
+        const ready = await this.waitForVideoBufferedAt(
+          playheadMs / 1000,
+          shouldContinue,
+        );
+        if (!ready) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[mse] media catch-up appended but target ` +
+            `${(playheadMs / 1000).toFixed(2)}s is still not video-buffered`,
+          );
+          return;
+        }
+        this.requestStreamRestart(endOffset);
+      }
+    } catch (e) {
+      if (!isAbortError(e)) throw e;
+    } finally {
+      if (this.audioCatchUpAbort === catchUpAbort) {
+        this.audioCatchUpAbort = null;
+      }
+      if (this.audioCatchUpSerial === serial) {
+        this.mediaSeekCatchUpActive = false;
+      }
+    }
+  }
+
+  private async startAudioCatchUp(
+    playheadMs: number,
+    reason: "switch" | "seek" = "switch",
+    serial?: number,
+  ): Promise<void> {
     if (!this.info) return;
     if (this.clusterIndex.length === 0) return;
 
@@ -1310,45 +2322,112 @@ export class MkvMseController {
     // hitting the playhead even if the cluster doesn't start exactly there.
     const lookbackMs = 500;
     const targetMs = Math.max(0, playheadMs - lookbackMs);
+    let pickIndex = 0;
     let pick = this.clusterIndex[0];
-    for (const e of this.clusterIndex) {
+    for (let i = 0; i < this.clusterIndex.length; i++) {
+      const e = this.clusterIndex[i];
       if (e.ptsMs <= targetMs) pick = e;
       else break;
+      pickIndex = i;
     }
     const startOffset = pick.fileOffset;
-    const endOffset = Math.max(startOffset, this.fetchOffset);
+    let endOffset = Math.max(startOffset, this.fetchOffset);
+    const audioPtsMinMs = targetMs;
+    let audioPtsMaxMs: number | undefined;
+    if (reason === "seek") {
+      const desiredEndMs = playheadMs + SEEK_AUDIO_CATCH_UP_AHEAD_MS;
+      audioPtsMaxMs = desiredEndMs;
+      const endByTime = this.clusterIndex
+        .slice(pickIndex + 1)
+        .find((e) => e.ptsMs >= desiredEndMs)?.fileOffset;
+      const endByBytes = startOffset + SEEK_AUDIO_CATCH_UP_MAX_BYTES;
+      endOffset = Math.min(
+        Math.max(startOffset, this.fetchOffset),
+        endByTime ?? Number.POSITIVE_INFINITY,
+        endByBytes,
+        this.fileSize,
+      );
+    }
     if (endOffset <= startOffset) return;
 
-    this.audioCatchUpAbort = new AbortController();
-    const linkedSignal = this.audioCatchUpAbort.signal;
+    if (this.audioCatchUpAbort) {
+      try { this.audioCatchUpAbort.abort(); } catch { /* ignore */ }
+      this.audioCatchUpAbort = null;
+    }
+
+    const catchUpAbort = new AbortController();
+    this.audioCatchUpAbort = catchUpAbort;
+    const linkedSignal = catchUpAbort.signal;
+    const catchUpSerial = serial ?? ++this.audioCatchUpSerial;
+    const shouldContinue = () =>
+      !this.destroyed &&
+      !linkedSignal.aborted &&
+      this.audioCatchUpSerial === catchUpSerial;
     const url = buildMediaUrl(this.fileId);
-    const res = await authedFetch(
-      url,
-      {
-        headers: { Range: `bytes=${startOffset}-${endOffset - 1}` },
-        signal: linkedSignal,
-      },
-      { kind: "media-range", priority: "critical", signal: linkedSignal },
-    );
-    if (this.destroyed) return;
-    const ab = await res.arrayBuffer();
-    if (this.destroyed) return;
-    const data = new Uint8Array(ab);
+    try {
+      if (!shouldContinue()) return;
+      const res = await authedFetch(
+        url,
+        {
+          headers: { Range: `bytes=${startOffset}-${endOffset - 1}` },
+          signal: linkedSignal,
+        },
+        { kind: "media-range", priority: "critical", signal: linkedSignal },
+      );
+      if (!shouldContinue()) return;
+      const ab = await res.arrayBuffer();
+      if (!shouldContinue()) return;
+      const data = new Uint8Array(ab);
 
-    // eslint-disable-next-line no-console
-    console.info(
-      `[mse] audio catch-up: ${((endOffset - startOffset) / 1024 / 1024).toFixed(2)} MB ` +
-      `from cluster@pts=${(pick.ptsMs / 1000).toFixed(2)}s`,
-    );
+      // eslint-disable-next-line no-console
+      console.info(
+        `[mse] audio catch-up (${reason}): ` +
+        `${((endOffset - startOffset) / 1024 / 1024).toFixed(2)} MB ` +
+        `from cluster@pts=${(pick.ptsMs / 1000).toFixed(2)}s`,
+      );
 
-    // Demux audio-only out of the fetched window. Do NOT touch
-    // nextChunkFileOffset / leftoverBuf — those belong to the main stream.
-    await this.processChunk(data, {
-      audioOnly: true,
-      chunkBaseFileOffset: startOffset,
-      updateLeftover: false,
-    });
-    this.audioCatchUpAbort = null;
+      // Demux audio-only out of the fetched window. Do NOT touch
+      // nextChunkFileOffset / leftoverBuf — those belong to the main stream.
+      await this.processChunk(data, {
+        audioOnly: true,
+        chunkBaseFileOffset: startOffset,
+        updateLeftover: false,
+        shouldContinue,
+        audioPtsMinMs,
+        audioPtsMaxMs,
+      });
+    } catch (e) {
+      if (!isAbortError(e)) throw e;
+    } finally {
+      if (this.audioCatchUpAbort === catchUpAbort) {
+        this.audioCatchUpAbort = null;
+      }
+    }
+  }
+
+  private describeAccumulationState(
+    accumulated: Uint8Array | null,
+    incoming: Uint8Array,
+  ): string {
+    const pendingBytes = accumulated?.length ?? 0;
+    const partial = this.partialCluster;
+    const partialText = partial
+      ? `partialCluster{cluster@${partial.clusterFileOffset}, ` +
+        `end=${partial.dataEndFileOffset ?? "unknown"}, ` +
+        `time=${partial.clusterTimeMs.toFixed(1)}ms, indexed=${partial.indexed}}`
+      : "partialCluster=none";
+    const head = accumulated
+      ? formatHex(accumulated.subarray(0, Math.min(12, accumulated.length)))
+      : "";
+    const tail = accumulated
+      ? formatHex(accumulated.subarray(Math.max(0, accumulated.length - 12)))
+      : "";
+    return (
+      `pending=${(pendingBytes / 1024 / 1024).toFixed(2)}MB ` +
+      `incoming=${(incoming.length / 1024).toFixed(1)}KB ` +
+      `fetchOffset=${this.fetchOffset} nextChunk=${this.nextChunkFileOffset} ` +
+      `${partialText} pendingHead=[${head}] pendingTail=[${tail}]`
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -1440,6 +2519,47 @@ function concatBuffers(a: Uint8Array, b: Uint8Array): Uint8Array {
   out.set(a, 0);
   out.set(b, a.length);
   return out;
+}
+
+function sampleRunDurationMs(
+  samples: DemuxedSample[],
+  defaultDurNs: number,
+  fallbackMs: number,
+): number {
+  const defaultMs = defaultDurNs > 0 ? defaultDurNs / 1_000_000 : 0;
+  let total = 0;
+  for (const sample of samples) {
+    total += sample.duration > 0 ? sample.duration : defaultMs || fallbackMs;
+  }
+  return total;
+}
+
+function sampleOverlapsPtsWindow(
+  sample: DemuxedSample,
+  minMs?: number,
+  maxMs?: number,
+): boolean {
+  const durationMs = sample.duration > 0 ? sample.duration : 0;
+  const endMs = sample.pts + durationMs;
+  if (minMs != null && endMs < minMs) return false;
+  if (maxMs != null && sample.pts > maxMs) return false;
+  return true;
+}
+
+function formatByteCount(bytes: number): string {
+  return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+}
+
+function formatHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join(" ");
+}
+
+function isAbortError(e: unknown): boolean {
+  if (!e || typeof e !== "object") return false;
+  const name = "name" in e ? (e as { name?: unknown }).name : "";
+  return name === "AbortError";
 }
 
 function sleep(ms: number): Promise<void> {

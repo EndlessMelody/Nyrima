@@ -34,7 +34,7 @@ _Last touched: 2026-05-16_
     before each release tag.
 
 ## Phase 2 — Real player · **shipped**
-_Last touched: 2026-05-16_
+_Last touched: 2026-05-22_
 
 - [x] EBML / MKV header probe to read codec + duration before decoding
 - [x] Native-first MKV with MSE remux fallback (force-native strategy)
@@ -62,6 +62,10 @@ _Last touched: 2026-05-16_
     dub swap. Surfaced via `handlePickAudioTrackNumber` in PlayerPage
     with the route-reload-with-`?audio=N` path retained as fallback
     for native MKV mode. Backlog F.9 closed.
+  - 2026-05-22 deploy pass adds the external AC-3 lane used when Chromium
+    rejects a muxed AC-3 combo: AC-3 frames decode through the WASM fallback,
+    backward external-audio seeks recover against an indexed video window,
+    and the audio picker marks the experimental AC-3 route explicitly.
 - [→] **P2.5** Smarter MKV header sniff — _deferred to backlog_
   - Bandwidth optimization (3–4 MB saved per video open). No user-observable
     defect today; 4 MB also seeds the MSE cluster prelude for fast first
@@ -79,6 +83,9 @@ Ships extra to Phase 2 to make the player feel less like a debug surface.
 - [x] Theatre-mode toggle in the bottom-right cluster — hides info card +
       playlist sidebar and dims the app-shell header via `:has()`
 - [x] Next-up autoplay card with poster + countdown, last 20 s of the episode
+- [x] Keyboard-accessible pointer scrubbing that previews while dragging and
+      commits the seek on release, so out-of-buffer jumps have one settled
+      target instead of a stream of half-seeks
 - [→] Timeline chapter markers — _deferred_ (needs EBML Chapters parsing,
       tracked as F.11)
 - [→] Unified Tracks panel (Subtitles + Audio tabs) — _deferred_ (rolls in
@@ -282,7 +289,7 @@ Drive's binary view/edit permission model.
     the entire folder.
 
 ## Pre-launch hardening · **shipped**
-_Last touched: 2026-05-20_
+_Last touched: 2026-05-22_
 
 Cleanup pass run on the road to v0.1.0. No new product surface — this
 section is the evidence that the extension is shippable today.
@@ -306,6 +313,9 @@ section is the evidence that the extension is shippable today.
     `googleapis.com/drive/v3/files/` (`initiatorDomains: [runtime.id]`).
   - BYOK OAuth + 24 h interactive consent ceiling caps stolen-device
     blast radius (`NEEDS_RECONSENT` resurfaces the consent screen).
+  - Public `Shared/index.json` reads validate owner, timestamps, Drive IDs,
+    optional image URL hosts, and entry shape before the Social store trusts a
+    followed user's Drive manifest.
 - [x] **L.4** Keyboard shortcut audit: cheatsheet matches the bound
   handler 1:1 (Playback, Audio & View, Subtitles, Playlist groups). No
   conflicts with browser-default chords; modifier keys deliberately
@@ -313,8 +323,8 @@ section is the evidence that the extension is shippable today.
 - [x] **L.5** Docs refresh: README / architecture / plan / PHASES all
   reflect the shipped Phase 4 + folder-poster pivot. Stale references
   to MAL/Jikan and `METADATA_CACHE.v2` removed.
-- [x] **L.6** TSC + Vitest green: `tsc --noEmit` exits 0, 87 tests
-  pass across 11 files (parser, subtitle converters, MKV remux, EBML,
+- [x] **L.6** TSC + Vitest green: `tsc --noEmit` exits 0, 107 tests
+  pass across 14 files (parser, subtitle converters, MKV remux, EBML,
   sharing services).
 
 ## Phase 5 — Realtime + privacy · **not started**

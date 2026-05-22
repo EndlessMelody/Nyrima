@@ -32,6 +32,8 @@ export interface PlayerAudioTrack {
   disabled?: boolean;
   /** Optional explanation shown in `title` when the row is disabled. */
   disabledReason?: string;
+  /** Optional short status label shown at the right edge of the row. */
+  badge?: string;
 }
 
 interface Props {
@@ -143,7 +145,9 @@ export function SettingsPopover({
                     <span className="dc-vlc__menu-side">
                       {track.disabled
                         ? "Unsupported"
-                        : track.language?.toUpperCase() || "AUDIO"}
+                        : track.badge ??
+                          track.language?.toUpperCase() ??
+                          "AUDIO"}
                     </span>
                   </button>
                 ))

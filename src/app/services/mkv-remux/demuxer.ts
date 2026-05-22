@@ -37,6 +37,7 @@ export interface ParseMkvMediaInfoOptions {
   audioTrackNumber?: number;
 }
 import type {
+  Ac3SpecificBoxFields,
   MkvMediaInfo,
   VideoTrackInfo,
   AudioTrackInfo,
@@ -82,25 +83,70 @@ export function parseMkvMediaInfo(
   let video: VideoTrackInfo | undefined;
   let audioTracks: AudioTrackInfo[] = [];
   let firstClusterOffset = 0;
+  // Tracks the DECLARED end of the last top-level element we walked, even
+  // when its content extends past the header buffer. When the first Cluster
+  // lives past the buffer (e.g. a multi-MB Cues element sits between Tracks
+  // and the first Cluster), this is where streaming should begin — otherwise
+  // we'd land in the middle of Cues content and the stream parser would see
+  // garbage until it stumbles into a Cluster ID by luck.
+  let postHeaderResumeOffset = segDataStart;
 
   let tracksResult: MediaTracks | undefined;
 
-  for (const el of iterateElements(buf, segDataStart, segEnd)) {
-    if (el.id === MKV_ID.Info) {
+  // Manual walk so we can advance past partial top-level elements using
+  // their DECLARED size, not the buffer-clamped size that iterateElements
+  // would yield. iterateElements stops yielding after one partial element;
+  // we need to keep accounting for what's past the buffer.
+  let walkOffset = segDataStart;
+  while (walkOffset < segEnd && walkOffset < buf.length) {
+    if (buf[walkOffset] === 0x00) {
+      walkOffset++;
+      continue;
+    }
+    const el = readElement(buf, walkOffset);
+    if (!el) break;
+
+    if (el.id === MKV_ID.Cluster) {
+      firstClusterOffset = el.elementOffset;
+      break;
+    }
+
+    // Only parse Info / Tracks when their data fully fits in the buffer.
+    if (
+      el.id === MKV_ID.Info &&
+      el.dataLengthRaw !== -1 &&
+      el.dataOffset + el.dataLengthRaw <= buf.length
+    ) {
       const parsed = parseInfoElement(buf, el);
       timecodeScaleNs = parsed.timecodeScaleNs;
       durationMs = parsed.durationMs;
     }
-    if (el.id === MKV_ID.Tracks) {
+    if (
+      el.id === MKV_ID.Tracks &&
+      el.dataLengthRaw !== -1 &&
+      el.dataOffset + el.dataLengthRaw <= buf.length
+    ) {
       tracksResult = parseMediaTracks(buf, el);
       video = tracksResult.video;
       audioTracks = tracksResult.audioTracks;
     }
-    if (el.id === MKV_ID.Cluster) {
-      // Record the absolute byte offset of the first Cluster
-      firstClusterOffset = el.elementOffset;
-      break; // stop scanning — we have everything we need
-    }
+
+    const declaredEnd =
+      el.dataLengthRaw === -1
+        ? el.elementOffset + el.elementLength
+        : el.dataOffset + el.dataLengthRaw;
+    postHeaderResumeOffset = declaredEnd;
+    walkOffset = declaredEnd;
+  }
+
+  if (firstClusterOffset <= 0) {
+    // Prefer a real Cluster signature if findFirstClusterOffset can find one;
+    // otherwise resume at the declared end of the last walked element. If
+    // even that's still inside the header buffer (which would mean no Cues/
+    // Attachments lived past the header), fall back to buf.length.
+    firstClusterOffset =
+      findFirstClusterOffset(buf, segDataStart, segEnd) ??
+      Math.max(postHeaderResumeOffset, buf.length);
   }
 
   // Select the requested audio track (caller's `audioTrackNumber`), falling
@@ -127,13 +173,141 @@ export function parseMkvMediaInfo(
     );
   }
 
-  return {
+  const info: MkvMediaInfo = {
     timecodeScaleNs,
     durationMs,
     video,
     audio,
     audioTracks,
     firstClusterOffset,
+  };
+  return attachAc3ConfigFromBufferedClusters(buf, info);
+}
+
+export function findFirstClusterOffset(
+  buf: Uint8Array,
+  start: number,
+  end: number,
+): number | null {
+  const bound = Math.min(end, buf.length - 4);
+  for (let offset = Math.max(0, start); offset <= bound; offset++) {
+    if (
+      buf[offset] !== 0x1f ||
+      buf[offset + 1] !== 0x43 ||
+      buf[offset + 2] !== 0xb6 ||
+      buf[offset + 3] !== 0x75
+    ) {
+      continue;
+    }
+    const el = readElement(buf, offset);
+    if (el?.id === MKV_ID.Cluster) return offset;
+  }
+  return null;
+}
+
+function attachAc3ConfigFromBufferedClusters(
+  buf: Uint8Array,
+  info: MkvMediaInfo,
+): MkvMediaInfo {
+  const audio = info.audio;
+  if (!audio || audio.codec !== "ac3" || audio.ac3) return info;
+  if (info.firstClusterOffset <= 0 || info.firstClusterOffset >= buf.length) {
+    return info;
+  }
+
+  const ac3 = findFirstAc3Config(buf, info.firstClusterOffset, info);
+  if (!ac3) return info;
+
+  const nextAudio = { ...audio, ac3 };
+  return {
+    ...info,
+    audio: nextAudio,
+    audioTracks: info.audioTracks.map((track) =>
+      track.trackNumber === audio.trackNumber ? { ...track, ac3 } : track,
+    ),
+  };
+}
+
+function findFirstAc3Config(
+  buf: Uint8Array,
+  firstClusterOffset: number,
+  info: MkvMediaInfo,
+): Ac3SpecificBoxFields | null {
+  let offset = firstClusterOffset;
+  while (offset < buf.length) {
+    if (buf[offset] === 0x00) {
+      offset++;
+      continue;
+    }
+    const el = readElement(buf, offset);
+    if (!el) break;
+
+    if (el.id === MKV_ID.Cluster) {
+      const samples = extractClusterSamples(buf, el, info);
+      for (const sample of samples) {
+        if (
+          !sample.isVideo &&
+          sample.trackNumber === info.audio?.trackNumber
+        ) {
+          const parsed = parseAc3SpecificBoxFields(sample.data);
+          if (parsed) return parsed;
+        }
+      }
+    }
+
+    if (el.dataLengthRaw === -1) break;
+    offset = el.dataOffset + el.dataLengthRaw;
+  }
+  return null;
+}
+
+export function parseAc3SpecificBoxFields(
+  frame: Uint8Array,
+): Ac3SpecificBoxFields | null {
+  if (frame.length < 7 || frame[0] !== 0x0b || frame[1] !== 0x77) {
+    return null;
+  }
+
+  let bitOffset = 0;
+  const readBits = (count: number): number => {
+    let value = 0;
+    for (let i = 0; i < count; i++) {
+      const byteIndex = bitOffset >> 3;
+      if (byteIndex >= frame.length) return 0;
+      const bitIndex = 7 - (bitOffset & 0x07);
+      value = (value << 1) | ((frame[byteIndex] >> bitIndex) & 0x01);
+      bitOffset++;
+    }
+    return value;
+  };
+
+  readBits(16); // syncword
+  readBits(16); // crc1
+  const fscod = readBits(2);
+  const frmsizecod = readBits(6);
+  const bsid = readBits(5);
+  const bsmod = readBits(3);
+  const acmod = readBits(3);
+
+  if (fscod === 3 || frmsizecod > 37) return null;
+
+  if ((acmod & 0x01) !== 0 && acmod !== 0x01) {
+    readBits(2); // cmixlev
+  }
+  if ((acmod & 0x04) !== 0) {
+    readBits(2); // surmixlev
+  }
+  if (acmod === 0x02) {
+    readBits(2); // dsurmod
+  }
+
+  return {
+    fscod,
+    bsid,
+    bsmod,
+    acmod,
+    lfeon: readBits(1),
+    bitRateCode: frmsizecod >> 1,
   };
 }
 
@@ -307,13 +481,69 @@ export function extractClusterSamples(
   clusterEl: EbmlElement,
   info: MkvMediaInfo,
 ): DemuxedSample[] {
-  const samples: DemuxedSample[] = [];
-  let clusterTimeMs = 0;
-  const tsScale = info.timecodeScaleNs / 1_000_000; // ms per timecode unit
-
   const end = Math.min(buf.length, clusterEl.dataOffset + clusterEl.dataLength);
+  return extractClusterSamplesFromRange(
+    buf,
+    clusterEl.dataOffset,
+    end,
+    0,
+    info,
+  ).samples;
+}
 
-  for (const child of iterateElements(buf, clusterEl.dataOffset, end)) {
+export interface ClusterSampleRangeResult {
+  samples: DemuxedSample[];
+  clusterTimeMs: number;
+  /** Offset of the first byte not consumed. If this is less than `end`, the
+   *  remaining bytes begin an incomplete EBML child element. */
+  consumedOffset: number;
+  /** True when parsing stopped because the next top-level Cluster began. */
+  reachedClusterBoundary: boolean;
+}
+
+/**
+ * Extract complete child elements from a Cluster byte range.
+ *
+ * This is the streaming-friendly variant used when a Cluster is larger than
+ * the current network chunk. It emits only fully-present SimpleBlock /
+ * BlockGroup children and returns the first incomplete child offset so the
+ * controller can keep just that tail for the next read.
+ */
+export function extractClusterSamplesFromRange(
+  buf: Uint8Array,
+  start: number,
+  end: number,
+  initialClusterTimeMs: number,
+  info: MkvMediaInfo,
+): ClusterSampleRangeResult {
+  const samples: DemuxedSample[] = [];
+  let clusterTimeMs = initialClusterTimeMs;
+  const tsScale = info.timecodeScaleNs / 1_000_000; // ms per timecode unit
+  const safeEnd = Math.min(end, buf.length);
+  let offset = start;
+
+  while (offset < safeEnd) {
+    if (buf[offset] === 0x00) {
+      offset++;
+      continue;
+    }
+
+    const child = readElement(buf, offset);
+    if (!child) break;
+    if (child.id === MKV_ID.Cluster) {
+      return {
+        samples,
+        clusterTimeMs,
+        consumedOffset: offset,
+        reachedClusterBoundary: true,
+      };
+    }
+    const childEnd =
+      child.dataLengthRaw === -1
+        ? child.elementOffset + child.elementLength
+        : child.dataOffset + child.dataLengthRaw;
+    if (childEnd > safeEnd) break;
+
     if (child.id === MKV_ID.Timecode) {
       clusterTimeMs = readUint(buf, child.dataOffset, child.dataLength) * tsScale;
     }
@@ -326,23 +556,14 @@ export function extractClusterSamples(
     if (child.id === MKV_ID.BlockGroup) {
       parseBlockGroup(buf, child, clusterTimeMs, info, samples);
     }
+    offset = childEnd;
   }
 
-  // Intentionally NOT sorted. MKV stores SimpleBlocks in decode order;
-  // their `timecode` field is the PTS, which for HEVC/AVC with B-frames is
-  // non-monotonic across the array (a B-frame's PTS sits between I/P-frames
-  // that decode before it). Sorting by PTS would emit samples in DISPLAY
-  // order, which puts B-frames ahead of the references they need — Chrome's
-  // HEVC decoder reads sample 0 (B), can't find its forward reference, and
-  // rejects the media fragment. Keeping file order preserves decode order
-  // so the mp4-generator can emit them in the same order in the moof's trun.
-  //
-  // (Long-term: emit per-sample `composition_time_offset` (ctts) in trun so
-  // the buffer's reported PTS matches display order without re-sorting.
-  // Until then PTS in the buffer equals DTS plus accumulated durations,
-  // which is close enough for playback — Chrome reorders via the
-  // bitstream's PicOrderCnt anyway.)
-  return samples;
+  // Intentionally NOT sorted. MKV stores SimpleBlocks in decode order; their
+  // `timecode` field is the PTS, which for HEVC/AVC with B-frames is
+  // non-monotonic across the array. Keeping file order preserves decode order
+  // so the mp4-generator can emit samples in the same order in the moof trun.
+  return { samples, clusterTimeMs, consumedOffset: offset, reachedClusterBoundary: false };
 }
 
 function blockToSamples(
@@ -359,27 +580,81 @@ function blockToSamples(
   const isAudio = block.trackNumber === info.audio?.trackNumber;
   if (!isVideo && !isAudio) return [];
 
+  const audio = isAudio ? info.audio : undefined;
   const defaultDurNs = isVideo
     ? info.video.defaultDurationNs
-    : info.audio?.defaultDurationNs ?? 0;
-  const durationMs = defaultDurNs > 0 ? defaultDurNs / 1_000_000 : 0;
-  const blockPts = clusterTimeMs + block.timecode;
+    : audio?.defaultDurationNs ?? 0;
+  const defaultDurationMs = defaultDurNs > 0 ? defaultDurNs / 1_000_000 : 0;
+  let framePts = clusterTimeMs + block.timecode;
 
   // Laced blocks contain N audio frames sharing one timecode. Each frame's
-  // PTS advances by `durationMs` from the block's base — that's how
-  // mkvtoolnix / ffmpeg recover per-frame timestamps from a laced block.
+  // PTS advances by its packet duration from the block's base. Opus-in-MKV
+  // commonly omits DefaultDuration, so derive the duration from the Opus TOC
+  // byte before falling back to TrackEntry DefaultDuration.
   const out: DemuxedSample[] = [];
   for (let i = 0; i < block.frames.length; i++) {
+    const frame = block.frames[i];
+    const durationMs =
+      getFrameDurationMs(frame, isVideo, audio, defaultDurationMs);
     out.push({
       trackNumber: block.trackNumber,
       isVideo,
-      pts: blockPts + i * durationMs,
+      pts: framePts,
       duration: durationMs,
-      data: block.frames[i],
+      data: frame,
       isKeyframe: block.keyframe,
     });
+    if (durationMs > 0) framePts += durationMs;
   }
   return out;
+}
+
+function getFrameDurationMs(
+  frame: Uint8Array,
+  isVideo: boolean,
+  audio: AudioTrackInfo | undefined,
+  defaultDurationMs: number,
+): number {
+  if (!isVideo && audio?.codec === "opus") {
+    const opusDurationMs = getOpusPacketDurationMs(frame, audio.sampleRate);
+    if (opusDurationMs > 0) return opusDurationMs;
+  }
+  if (!isVideo && audio?.codec === "ac3") {
+    const sampleRate = audio.sampleRate > 0 ? audio.sampleRate : 48000;
+    return (1536 * 1000) / sampleRate;
+  }
+  return defaultDurationMs;
+}
+
+function getOpusPacketDurationMs(
+  packet: Uint8Array,
+  sampleRate: number,
+): number {
+  if (packet.length === 0) return 0;
+  const rate = sampleRate > 0 ? sampleRate : 48000;
+  const toc = packet[0];
+  let samplesPerFrame: number;
+
+  if ((toc & 0x80) !== 0) {
+    samplesPerFrame = (rate << ((toc >> 3) & 0x03)) / 400;
+  } else if ((toc & 0x60) === 0x60) {
+    samplesPerFrame = (toc & 0x08) !== 0 ? rate / 50 : rate / 100;
+  } else {
+    const size = (toc >> 3) & 0x03;
+    samplesPerFrame = size === 3 ? (rate * 60) / 1000 : (rate << size) / 100;
+  }
+
+  const frameCountCode = toc & 0x03;
+  let frameCount = 1;
+  if (frameCountCode === 1 || frameCountCode === 2) {
+    frameCount = 2;
+  } else if (frameCountCode === 3) {
+    if (packet.length < 2) return 0;
+    frameCount = packet[1] & 0x3f;
+  }
+
+  if (frameCount <= 0) return 0;
+  return (samplesPerFrame * frameCount * 1000) / rate;
 }
 
 function parseBlockGroup(

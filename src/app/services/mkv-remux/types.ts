@@ -29,6 +29,26 @@ export interface AudioTrackInfo {
   language: string;
   /** Free-form name from the MKV `Name` element — `"Japanese 5.1"`, etc. */
   name: string;
+  /**
+   * AC-3 fields from the first sync frame, when we have already seen one in
+   * the header preload. Used to build a precise `dac3` box for MSE.
+   */
+  ac3?: Ac3SpecificBoxFields;
+}
+
+export interface Ac3SpecificBoxFields {
+  /** Sample-rate code: 0=48 kHz, 1=44.1 kHz, 2=32 kHz. */
+  fscod: number;
+  /** Bitstream identification, usually 8 for standard AC-3. */
+  bsid: number;
+  /** Bitstream mode, usually 0 for complete main audio. */
+  bsmod: number;
+  /** Audio coding mode/channel layout. */
+  acmod: number;
+  /** Low-frequency effects channel present. */
+  lfeon: number;
+  /** AC-3 bitrate code, derived from the frame header `frmsizecod >> 1`. */
+  bitRateCode: number;
 }
 
 export interface DemuxedSample {

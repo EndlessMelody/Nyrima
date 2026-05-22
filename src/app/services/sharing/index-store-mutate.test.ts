@@ -44,7 +44,7 @@ function makeEntry(id: string): ShareEntry {
     v: 2,
     sharedAt: "2026-05-20T05:00:00.000Z",
     updatedAt: "2026-05-20T05:00:00.000Z",
-    target: { kind: "video", fileId: `file-${id}` },
+    target: { kind: "video", fileId: `1AbCdEfGhIjKlMnOpQrStUvWxYz-${id}` },
     title: id,
   };
 }

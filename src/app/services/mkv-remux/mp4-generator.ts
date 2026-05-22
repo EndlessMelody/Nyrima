@@ -10,7 +10,12 @@
  *   Audio: AAC, FLAC, Opus, AC-3
  */
 
-import type { VideoTrackInfo, AudioTrackInfo, DemuxedSample } from "./types";
+import type {
+  Ac3SpecificBoxFields,
+  VideoTrackInfo,
+  AudioTrackInfo,
+  DemuxedSample,
+} from "./types";
 
 const VIDEO_TIMESCALE = 90000;
 
@@ -612,15 +617,18 @@ function buildAc3(audio: AudioTrackInfo): Uint8Array {
  * AC-3 decoder picks up the truth from each frame's sync header anyway, so
  * the dac3 box is mostly advisory for the container.
  *
- * `bit_rate_code = 23` is a safe over-estimate. The value here is informa-
- * tional; the decoder reads the real bitrate from each frame.
+ * When the demuxer has already seen an AC-3 sync frame, those header fields
+ * are used exactly. Otherwise we fall back to 640 kbps (`bit_rate_code = 18`),
+ * the largest valid AC-3 bitrate code.
  */
 function buildDac3(audio: AudioTrackInfo): Uint8Array {
-  const fscod = ac3FscodFor(audio.sampleRate);
-  const bsid = 8;
-  const bsmod = 0;
-  const { acmod, lfeon } = ac3ChannelLayoutFor(audio.channels);
-  const bit_rate_code = 23;
+  const fields = audio.ac3 ?? fallbackAc3Fields(audio);
+  const fscod = clampBits(fields.fscod, 2);
+  const bsid = clampBits(fields.bsid, 5);
+  const bsmod = clampBits(fields.bsmod, 3);
+  const acmod = clampBits(fields.acmod, 3);
+  const lfeon = clampBits(fields.lfeon, 1);
+  const bitRateCode = clampBits(fields.bitRateCode, 5);
 
   const payload = new Uint8Array(3);
   payload[0] = (fscod << 6) | (bsid << 1) | ((bsmod >> 2) & 0x01);
@@ -628,9 +636,26 @@ function buildDac3(audio: AudioTrackInfo): Uint8Array {
     ((bsmod & 0x03) << 6) |
     (acmod << 3) |
     (lfeon << 2) |
-    ((bit_rate_code >> 3) & 0x03);
-  payload[2] = (bit_rate_code & 0x07) << 5;
+    ((bitRateCode >> 3) & 0x03);
+  payload[2] = (bitRateCode & 0x07) << 5;
   return box("dac3", payload);
+}
+
+function fallbackAc3Fields(audio: AudioTrackInfo): Ac3SpecificBoxFields {
+  const { acmod, lfeon } = ac3ChannelLayoutFor(audio.channels);
+  return {
+    fscod: ac3FscodFor(audio.sampleRate),
+    bsid: 8,
+    bsmod: 0,
+    acmod,
+    lfeon,
+    bitRateCode: 18,
+  };
+}
+
+function clampBits(value: number, bits: number): number {
+  const max = (1 << bits) - 1;
+  return Math.max(0, Math.min(max, value | 0));
 }
 
 function ac3FscodFor(sampleRate: number): number {
@@ -730,12 +755,13 @@ export function generateVideoMediaSegment(
   samples: DemuxedSample[],
   sequenceNumber: number,
   video: VideoTrackInfo,
+  baseDecodeTimeMs?: number,
 ): Uint8Array {
   const videoSamples = samples.filter((s) => s.isVideo);
   if (videoSamples.length === 0) return new Uint8Array(0);
   fillDurations(videoSamples, video.defaultDurationNs);
   return assembleMediaSegment(sequenceNumber, [
-    makeVideoTrafInput(videoSamples, 1),
+    makeVideoTrafInput(videoSamples, 1, baseDecodeTimeMs),
   ]);
 }
 
@@ -769,11 +795,17 @@ interface TrafInput {
   hasCompositionOffsets?: boolean;
 }
 
-function makeVideoTrafInput(samples: DemuxedSample[], trackId: number): TrafInput {
+function makeVideoTrafInput(
+  samples: DemuxedSample[],
+  trackId: number,
+  baseDecodeTimeMs?: number,
+): TrafInput {
   const ptsTicks = samples.map((s) =>
     Math.round((s.pts / 1000) * VIDEO_TIMESCALE),
   );
-  const baseDts = Math.min(...ptsTicks);
+  const baseDts = baseDecodeTimeMs == null
+    ? Math.min(...ptsTicks)
+    : Math.round((baseDecodeTimeMs / 1000) * VIDEO_TIMESCALE);
   const compositionOffsets = new Int32Array(samples.length);
   let sampleDts = baseDts;
   for (let i = 0; i < samples.length; i++) {

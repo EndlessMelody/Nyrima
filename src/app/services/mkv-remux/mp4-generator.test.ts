@@ -15,7 +15,12 @@ import {
   generateVideoMediaSegment,
   generateVideoInitSegment,
 } from "./mp4-generator";
-import type { AudioTrackInfo, DemuxedSample, VideoTrackInfo } from "./types";
+import type {
+  Ac3SpecificBoxFields,
+  AudioTrackInfo,
+  DemuxedSample,
+  VideoTrackInfo,
+} from "./types";
 
 /** Minimal H.264 AVCDecoderConfigurationRecord: profile=Baseline (0x42),
  *  compatibility=0, level=3.0 (0x1E), length-size-minus-one=3, zero SPS/PPS. */
@@ -35,6 +40,7 @@ const VIDEO_AVC: VideoTrackInfo = {
 function makeAc3(
   sampleRate: number,
   channels: number,
+  ac3?: Ac3SpecificBoxFields,
 ): AudioTrackInfo {
   return {
     trackNumber: 2,
@@ -45,6 +51,7 @@ function makeAc3(
     defaultDurationNs: 32_000_000,
     language: "jpn",
     name: "Japanese 5.1",
+    ac3,
   };
 }
 
@@ -75,6 +82,16 @@ function findBox(buf: Uint8Array, tag: string): number {
     }
   }
   throw new Error(`box "${tag}" not found in init segment`);
+}
+
+function readTfdtBaseDecodeTime(buf: Uint8Array): number {
+  const tfdtStart = findBox(buf, "tfdt");
+  const version = buf[tfdtStart + 8];
+  const dv = new DataView(buf.buffer, buf.byteOffset);
+  if (version === 0) return dv.getUint32(tfdtStart + 12, false);
+  const high = dv.getUint32(tfdtStart + 12, false);
+  const low = dv.getUint32(tfdtStart + 16, false);
+  return high * 0x100000000 + low;
 }
 
 describe("generateAudioInitSegment — Opus audio", () => {
@@ -143,28 +160,46 @@ describe("generateInitSegment — AC-3 audio", () => {
     // Re-derive the expected packing here so a future change to the bit
     // layout fails noisily instead of silently producing bad init segs.
     //
-    //   fscod=0 (48k), bsid=8, bsmod=0, acmod=7, lfeon=1, bit_rate_code=23
+    //   fscod=0 (48k), bsid=8, bsmod=0, acmod=7, lfeon=1, bit_rate_code=18
     //
     // byte 0 = fscod[2] bsid[5] bsmod[1-bit, top]
     //        = (0<<6) | (8<<1) | 0
     //        = 0x10
     // byte 1 = bsmod[2-bits, bottom] acmod[3] lfeon[1] bit_rate_code[2-top]
-    //        = (0<<6) | (7<<3) | (1<<2) | ((23>>3)&3)
+    //        = (0<<6) | (7<<3) | (1<<2) | ((18>>3)&3)
     //        = 0x00 | 0x38 | 0x04 | 0x02 = 0x3E
     // byte 2 = bit_rate_code[3-bottom] reserved[5]
-    //        = ((23&7)<<5) = 0xE0
-    expect(Array.from(payload)).toEqual([0x10, 0x3e, 0xe0]);
+    //        = ((18&7)<<5) = 0x40
+    expect(Array.from(payload)).toEqual([0x10, 0x3e, 0x40]);
   });
 
   it("packs dac3 fields for 48 kHz stereo (acmod=2, lfeon=0)", () => {
     const { data } = generateInitSegment(VIDEO_AVC, makeAc3(48000, 2));
     const dac3Start = findBox(data, "dac3");
     const payload = data.subarray(dac3Start + 8, dac3Start + 11);
-    // fscod=0, bsid=8, bsmod=0, acmod=2, lfeon=0, bit_rate_code=23
+    // fscod=0, bsid=8, bsmod=0, acmod=2, lfeon=0, bit_rate_code=18
     // byte 0 = (0<<6)|(8<<1)|0 = 0x10
-    // byte 1 = (0<<6)|(2<<3)|(0<<2)|((23>>3)&3) = 0x10 | 0x02 = 0x12
-    // byte 2 = ((23&7)<<5) = 0xE0
-    expect(Array.from(payload)).toEqual([0x10, 0x12, 0xe0]);
+    // byte 1 = (0<<6)|(2<<3)|(0<<2)|((18>>3)&3) = 0x10 | 0x02 = 0x12
+    // byte 2 = ((18&7)<<5) = 0x40
+    expect(Array.from(payload)).toEqual([0x10, 0x12, 0x40]);
+  });
+
+  it("prefers AC-3 fields parsed from the first sync frame", () => {
+    const { data } = generateInitSegment(
+      VIDEO_AVC,
+      makeAc3(48000, 2, {
+        fscod: 0,
+        bsid: 8,
+        bsmod: 0,
+        acmod: 2,
+        lfeon: 0,
+        bitRateCode: 10,
+      }),
+    );
+    const dac3Start = findBox(data, "dac3");
+    const payload = data.subarray(dac3Start + 8, dac3Start + 11);
+
+    expect(Array.from(payload)).toEqual([0x10, 0x11, 0x40]);
   });
 
   it("maps 44.1 kHz to fscod=1", () => {
@@ -282,6 +317,33 @@ describe("generateVideoMediaSegment — trun byte layout", () => {
     // The third sample is a B-frame whose display time is before its decode
     // slot, so trun version 1 must carry a negative signed offset.
     expect(thirdCto).toBeLessThan(0);
+  });
+
+  it("honors an explicit continuous video decode clock", () => {
+    const firstRun: DemuxedSample[] = [
+      makeFrame(0, true),
+      makeFrame(166, false),
+      makeFrame(42, false),
+    ];
+    const secondRun: DemuxedSample[] = [
+      makeFrame(1000, true),
+      makeFrame(1166, false),
+      makeFrame(1042, false),
+    ];
+    const firstSeg = generateVideoMediaSegment(firstRun, 1, VIDEO_AVC, 0);
+    const nextDecodeMs = (VIDEO_AVC.defaultDurationNs / 1_000_000) * 3;
+    const secondSeg = generateVideoMediaSegment(
+      secondRun,
+      2,
+      VIDEO_AVC,
+      nextDecodeMs,
+    );
+
+    expect(readTfdtBaseDecodeTime(firstSeg)).toBe(0);
+    expect(readTfdtBaseDecodeTime(secondSeg)).toBe(
+      Math.round((nextDecodeMs / 1000) * 90_000),
+    );
+    expect(readTfdtBaseDecodeTime(secondSeg)).not.toBe(90_000);
   });
 });
 

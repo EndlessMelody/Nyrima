@@ -231,6 +231,7 @@ export function DrivePlayer({
   const previewTimerRef = useRef<number | null>(null);
   const previewPendingTimeRef = useRef<number | null>(null);
   const previewBusyRef = useRef(false);
+  const activeScrubPointerIdRef = useRef<number | null>(null);
 
   // Stash callback props in a ref so the <video> event-binding effect only
   // runs once. Without this, every parent render that produces fresh
@@ -491,7 +492,8 @@ export function DrivePlayer({
     //   1. The codec isn't in the MSE remuxer's whitelist (e.g. DTS,
     //      TrueHD) — we can't build a fresh fMP4 init segment for it.
     //   2. PlayerPage found no browser path for it: neither MSE packaging
-    //      nor the external WebCodecs audio lane can play that track.
+    //      nor the external WebCodecs audio lane can play that track. AC-3 is
+    //      currently allowed through as an experimental test path.
     //
     // The currently-playing track is always enabled — even if its codec
     // hits one of those gates, clicking your own active dub is a no-op
@@ -504,14 +506,19 @@ export function DrivePlayer({
         const tracks: PlayerAudioTrack[] = mkvAudioTracks.map((t) => {
           const isActive = t.number === selectedMkvAudioTrackNumber;
           const isMuxerDefault = t.number === defaultTrackNumber;
+          const normCodec = t.codecId.toUpperCase().replace(/\s/g, "");
+          const isExperimentalAc3 =
+            t.remuxable &&
+            normCodec === "A_AC3" &&
+            t.browserSupported === false;
           const reason = !t.remuxable
             ? `${t.codecId} isn't in the MSE remuxer's whitelist. ` +
               `Nyrima can't switch into this dub on its own.`
-            : t.browserSupported === false
+            : t.browserSupported === false && !isExperimentalAc3
               ? `Your browser refuses ${t.codecId} for this file's ` +
                 `available playback paths.`
               : undefined;
-          const switchable = !reason || isMuxerDefault;
+          const switchable = !reason || isMuxerDefault || isExperimentalAc3;
           return {
             id: `mkv-${t.number}`,
             label: t.label,
@@ -519,6 +526,7 @@ export function DrivePlayer({
             enabled: isActive,
             disabled: !isActive && !switchable,
             disabledReason: switchable ? undefined : reason,
+            badge: isExperimentalAc3 ? "TEST" : undefined,
           };
         });
         setAudioTracks(tracks);
@@ -577,6 +585,7 @@ export function DrivePlayer({
     "idle" | "loading" | "ready" | "unavailable"
   >("idle");
   const [scrubbing, setScrubbing] = useState(false);
+  const [scrubTime, setScrubTime] = useState<number | null>(null);
   const scrubbingRef = useRef(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -1178,30 +1187,62 @@ export function DrivePlayer({
   }
 
   // Timeline scrubbing -------------------------------------------------------
-  function pctFromEvent(e: { clientX: number }): number {
-    const t = timelineRef.current;
-    if (!t) return 0;
-    const rect = t.getBoundingClientRect();
-    return Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  function getSeekableDuration(): number {
+    const mediaDuration = videoRef.current?.duration;
+    if (duration > 0 && Number.isFinite(duration)) return duration;
+    if (mediaDuration && mediaDuration > 0 && Number.isFinite(mediaDuration)) {
+      return mediaDuration;
+    }
+    return 0;
   }
 
-  function updateTimelineFromClientX(clientX: number, seek: boolean) {
-    if (!duration) return;
-    const pct = pctFromEvent({ clientX });
-    const nextTime = pct * duration;
+  function pctFromClientX(clientX: number): number | null {
+    const t = timelineRef.current;
+    if (!t) return null;
+    const rect = t.getBoundingClientRect();
+    if (rect.width <= 0) return null;
+    return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  }
+
+  function commitTimelineTime(time: number) {
+    const seekDuration = getSeekableDuration();
+    if (!seekDuration) return;
+    const nextTime = Math.max(0, Math.min(time, seekDuration));
+    const v = videoRef.current;
+    setCurrentTime(nextTime);
+    if (v) v.currentTime = nextTime;
+    kickIdleTimer();
+  }
+
+  function updateTimelineFromClientX(
+    clientX: number,
+    mode: "hover" | "scrub" | "commit",
+  ): number | null {
+    const seekDuration = getSeekableDuration();
+    if (!seekDuration) return null;
+    const pct = pctFromClientX(clientX);
+    if (pct === null) return null;
+    const nextTime = pct * seekDuration;
     setHoverTime(nextTime);
     setHoverX(pct);
     queueTimelinePreview(nextTime);
-    if (seek) {
-      const v = videoRef.current;
-      setCurrentTime(nextTime);
-      if (v) v.currentTime = nextTime;
+    if (mode !== "hover") {
+      setScrubTime(nextTime);
     }
+    if (mode === "commit") {
+      commitTimelineTime(nextTime);
+    }
+    return nextTime;
   }
 
   function onTimelinePointerMove(e: React.PointerEvent<HTMLDivElement>) {
-    if (!duration) return;
-    updateTimelineFromClientX(e.clientX, scrubbingRef.current);
+    if (!getSeekableDuration()) return;
+    if (scrubbingRef.current) {
+      e.preventDefault();
+      updateTimelineFromClientX(e.clientX, "scrub");
+      return;
+    }
+    updateTimelineFromClientX(e.clientX, "hover");
   }
 
   function onTimelinePointerLeave() {
@@ -1215,22 +1256,129 @@ export function DrivePlayer({
   }
 
   function onTimelinePointerDown(e: React.PointerEvent<HTMLDivElement>) {
-    if (!duration) return;
+    if (!getSeekableDuration()) return;
     e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
+    e.stopPropagation();
+    e.currentTarget.focus();
+    activeScrubPointerIdRef.current = e.pointerId;
     scrubbingRef.current = true;
     setScrubbing(true);
-    updateTimelineFromClientX(e.clientX, true);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Pointer capture can fail if the browser has already cancelled the
+      // pointer; the window listeners below keep the drag usable.
+    }
+    updateTimelineFromClientX(e.clientX, "scrub");
+  }
+
+  function finishTimelineScrub(
+    target: HTMLDivElement | null,
+    pointerId: number | null,
+    clientX?: number,
+  ) {
+    if (!scrubbingRef.current) return;
+    if (
+      activeScrubPointerIdRef.current !== null &&
+      pointerId !== null &&
+      pointerId !== activeScrubPointerIdRef.current
+    ) {
+      return;
+    }
+    if (typeof clientX === "number") {
+      updateTimelineFromClientX(clientX, "commit");
+    }
+    if (
+      target &&
+      pointerId !== null &&
+      target.hasPointerCapture(pointerId)
+    ) {
+      target.releasePointerCapture(pointerId);
+    }
+    activeScrubPointerIdRef.current = null;
+    scrubbingRef.current = false;
+    setScrubbing(false);
+    setScrubTime(null);
   }
 
   function finishTimelinePointer(e: React.PointerEvent<HTMLDivElement>) {
-    if (!scrubbingRef.current) return;
-    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
-      e.currentTarget.releasePointerCapture(e.pointerId);
+    e.preventDefault();
+    finishTimelineScrub(e.currentTarget, e.pointerId, e.clientX);
+  }
+
+  function onTimelineKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    const seekDuration = getSeekableDuration();
+    if (!seekDuration) return;
+    const base = scrubTime ?? videoRef.current?.currentTime ?? currentTime;
+    let nextTime: number | null = null;
+    switch (e.key) {
+      case "ArrowLeft":
+        nextTime = base - settings.skipSeconds;
+        break;
+      case "ArrowRight":
+        nextTime = base + settings.skipSeconds;
+        break;
+      case "PageDown":
+        nextTime = base - 30;
+        break;
+      case "PageUp":
+        nextTime = base + 30;
+        break;
+      case "Home":
+        nextTime = 0;
+        break;
+      case "End":
+        nextTime = seekDuration;
+        break;
+      default:
+        return;
     }
+    e.preventDefault();
+    e.stopPropagation();
+    commitTimelineTime(nextTime);
+  }
+
+  useEffect(() => {
+    if (!scrubbing) return;
+    function onWindowPointerMove(e: PointerEvent) {
+      if (
+        activeScrubPointerIdRef.current !== null &&
+        e.pointerId !== activeScrubPointerIdRef.current
+      ) {
+        return;
+      }
+      e.preventDefault();
+      updateTimelineFromClientX(e.clientX, "scrub");
+    }
+    function onWindowPointerEnd(e: PointerEvent) {
+      if (
+        activeScrubPointerIdRef.current !== null &&
+        e.pointerId !== activeScrubPointerIdRef.current
+      ) {
+        return;
+      }
+      e.preventDefault();
+      finishTimelineScrub(timelineRef.current, e.pointerId, e.clientX);
+    }
+    window.addEventListener("pointermove", onWindowPointerMove, {
+      passive: false,
+    });
+    window.addEventListener("pointerup", onWindowPointerEnd);
+    window.addEventListener("pointercancel", onWindowPointerEnd);
+    return () => {
+      window.removeEventListener("pointermove", onWindowPointerMove);
+      window.removeEventListener("pointerup", onWindowPointerEnd);
+      window.removeEventListener("pointercancel", onWindowPointerEnd);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scrubbing]);
+
+  useEffect(() => {
+    activeScrubPointerIdRef.current = null;
     scrubbingRef.current = false;
     setScrubbing(false);
-  }
+    setScrubTime(null);
+  }, [src]);
 
   function queueTimelinePreview(time: number) {
     if (!src || onVideoRef || !Number.isFinite(time)) {
@@ -1266,10 +1414,12 @@ export function DrivePlayer({
     }, 120);
   }
 
+  const displayTime = scrubTime ?? currentTime;
+
   const playedPct = useMemo(() => {
     if (!duration) return 0;
-    return (currentTime / duration) * 100;
-  }, [currentTime, duration]);
+    return (displayTime / duration) * 100;
+  }, [displayTime, duration]);
 
   const bufferedPct = useMemo(() => {
     if (!duration) return 0;
@@ -1286,8 +1436,8 @@ export function DrivePlayer({
   // Tracks with a reconstituted ASS source render through libass (JASSUB) so
   // typesetting (positions, karaoke, fades, fonts, colors) survives. Plain
   // SRT/VTT and untyped text tracks fall back to the CSS overlay. Embedded
-  // MKV ASS now follows this path too: extractMkvSubtitles rebuilds assSource
-  // incrementally and the JassubOverlay reloads on every script change.
+  // MKV ASS only enters this path after extraction finalizes, so libass sees
+  // a stable script instead of blinking through repeated track reloads.
   const jassubIntended =
     !!activeTrack?.assSource && activeTrack.assRenderer === "jassub";
   // libass is the *winning* renderer only after the worker reports ready AND
@@ -1562,17 +1712,29 @@ export function DrivePlayer({
       {/* Bottom HUD */}
       <div className="dc-vlc__hud">
         <div className="dc-vlc__timeline-head" aria-live="off">
-          <span>{formatTimecode(currentTime)}</span>
+          <span>{formatTimecode(displayTime)}</span>
           <span>{formatTimecode(duration)}</span>
         </div>
         <div
           ref={timelineRef}
-          className={cn("dc-vlc__timeline", { "is-scrubbing": scrubbing })}
+          className={cn("dc-vlc__timeline", {
+            "is-scrubbing": scrubbing,
+            "is-disabled": !duration,
+          })}
+          role="slider"
+          tabIndex={duration ? 0 : -1}
+          aria-label="Playback timeline"
+          aria-valuemin={0}
+          aria-valuemax={Math.max(0, Math.round(duration))}
+          aria-valuenow={Math.max(0, Math.round(displayTime))}
+          aria-valuetext={`${formatTimecode(displayTime)} of ${formatTimecode(duration)}`}
+          aria-disabled={!duration}
           onPointerMove={onTimelinePointerMove}
           onPointerLeave={onTimelinePointerLeave}
           onPointerDown={onTimelinePointerDown}
           onPointerUp={finishTimelinePointer}
           onPointerCancel={finishTimelinePointer}
+          onKeyDown={onTimelineKeyDown}
         >
           <div className="dc-vlc__timeline-track">
             <div

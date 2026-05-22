@@ -398,6 +398,7 @@
   cursor: pointer;
   touch-action: none;
   user-select: none;
+  outline: none;
 
   &-track {
     position: relative;
@@ -409,8 +410,21 @@
   }
 
   &:hover &-track,
+  &:focus-visible &-track,
   &.is-scrubbing &-track {
     height: 7px;
+  }
+
+  &:focus-visible &-track {
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.2);
+  }
+
+  &.is-scrubbing {
+    cursor: grabbing;
+  }
+
+  &.is-disabled {
+    cursor: default;
   }
 
   &.is-scrubbing .dc-vlc__tl-progress,
