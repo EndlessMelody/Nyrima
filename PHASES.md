@@ -28,10 +28,10 @@ _Last touched: 2026-05-16_
 - [x] Replace placeholder PNG icons with the managed extension icon export
   - `scripts/make-icons.mjs` resamples `public/icons/extension-icon.png` via `sharp` into
     16/32/48/128 PNGs for the Chrome extension manifest and toolbar action.
-- [x] End-to-end smoke test playbook for the sharing layer
-  - `docs/sharing-smoke-test.md` covers the fast loopback (own `Shared/` →
-    self-follow) and a two-account variant. Used to validate P4.1–P4.5
-    before each release tag.
+- [x] Sharing user guide with manual verification path
+  - `docs/sharing-guide.md` explains the Drive-native share model and keeps
+    the fast loopback/two-profile verification path beside the user-facing
+    permission warnings.
 
 ## Phase 2 — Real player · **shipped**
 _Last touched: 2026-05-22_
@@ -323,9 +323,9 @@ section is the evidence that the extension is shippable today.
 - [x] **L.5** Docs refresh: README / architecture / plan / PHASES all
   reflect the shipped Phase 4 + folder-poster pivot. Stale references
   to MAL/Jikan and `METADATA_CACHE.v2` removed.
-- [x] **L.6** TSC + Vitest green: `tsc --noEmit` exits 0, 107 tests
-  pass across 14 files (parser, subtitle converters, MKV remux, EBML,
-  sharing services).
+- [x] **L.6** TSC + Vitest green: `tsc --noEmit` exits 0, 112 tests
+  pass across 17 files (parser, subtitle converters, MKV remux, EBML,
+  sharing services, release-script tooling).
 
 ## Phase 5 — Realtime + privacy · **not started**
 _Last touched: never_
@@ -337,10 +337,12 @@ _Last touched: never_
 ---
 
 ## Cross-cutting backlog
-_Last touched: 2026-05-16_
+_Last touched: 2026-05-22_
 
 - [ ] **F.1** Lazy route splitting (`React.lazy` for Library + Player pages)
-- [ ] **F.2** Replace `scripts/zip.mjs` tar.gz fallback with `adm-zip`
+- [x] **F.2** Replace `scripts/zip.mjs` tar.gz fallback with `adm-zip`
+  - `npm run package` builds and verifies the upload ZIP; `npm run zip`
+    stays as a real-ZIP compatibility command for an existing `dist/` tree.
 - [ ] **F.3** Generate real PNG icons from `NyrimaMark` SVG in `make-icons.mjs`
 - [x] **F.4** Vitest setup + parser unit tests
   - 26 tests covering `parseTitle`, `normalizeMovieTitle`, `isEpisodicFilename`,

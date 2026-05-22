@@ -6,202 +6,193 @@
 
 ### Personal Video Cinema on Google Drive
 
-*Turn your Drive folder into a private streaming room — original quality, no backend, no uploads.*
+*Turn a Drive folder you can access into a private Chrome-extension cinema:
+original media bytes, folder-owned artwork, rich subtitles, and no Nyrima
+backend.*
 
 [![Built with React](https://img.shields.io/badge/Built%20with-React%2018-61DAFB?logo=react&logoColor=white&style=flat-square)](https://react.dev)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.5%2B-3178C6?logo=typescript&logoColor=white&style=flat-square)](https://www.typescriptlang.org)
-[![Vite](https://img.shields.io/badge/Bundler-Vite%205-646CFF?logo=vite&logoColor=white&style=flat-square)](https://vitejs.dev)
-[![Manifest V3](https://img.shields.io/badge/Chrome%20Extension-MV3-4285F4?logo=googlechrome&logoColor=white&style=flat-square)](https://developer.chrome.com/docs/extensions/mv3/intro)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178C6?logo=typescript&logoColor=white&style=flat-square)](https://www.typescriptlang.org)
+[![Vite](https://img.shields.io/badge/Bundler-Vite%206-646CFF?logo=vite&logoColor=white&style=flat-square)](https://vite.dev)
+[![Manifest V3](https://img.shields.io/badge/Chrome%20Extension-MV3-4285F4?logo=googlechrome&logoColor=white&style=flat-square)](https://developer.chrome.com/docs/extensions)
 [![License](https://img.shields.io/badge/License-MIT-22C55E?style=flat-square)](#license)
-[![Tests](https://img.shields.io/badge/Vitest-26%20passing-86EFAC?logo=vitest&logoColor=white&style=flat-square)](#testing)
+[![Tests](https://img.shields.io/badge/Vitest-112%20passing-86EFAC?logo=vitest&logoColor=white&style=flat-square)](#testing)
 
-[Architecture](./docs/architecture.md) • [Roadmap](./PHASES.md) • [Living Plan](./docs/plan.md) • [OAuth Setup](./docs/oauth-setup.md) • [Report an issue](https://github.com/EndlessMelody/Nyrima/issues)
+[Documentation](./docs/index.md) | [How It Works](./docs/how-nyrima-works.md) |
+[Architecture](./docs/architecture.md) | [OAuth Setup](./docs/oauth-setup.md) |
+[Privacy Policy](./docs/privacy-policy.md) |
+[Report an issue](https://github.com/EndlessMelody/Nyrima/issues)
 
 </div>
 
 ---
 
-## About
+## What Nyrima Is
 
-Nyrima is a Chrome MV3 extension that turns a single Google Drive folder
-into your personal cinema. Pair it with a folder you call your **Nyrima
-root** and every child folder becomes a library tile in a cinematic lobby:
-folder-placed posters, season / episode grouping, watch-state filters,
-continue-watching, and a custom VLC-flavored player that streams the
-original bytes from Drive — no transcoding, no third-party server, your
-tokens never leave the extension. A Drive-native sharing layer lets you
-publish a public manifest folder, follow friends, comment, and import
-shared videos straight into your own Drive.
+Nyrima is a Chrome Manifest V3 extension for watching personal video
+libraries stored in Google Drive. You pair one Drive folder as the Nyrima
+root, and each child folder becomes a library in the lobby. Nyrima finds
+videos, sibling subtitles, and artwork files you place in those folders,
+then plays the media inside an extension page.
 
-Phases 1 (MVP), 2 (real player), 3 (library polish), and 4 (sharing
-layer) are shipped. See [`PHASES.md`](./PHASES.md) for the rolling status
-of every ticket.
+Nyrima is not a hosted video service. The current app has no Nyrima backend,
+transcoding server, analytics endpoint, or ad network. Media stays in Drive
+and streams from Google Drive APIs to the browser when the user opens it.
 
-## Why Nyrima?
+## How It Works
 
-Most "watch from Drive" workflows force a tradeoff that takes the cinema
-out of personal media:
+1. The extension page lists folders and files from Google Drive using either a
+   user-provided Drive API key for public files or a user-provided Google
+   OAuth client for signed-in Drive access.
+2. The lobby turns child folders under the paired root into libraries with
+   poster art from files such as `Poster.jpg` and `Backdrop.webp`.
+3. The player prefers browser-native playback. For MKV files that need help,
+   Nyrima can Range-fetch Drive bytes, remux supported streams to fragmented
+   MP4 through Media Source Extensions, and render ASS subtitles with JASSUB.
+4. Settings, watch progress, recent folders, credential values, and caches are
+   stored locally in extension storage or IndexedDB. OAuth access tokens are
+   mediated by the background service worker.
+5. Sharing is optional. When the user publishes a Drive-created `Shared/`
+   folder, followers can read share metadata from Drive, comment through their
+   own Drive comment stream, and import accessible targets into their own
+   Drive with Drive server-side copy operations.
 
-- **Lossy re-encodes** — Drive's web preview re-encodes to ~360p. Fan-edits
-  and remuxed Blu-rays get mangled.
-- **Broken fansub typesetting** — Drive's preview ignores embedded ASS.
-  Signs, karaoke, and positioned credits disappear.
-- **No HEVC + multi-audio support** — Drive's player can't switch dub
-  tracks on Blu-ray MKVs, and HEVC fails outright.
-- **Lost progress across devices** — every fresh tab starts from frame 0.
-- **No cinematic surface** — a `<video>` tag inside drive.google.com is
-  not a movie night.
+For the plain-language version of the full data flow, see
+[`docs/how-nyrima-works.md`](./docs/how-nyrima-works.md). For implementation
+boundaries and storage details, see
+[`docs/architecture.md`](./docs/architecture.md).
 
-Nyrima keeps the bytes original, remuxes HEVC + FLAC MKVs through MSE
-with in-place audio-track switching (no page reload), renders ASS through
-**libass** (JASSUB), remembers playback positions, and frames the whole
-experience like a private streaming app.
+## Current Features
 
-## Features
+### Library
 
-### Lobby & library
-- **Nyrima root model** — pair with one Drive folder; its children become
-  libraries. Re-validated on every refresh so renames surface clearly.
-- **Lobby dashboard** with a Continue / Featured hero, an instrument-tape
-  stats strip (libraries · episodes · total runtime · watched), pinned and
-  random-pick shelves, plus a Continue-Watching horizontal scroll.
-- **Library page** with in-folder search, watched-state filters, persisted
-  sort (name / modified / size / duration), and three view modes
-  (grouped seasons / poster grid / list).
-- **Library cards** show a folder-placed `Poster.*` backdrop, episode
-  count, total runtime, and a watched-ratio pill that turns solid at
-  completion.
-- **Season / episode grouping** built on a folder-aware title parser so
-  `[GS]01.mkv` reads as *Gimai Seikatsu · S01 · Ep01*.
-- **User-placed posters** — drop a `Poster.{jpg,png,webp}` (and optional
-  `Backdrop.*`) into any library folder and Nyrima picks it up. No
-  third-party metadata lookups; what you place is what you see.
-- **Background bulk-enrichment** — un-visited libraries get stats + cover
-  paths resolved in the background on lobby load, so the UI fills in
-  without the user clicking through each library.
-- **Browser-native virtualisation** via `content-visibility: auto` on
-  every grid and list surface — collections with hundreds of episodes
-  stay smooth.
+- Pair one Google Drive root folder; each direct child folder becomes a
+  library tile.
+- Browse a cinematic lobby with recent libraries, pinned items, Continue
+  Watching, stats, library search, filters, sort order, grouped seasons, grid
+  mode, and list mode.
+- Use folder-owned artwork: `Poster.{jpg,png,webp}` and optional
+  `Backdrop.*` inside Drive folders. Nyrima does not fetch poster metadata
+  from a third-party media database.
+- Parse episode-style filenames and season folders for show grouping while
+  still supporting movie folders.
 
 ### Player
-- **Native-first MKV** with an automatic MSE-remux fallback. EBML header
-  probe reads codec + duration before decoding; per-file playback-mode
-  cache so re-opening the same file skips the watchdog cost.
-- **HEVC + FLAC Blu-ray rips** — the MSE pipeline emits split
-  video/audio SourceBuffers, fixes the trun field order, uses `hev1`
-  (not `hvc1`) for inline-parameter HEVC, and unpacks EBML/Xiph/fixed
-  lacing for multi-frame FLAC blocks. Cooperative yields keep the main
-  thread responsive on multi-MB clusters.
-- **In-place audio-track switching** — pick a different dub from the HUD
-  and the picture never blinks. The MSE controller re-parses the cached
-  Tracks element, runs `changeType` on the audio SourceBuffer, and
-  back-fills from `currentTime − 0.5 s` without touching the video pipe.
-- **Custom Neon Cinema chrome** with mono timecodes, centered play/skip
-  trio, auto-hiding HUD, hover preview bubble with a hairline tail, and
-  four corner brackets.
-- **Subtitles** — SRT / VTT / ASS / SSA auto-mount from siblings;
-  embedded MKV subs extract live during playback; **JASSUB / libass**
-  renders typesetting (positions, karaoke, fades, fonts). Embedded ASS
-  hands off to libass on finalize, with the CSS overlay bridging the
-  streaming window.
-- **Smart resume pill** — *Resume at MM:SS / Restart*, auto-confirms
-  after a draining 3.5 s timer.
-- **Pre-roll Now-Playing card** — series · episode · runtime fades over
-  the first frame for 3.4 s.
-- **Ambient backdrop glow** sampled from the folder's `Poster.*` (or
-  `Backdrop.*`), painted via box-shadow around the player frame;
-  transitions smoothly between episodes.
-- **Next-up autoplay card** with poster + countdown in the closing
-  seconds. Auto-advance fires on the `<video>` `ended` event so you see
-  the final frame first.
-- **Theatre-mode toggle** hides the surrounding chrome and dims the app
-  header without going fullscreen.
-- **`?` keyboard cheatsheet** documenting every shortcut grouped by
-  intent.
-- **Subtitle styling panel** — font preset, custom font upload, weight,
-  fill / outline color, shadow, letter spacing, vertical position.
 
-### Sharing (Phase 4)
-- **Drive-only social model.** Each user gets a `Shared/` folder with
-  one `index.json` (inline share entries) and one `comments.jsonl`
-  (own outbound comments). No backend, no server-side state.
-- **Follow + pull** — paste a friend's `Shared/` URL, scan their index,
-  flatten into the Inbox. Bounded-concurrency Drive reads, last-good
-  rows cached so `/social` renders before the network completes.
-- **Comments** — decentralized JSONL appends. Each commenter writes to
-  their own folder; the share owner reconstructs threads by reading
-  followers' streams and filtering by `sharedFolderId`.
-- **Drive-to-Drive import** — Inbox rows have an Import button that
-  uses Drive's server-side `files.copy` to mirror the shared target
-  into `Nyrima/Imports/<title - timestamp>/` in your own Drive. No
-  browser download/re-upload round trip.
-- **Bootstrap directory** — opt-in `DirectoryEntry[]` hosted on GitHub
-  raw, cached on a 24 h TTL. Discover rail surfaces people you aren't
-  already following.
+- Play Drive media from the extension player with resume state, next-up
+  autoplay, theatre mode, shortcuts, subtitle settings, audio-track controls,
+  and a custom HUD.
+- Prefer direct browser playback, then use the current MKV remux path for
+  supported MKV video/audio combinations that need MSE.
+- Support supported external sibling subtitles including SRT, VTT, ASS, and
+  SSA, plus supported embedded MKV text subtitles.
+- Render ASS/SSA typesetting through JASSUB/libass where the current subtitle
+  path supports it.
 
-### Platform
-- **No backend.** Every byte of media flows from Drive to your browser.
-  No Nyrima server, no analytics endpoint.
-- **BYOK auth.** Each user pastes their own Google Cloud OAuth Client
-  ID; the background SW runs `chrome.identity.launchWebAuthFlow` with
-  that client_id. A 24 h interactive-consent ceiling caps stolen-device
-  blast radius. The `Authorization: Bearer` header is stamped on
-  `<video>` Range fetches via a declarativeNetRequest rule.
-- **Narrow OAuth scopes.** `drive.readonly` for browsing, `drive.file`
-  for writing only files the app itself created (`Shared/` manifests +
-  `Nyrima/Imports/` copies), plus `userinfo.email` / `userinfo.profile`
-  for the share handle.
-- **One source of truth for filename parsing** — `@shared/title-parser`
-  handles folder + filename → show / season / episode / specials, plus
-  filename-only normalization for movies.
+### Sharing
 
-## Getting started
+- Create an app-owned Drive `Shared/` folder with `index.json` share metadata
+  and `comments.jsonl` outbound comments.
+- Publish that folder only when the user opts into "Anyone with the link"
+  read access.
+- Follow another user's published `Shared/` folder URL and sync entries into
+  an Inbox.
+- Import accessible shared videos or folders into
+  `Nyrima/Imports/<share title - timestamp>/` with Drive copy APIs.
 
-1. Pick a folder on Google Drive — call it whatever you want (the
-   *default* is `Nyrima`). It becomes your library root.
-2. Drop folders of videos into it. Each child folder of the root is one
-   library in the lobby. Optionally place a `Poster.{jpg,png,webp}`
-   (and `Backdrop.*`) inside each folder for cinematic covers.
-3. Install the extension (see [Loading the unpacked extension](#loading-the-unpacked-extension)).
-4. On first launch, the welcome screen walks through:
-   - Pairing the Nyrima root folder you just created.
-   - Adding a Google API key (preferred for public files) and / or your
-     own Google Cloud OAuth Client ID for private folders + the Phase 4
-     sharing layer. See [`docs/oauth-setup.md`](./docs/oauth-setup.md).
+## Access Modes
 
-## Tech stack
+Nyrima has two current Google Drive access modes:
 
-- **Vite 5** + `@crxjs/vite-plugin` — MV3 bundler with HMR.
-- **React 18** + **TypeScript 5.5+** — strict mode.
-- **Once UI** (`@once-ui-system/core`) for typography and design tokens.
-- **Zustand** for app state, **react-router-dom (Hash)** for routing.
-- **MSE + EBML parser** for the MKV-remux pipeline
-  ([`mkv-remux/`](src/app/services/mkv-remux)).
-- **JASSUB / libass-wasm** for ASS / SSA rendering.
-- **chrome.declarativeNetRequest** for the `Authorization` header rule.
-- **Vitest** for the unit-test suite (87 tests).
+| Mode | Best for | Notes |
+| --- | --- | --- |
+| Drive API key | Public "Anyone with the link" Drive media | The user creates and stores the key locally. Public Drive quotas and file privacy still apply. |
+| BYOK OAuth client ID | Private Drive folders, profile-backed sharing, Drive writes, and more reliable signed-in access | The user creates a Google Cloud OAuth client for the extension ID and pastes the client ID into Nyrima. |
 
-## Setup
+The OAuth flow is current BYOK behavior. Nyrima uses
+`chrome.identity.launchWebAuthFlow` from the background service worker; it
+does not require editing an `oauth2` block into the manifest. Follow
+[`docs/oauth-setup.md`](./docs/oauth-setup.md) for development and tester
+setup.
+
+## Quick Start
+
+### Build the unpacked extension
 
 ```bash
 npm install
-npm run dev          # Vite dev server with HMR
-npm run build        # tsc --noEmit + production build → dist/
-npm run zip          # Pack dist/ for the Chrome Web Store
-npm test             # Run the Vitest suite once
-npm run test:watch   # Re-run on save
+npm run build
 ```
 
-### Loading the unpacked extension
+1. Open `chrome://extensions`.
+2. Enable **Developer mode**.
+3. Click **Load unpacked** and choose `dist/`.
+4. Open Nyrima from the toolbar popup or the app tab.
 
-1. `npm run build`.
-2. Open `chrome://extensions`, enable **Developer mode**.
-3. Click **Load unpacked**, pick the `dist/` folder.
-4. Open Nyrima (toolbar icon or the in-tab app at
-   `chrome-extension://<id>/src/app/index.html`).
-5. Pair your Nyrima root folder when prompted, then add a Google API key.
-6. If you need OAuth (private folders), follow
-   [`docs/oauth-setup.md`](./docs/oauth-setup.md).
+### Prepare a first library
+
+1. Create or choose a Google Drive folder to be the Nyrima root.
+2. Put one child folder inside it for a movie or show.
+3. Put videos inside that child folder.
+4. Optionally add `Poster.jpg`, `Backdrop.webp`, and subtitle files with a
+   matching basename such as `Episode 01.mkv` and `Episode 01.en.ass`.
+5. Pair the root folder in Nyrima and configure access.
+
+For the full first-run path, see
+[`docs/getting-started.md`](./docs/getting-started.md).
+
+## Development
+
+```bash
+npm install
+npm run dev
+```
+
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Start Vite extension development output. |
+| `npm run build` | Type-check and write the production extension to `dist/`. |
+| `npm run typecheck` | Run the TypeScript check without writing a build. |
+| `npm test` | Run the full Vitest suite once. |
+| `npm run test:watch` | Keep Vitest running while editing. |
+| `npm run check` | Type-check, test, and verify local Markdown links. |
+| `npm run docs:check` | Check local links in README, docs, phases, and `.claude` Markdown. |
+| `npm run probe:mkv -- "<file.mkv>"` | Inspect MKV tracks, first audio blocks, and Nyrima audio-switch diagnostics. |
+
+Load `dist/` unpacked after a production build when checking extension
+permissions, OAuth extension ID behavior, and Chrome loading errors.
+
+### Release scripts
+
+| Command | Purpose |
+| --- | --- |
+| `npm run inspect:manifest` | Print the generated manifest entry points, permissions, hosts, and icons from `dist/`. |
+| `npm run verify:extension` | Validate the generated manifest and required extension files in `dist/`. |
+| `npm run release:check` | Build, test, check docs links, and verify generated extension output. |
+| `npm run package` | Build, verify, and write `dist-zip/nyrima-<version>.zip` with a SHA-256 report. |
+| `npm run package:dist` | Package an already-built and verified `dist/` tree. |
+| `npm run zip` | Compatibility alias for packaging the current `dist/` tree as a real ZIP. |
+
+## Tech Stack
+
+| Layer | Current stack |
+| --- | --- |
+| Extension build | Chrome Manifest V3, Vite 6, `@crxjs/vite-plugin` |
+| UI runtime | React 18, TypeScript 5.6, hash routing with React Router |
+| UI system | Once UI token CSS and React contexts, Nyrima Sass surfaces, custom font assets |
+| Local state | Zustand, `chrome.storage`, IndexedDB caches |
+| Drive/media | Google Drive REST APIs, Media Source Extensions, EBML/MKV services, Mediabunny AC-3 support |
+| Subtitles | JASSUB/libass plus Nyrima subtitle parsing/extraction |
+| Verification | Vitest, TypeScript build checks, Chrome unpacked-extension checks |
+
+## Public Promo Site
+
+Nyrima also has a separate public promo website. That site is the public
+distribution and information surface for the package upload/download path,
+installation help, product Q&A/FAQ, privacy policy, terms, support/contact,
+and reviewer/store-facing links.
+
+The promo site is separate from the extension runtime. Public copy there should
+match the currently packaged extension and the policy/docs in this repository.
 
 ## Testing
 
@@ -209,60 +200,50 @@ npm run test:watch   # Re-run on save
 npm test
 ```
 
-Covers the pure-logic modules the rest of the app leans on:
-
-- `@shared/title-parser` — `parseTitle`, `normalizeMovieTitle`,
-  `isEpisodicFilename`, `isSeasonFolderName`.
-- `services/subtitles` — SRT / VTT / ASS parsers, `forceCenterDialogueInAss`,
-  `detectLang`.
-
-UI components stay out of the unit suite for now — the `chrome.*` surface
-and the WebGL/canvas paths in the player are better covered by manual
-smoke passes.
+The current Vitest suite covers title parsing, subtitles, sharing stores,
+Drive import helpers, EBML/remux logic, AC-3 playback helpers, fragmented MP4
+generation, MSE controller behavior, and the Node release-script toolkit.
+Browser extension integration, Google OAuth consent, real Drive permissions,
+and media playback against real files still need manual verification in Chrome.
 
 ## Documentation
 
-The repository keeps four living documents, each with a clear job:
+Start at [`docs/index.md`](./docs/index.md).
 
 | Document | Purpose |
 | --- | --- |
-| [`README.md`](./README.md) | This file. What Nyrima is, what's shipped, how to run it. |
-| [`PHASES.md`](./PHASES.md) | The single source of truth for ticket status — what shipped, what's deferred, what's in the cross-cutting backlog. Updated on the same commit that lands the work. |
-| [`docs/architecture.md`](./docs/architecture.md) | System shape — components, data flow, storage schema, trade-offs, open questions. |
-| [`docs/plan.md`](./docs/plan.md) | The *why* behind each phase. Higher-level than PHASES.md; points readers there for status. |
-| [`docs/oauth-setup.md`](./docs/oauth-setup.md) | Optional OAuth client setup for private folders. |
+| [`docs/how-nyrima-works.md`](./docs/how-nyrima-works.md) | What the app is and how the current flows work. |
+| [`docs/getting-started.md`](./docs/getting-started.md) | Install, pair Drive, configure access, and play the first file. |
+| [`docs/library-guide.md`](./docs/library-guide.md) | Folder layout, artwork, subtitles, and player behavior. |
+| [`docs/sharing-guide.md`](./docs/sharing-guide.md) | Current Drive-only sharing model and privacy choices. |
+| [`docs/troubleshooting.md`](./docs/troubleshooting.md) | Setup, Chrome, OAuth, Drive, playback, and sharing diagnosis. |
+| [`docs/architecture.md`](./docs/architecture.md) | Detailed developer architecture and trust boundaries. |
+| [`docs/oauth-setup.md`](./docs/oauth-setup.md) | Google Cloud OAuth setup for developers and testers. |
+| [`docs/permissions-and-data-use.md`](./docs/permissions-and-data-use.md) | Permission, scope, endpoint, and storage audit. |
+| [`docs/privacy-policy.md`](./docs/privacy-policy.md) | Privacy policy for the current extension. |
+| [`docs/terms-of-use.md`](./docs/terms-of-use.md) | Terms for using the current extension. |
 
-## Roadmap
+Engineering phase status stays in [`PHASES.md`](./PHASES.md).
 
-Detailed status lives in [`PHASES.md`](./PHASES.md). Headlines:
+## Contributor Project Memory
 
-- **Phase 1 — MVP** — shipped.
-- **Phase 2 — Real player** — shipped (MKV, HEVC + FLAC, in-place audio
-  swap, JASSUB, custom HUD, ambient, resume pill, next-up).
-- **Phase 3 — Library polish** — shipped (search, grouping, folder
-  posters, virtualised grid, card upgrades, lobby stats, bulk-enrichment).
-- **Phase 4 — Sharing layer** — shipped. Drive-only share manifests,
-  follow + pull, comments-as-JSONL, Drive-to-Drive import, bootstrap
-  directory.
-- **Phase 5 — Realtime + privacy** — not started. Watch parties via
-  WebRTC datachannels (Drive signaling), AES-GCM encrypted libraries,
-  PWA offline cache.
+Future contributor and agent guidance lives in
+[.claude/README.md](./.claude/README.md): workflow, artifacts, system
+boundaries, reusable patterns, Nyrima styling, and Once UI integration notes.
+It complements the deploy docs above; it does not replace them.
 
-Cross-cutting backlog: SeekHead-following header sniff (F.10), timeline
-chapter markers (F.11), unified Tracks panel (F.12), and a few
-code-hygiene items.
+## Security And Privacy Summary
 
-## Security & privacy
-
-- **Tokens never leave the extension.** The background worker is the
-  only origin that holds OAuth tokens; the app page asks via
-  `chrome.runtime.sendMessage` and never owns one directly.
-- **API-key auth is the default.** OAuth only kicks in when a file
-  requires it; `drive.readonly` scope, narrow by design.
-- **No server.** All Drive responses stay client-side; Jikan is the only
-  external endpoint, used solely for poster/metadata lookups.
-- **CSP-friendly.** WASM (libass) loads via `wasm-unsafe-eval` in the
-  manifest CSP; nothing inline.
+- Media bytes flow from Google Drive to the browser. Nyrima does not upload
+  media to a Nyrima server.
+- Nyrima does not read browser cookies from Drive or other websites.
+- OAuth tokens are handled through the background service worker and are not
+  sent to the optional GitHub raw directory endpoint.
+- Publishing a `Shared/` folder makes share metadata readable by anyone with
+  that folder link. It does not automatically grant access to the underlying
+  target file or library folder.
+- The detailed permission and data-use map is in
+  [`docs/permissions-and-data-use.md`](./docs/permissions-and-data-use.md).
 
 ## License
 

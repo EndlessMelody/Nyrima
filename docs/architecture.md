@@ -1,244 +1,341 @@
-# Nyrima — Architecture
+# Nyrima Architecture
 
-This document is the single source of truth for the system shape. Update it
-whenever a structural change lands. For phase / ticket status see
-[`../PHASES.md`](../PHASES.md).
+This document describes the current deployable Chrome extension. It is the
+technical companion to [`how-nyrima-works.md`](./how-nyrima-works.md).
+Engineering status and future work remain in [`../PHASES.md`](../PHASES.md).
 
-## Goals
+## System Intent
 
-1. **No backend.** Everything runs in the user's browser. Google Drive
-   is the only remote dependency. Metadata is whatever the user places
-   alongside their videos (`Poster.*`, `Backdrop.*`) — no external
-   metadata service. The Phase 4.4 bootstrap directory is the only
-   non-Drive endpoint, and it's a single anonymous JSON fetch.
-2. **Parasitic UX.** The user should feel like Nyrima is an extension of
-   Drive itself. The floating action on `drive.google.com` plus the
-   right-click context entry are the primary entry points.
-3. **Bring-your-own data.** Users only ever stream Drive content they can
-   access. Sharing is opt-in: users publish a public `Shared/` manifest folder,
-   but target videos/libraries still require their own Drive permissions.
-4. **Quality first.** Subtitle accuracy and original-bitrate playback matter
-   more than fast feature growth.
+Nyrima is designed around four current constraints:
 
-## Components
+1. **No Nyrima backend.** The extension page talks to Google Drive APIs and
+   local browser storage. Media is not uploaded to a Nyrima server.
+2. **Drive stays authoritative.** A user can only list, stream, copy, publish,
+   or permission Drive data that Google Drive allows for that user and access
+   mode.
+3. **The browser owns playback.** Native video playback is preferred. The
+   local MSE remux pipeline fills supported browser gaps without server-side
+   transcoding.
+4. **Sharing is opt-in metadata federation.** Public share metadata lives in
+   app-created Drive files only when a user chooses to publish their
+   `Shared/` folder.
 
-### 1. Background service worker — `src/background/service-worker.ts`
+## Runtime Topology
 
-- Registers the context menu (`contextMenus`) and toolbar action.
-- Optional OAuth holder via `chrome.identity.launchWebAuthFlow` for the
-  rare files that require it. API-key auth is the default path.
-- Persists the recent-folders MRU and the Nyrima root pairing.
-- Routes deep-links: "open the app pre-navigated to folder X".
-
-### 2. Content script — `src/content/drive-inject.tsx`
-
-- Runs on `https://drive.google.com/*`.
-- Mounts a single Shadow-DOM-hosted floating button at bottom-right.
-- Resilient to Drive's SPA navigation via a MutationObserver on
-  `location.href`.
-- Only side effect: appending one host element to `document.body`.
-
-### 3. App page — `src/app/`
-
-- A normal extension page (`chrome-extension://<id>/src/app/index.html`).
-- React + react-router (`HashRouter` — file:// has no History API).
-- Routes:
-  - `/` → `LandingPage` (lobby: hero + stats strip + shelves)
-  - `/library/:folderId` → `LibraryPage` (grid / list / grouped views)
-  - `/play/:folderId/:fileId` → `PlayerPage`
-  - `/social`, `/social/:tab`, `/social/shelf/:folderId` → Drive-only
-    sharing hub (Inbox, My Shares, People, Activity, Privacy)
-- Lives in its own tab so heavy WASM (libass) doesn't compete with the
-  background worker's MV3 budget.
-
-### 4. Popup — `src/popup/`
-
-- Tiny mode-switch surface: jump straight into recent folders or open the
-  full app.
-
-### 5. MKV remux pipeline — `src/app/services/mkv-remux/*`
-
-- EBML parser → demuxer → fMP4 fragment writer feeding MSE.
-- `mse-controller.ts` owns the lifecycle: 4 MB header prelude + progressive
-  Range-fetched stream → demuxed clusters → fragmented MP4 → SourceBuffer.
-- **Split SourceBuffers.** Video and audio each have their own
-  SourceBuffer on one MediaSource. Lets HEVC + FLAC files (typical of
-  Blu-ray rips with multiple dubs) play without a multiplexed init
-  segment, and unlocks `switchAudio(trackNumber)` for in-place dub
-  swapping with no page reload — the video pipe is untouched while the
-  audio SourceBuffer runs `changeType` + back-fill from the cluster
-  covering `currentTime − 0.5 s`.
-- **Lacing-aware demux.** `parseSimpleBlock` handles Xiph (1), fixed
-  (2), and EBML (3) lacing so multi-frame FLAC blocks land as separate
-  `DemuxedSample`s with PTS advanced by `defaultDurationNs × frame`.
-- **Decode-order preserved.** `extractClusterSamples` does NOT sort by
-  PTS — MKV SimpleBlocks are stored in decode order and B-frames break
-  if reshuffled by display order.
-- Piggybacks the same byte stream on the subtitle feeder so embedded MKV
-  subs extract without a second network roundtrip.
-
-### 6. Subtitle pipeline — `src/app/services/{mkv-subtitles, subtitles}.ts`
-
-- External `.srt` / `.vtt` / `.ass` / `.ssa` siblings auto-mount.
-- Embedded MKV `S_TEXT/UTF8 | ASS | SSA` extract live during streaming.
-- ASS routes through **JASSUB** (libass-wasm) for typesetting; embedded
-  reconstituted scripts hand off on finalize once the extractor flips
-  `assSourceComplete`. The CSS overlay bridges the streaming window.
-- A `forceCenterDialogueInAss` pass rewrites Dialogue Alignment to 2
-  (bottom-center) — positioned signs with `\pos` / `\move` are left alone.
-
-## Data flow
-
-```
-[ Content script (drive.google.com) ]
-        │   chrome.runtime.sendMessage (deep-link / open-folder)
-        ▼
-[ Background service worker ]
-        │   chrome.storage.local                  optional OAuth
-        ▼                                          via launchWebAuthFlow
-[ chrome.storage.local ]                        [ Drive REST ]
-        ▲
-        │
-[ App page · React · Once UI ]
-        │                              ┌─────────────────────────┐
-        │ authedFetch (API key first,  │  declarativeNetRequest  │
-        │  Bearer fallback)            │  rule on googleapis      │
-        ▼                              │  stamps Authorization    │
-[ Drive REST: files.list, files.get,   │  on <video> Range fetches│
-  alt=media ]                          └──────────┬───────────────┘
-        │                                         │
-        │   Range bytes                           │
-        ▼                                         ▼
-[ MSE controller ] ─── demux ─── fMP4 frags ─── [ <video> ]
-        │                                         ▲
-        │   subtitle bytes (piggyback)             │ JASSUB canvas
-        ▼                                         │
-[ extractMkvSubtitles ] ── cues / ASS source ─── [ SubtitleOverlay ]
-
-[ Drive folder ] ─── Poster.{jpg,png,webp} / Backdrop.*
-        │ metadata-service resolves a folder-local cover URL
-        ▼
-[ chrome.storage.local · dc.metadataCache.v3 ]
+```text
+                    drive.google.com
+                          |
+                    content script
+                          |
+             chrome.runtime messages / deep-links
+                          v
+popup ---------- background service worker ---------- Google OAuth consent
+                          |
+              OAuth token mediation and DNR rule
+                          |
+                          v
+                 React extension app page
+        lobby | library | player | social | settings
+              |                 |
+              |                 +-- local MSE/JASSUB playback work
+              |
+              +-- Google Drive API/media hosts
+              +-- chrome.storage.local / session
+              +-- IndexedDB Drive caches
+              +-- optional GitHub raw share directory fetch
 ```
 
-There is no third-party metadata API. The legacy MAL/Jikan path was
-removed on 2026-05-18 in favour of user-placed cover files inside each
-library folder. `METADATA_CACHE.v3` busted any stale `.v2` entries on
-upgrade.
+## Extension Surfaces
 
-Sharing data is file-federated through Drive rather than centralized:
+### Manifest
 
+[`../src/manifest.config.ts`](../src/manifest.config.ts) builds the Manifest
+V3 declaration. It defines the app action, service worker, Drive content
+script, extension permissions, host permissions, and extension-page CSP.
+
+There is intentionally no manifest `oauth2` block in the current build. OAuth
+uses a user-provided Chrome Extension client ID at runtime.
+
+### Background service worker
+
+[`../src/background/service-worker.ts`](../src/background/service-worker.ts)
+owns:
+
+- Context-menu setup for Drive folder links/pages.
+- Opening or focusing the main app page for a Drive folder.
+- Recent-folder message handling.
+- OAuth startup through `chrome.identity.launchWebAuthFlow`.
+- Short-lived OAuth token caching in memory and `chrome.storage.session`.
+- The last interactive-consent timestamp in `chrome.storage.local`.
+- A Chrome alarm that attempts silent token refresh inside the current
+  interactive-consent window.
+- A dynamic declarativeNetRequest rule that stamps an `Authorization: Bearer`
+  header on extension-initiated Drive media requests when OAuth playback needs
+  direct `<video>` Range requests.
+
+The service worker enforces the current 24-hour interactive-consent ceiling.
+Past that wall-clock window, the user must consent again even if Google still
+has a browser session.
+
+### Drive content script
+
+[`../src/content/drive-inject.tsx`](../src/content/drive-inject.tsx) runs on
+`https://drive.google.com/*`. It mounts one Shadow-DOM-backed floating action
+that can open the current Drive folder in Nyrima. It watches Drive SPA
+navigation and detects stale extension contexts after extension reload.
+
+It does not read Drive cookies. It extracts a folder ID from Drive URLs and
+sends extension runtime messages.
+
+### Main app page
+
+[`../src/app/`](../src/app/) is a React extension page with hash routing:
+
+- `/` for lobby/root onboarding.
+- `/library/:folderId` for library browsing.
+- `/play/:folderId/:fileId` for playback.
+- `/social`, social tabs, and social shelves for Drive-native sharing.
+
+The app page owns UI state, Drive listing calls, player orchestration, poster
+resolution, subtitle setup, settings, and social stores. Heavy media work
+stays here instead of in the MV3 service worker.
+
+### Toolbar popup
+
+[`../src/popup/`](../src/popup/) is a small entry surface that opens the app
+or recent folder locations in tabs.
+
+## Drive Access And Auth
+
+Drive calls converge in [`../src/app/services/auth.ts`](../src/app/services/auth.ts)
+and [`../src/app/services/drive-api.ts`](../src/app/services/drive-api.ts).
+
+### API-key path
+
+`dc.apiKey` stores a user-provided Google Drive API key locally. The key path
+is for public Drive content where Drive accepts key-backed reads. URL helpers
+append the key to Drive API/media requests.
+
+An API key is not a user grant. It does not make private Drive data readable.
+
+### BYOK OAuth path
+
+`dc.oauthClientId` stores a user-provided Google OAuth Chrome Extension client
+ID locally. The service worker requests the current scope set:
+
+```text
+https://www.googleapis.com/auth/drive.readonly
+https://www.googleapis.com/auth/drive.file
+https://www.googleapis.com/auth/userinfo.email
+https://www.googleapis.com/auth/userinfo.profile
 ```
-[ User A Nyrima root ]
-        └─ Shared/                     public: anyone-with-link reader
-             ├─ index.json             v=2, inline ShareEntry[]
-             └─ comments.jsonl         User A's outbound comments
 
-[ User B app ] ── follows A's Shared URL ──► read A/index.json → Inbox/Shelf
-[ User B app ] ── comments on A share ─────► append B/comments.jsonl
-[ User A app ] ── scans followed users ────► read B/comments.jsonl,
-                                             filter by A sharedFolderId
-[ User B app ] ── imports A share ─────────► Drive files.copy into
-                                             B/Nyrima/Imports/<title>/
+The scopes serve different current features:
+
+- `drive.readonly` lists and streams arbitrary Drive folders/files the user
+  can read.
+- `drive.file` creates and edits app-created `Shared/` and `Imports/` Drive
+  data and permission changes on app-created share folders.
+- User info scopes support profile-backed sharing identity.
+
+`authedFetch` prefers OAuth when a live token is available and falls back to an
+API key where that access path is configured and useful. Drive requests are
+queued, retried, rate-limit-aware, and de-duplicated by the Drive service
+layer.
+
+## Drive Library Model
+
+The paired root folder is the app entry point. Direct child folders become
+library surfaces. File listing uses Google Drive v3 metadata fields for IDs,
+names, MIME types, size, modified time, thumbnails, parents, copy/download
+capabilities, and video metadata when Drive returns it.
+
+The current model includes:
+
+- Folder-local poster/backdrop discovery from `Poster.*` and `Backdrop.*`.
+- Title parsing from folder and filename hints for season/episode grouping.
+- External subtitle sibling matching by basename prefix.
+- Root revalidation when the app refreshes.
+
+There is no current external poster metadata provider. Legacy poster cache
+entries are migrated away from the removed metadata path.
+
+## Playback Pipeline
+
+### Direct path
+
+When Chrome can play the selected file directly, Nyrima builds a Drive media
+URL and lets the browser media stack fetch it. For OAuth direct media requests,
+the background service worker's DNR rule adds the bearer header to matching
+extension-initiated Drive media requests.
+
+### Range and MSE path
+
+The MKV services under
+[`../src/app/services/mkv-remux/`](../src/app/services/mkv-remux/) handle the
+current supported remux fallback:
+
+1. Probe EBML headers and tracks.
+2. Range-fetch Drive bytes.
+3. Parse clusters and selected tracks.
+4. Produce fragmented MP4 fragments.
+5. Append video/audio fragments to Media Source Extensions buffers.
+
+The pipeline keeps split audio and video SourceBuffers for current track
+switching behavior and can use the current AC-3 decode/render support where
+implemented. Per-file playback strategy state avoids repeating some startup
+work on reopen.
+
+### Subtitle path
+
+Subtitle services handle:
+
+- External SRT, VTT, ASS, and SSA sibling subtitle files.
+- Supported embedded MKV text subtitle extraction during playback.
+- ASS/SSA handoff to JASSUB/libass for richer subtitle layout where supported.
+
+## Sharing Topology
+
+Sharing uses app-created Drive files rather than a Nyrima social backend:
+
+```text
+User A Drive root/
+  Shared/
+    index.json       v=2 share index with inline ShareEntry records
+    comments.jsonl   User A outbound comments
+
+User B follows A Shared folder URL
+  -> read A Shared/index.json
+  -> cache flattened inbox rows locally
+
+User B comments on A share
+  -> append one comment record to B Shared/comments.jsonl
+
+User A activity view
+  -> read followed users' comments.jsonl streams
+  -> filter records targeting A Shared folder and share ID
 ```
 
-The share manifest is metadata plus Drive target ids/links. It does not grant
-access to the underlying video file or library folder. Import is not a torrent
-swarm: it is Drive's server-side copy path. Recipients avoid a browser
-download/re-upload round trip, but Drive still enforces source permissions and
-owner copy/download restrictions.
+The `Shared/` folder starts as an app-owned Drive folder. Nyrima changes it to
+link-readable only when the user opts into publishing. A share manifest can be
+public while the target file/folder stays private; target permissions remain a
+separate Google Drive boundary.
 
-Tokens flow: app → background (`AUTH_GET_TOKEN`) → cached chrome.identity
-→ token. The app never touches `chrome.identity` directly; this keeps the
-surface tight.
+Imports use Drive copy APIs. Video import can copy obvious companion poster and
+subtitle files; library import can walk a folder tree. Copy permissions and
+source-owner restrictions remain enforced by Drive.
 
-## Drive API conventions
+## Storage And Data Placement
 
-- All requests through `services/auth.ts → authedFetch`, which retries
-  once on HTTP 401 with `interactive=true` (OAuth path only).
-- Listing is `listFolderAll`, paginating until exhausted (`pageSize=200`),
-  fronted by a request queue + dedup layer (`services/drive/*`).
-- Streaming is `googleapis.com/.../alt=media&key=...` for the API-key
-  path, or `Authorization: Bearer …` stamped via a DNR rule for OAuth.
-- Share import uses `files.copy` for each source file and creates folders with
-  `files.create`. Single-video imports also copy obvious companions from the
-  source folder (`Poster.*` plus same-basename subtitle files). Library imports
-  recurse through the folder tree sequentially to stay gentle on Drive quota.
+### Persistent local extension storage
 
-## Theming
+`chrome.storage.local` is the primary persistent store for the app.
 
-Once UI provides a token-based theming system driven by `data-*`
-attributes on `<html>`. Nyrima sets these in `src/app/index.html` and
-flips `data-theme` from `AppProviders` to switch dark/light. Because
-Once UI is designed for Next.js, we deliberately do **not** import its
-`<Providers>` wrapper — that pulls `next/navigation`. Instead
-`AppProviders` carries the minimum subset we need (theme state).
+| Key | Current purpose |
+| --- | --- |
+| `dc.nyrimaRoot` | Verified paired Drive root. |
+| `dc.recentFolders` | Recent library/folder data and lobby summaries. |
+| `dc.userProfile` | Cached Google profile snapshot when OAuth yields it. |
+| `dc.playbackState` | Local resume/progress records. |
+| `dc.settings` | Theme, player, subtitle, and library preferences. |
+| `dc.metadataCache.v3` | Current folder-art cache key after legacy poster migration. |
+| `dc.playbackEngineCache` | Per-file native/MSE strategy cache. |
+| `dc.libraryViewState` | Per-library search/collapse UI state. |
+| `dc.apiKey` | User-provided Google Drive API key. |
+| `dc.oauthClientId` | User-provided Google OAuth client ID. |
+| `dc.oauthInteractiveAt` | Last successful interactive OAuth consent timestamp. |
+| `dc.shareProfile` | Local share handle/name/avatar configuration. |
+| `dc.sharedFolderId` | Cached ID of the user's app-created `Shared/` folder. |
+| `dc.followedUsers` | Local list of followed public `Shared/` folder IDs. |
+| `dc.socialInboxCache.v1` | Last-good flattened share inbox rows. |
+| `dc.directoryCache.v1` | Optional public directory cache and fetch timestamp. |
 
-The player chrome uses its own dark-first "Neon Cinema" tokens; the rest
-of the app uses the Once UI tokens.
+Sharing permissions also keep a small local cached public/private state keyed
+to the current `Shared/` folder.
 
-## Storage schema
+### Session token cache
 
-`chrome.storage.local` is the only persistent store.
+`chrome.storage.session` holds the short-lived OAuth access token entry so an
+MV3 service-worker idle unload does not force immediate re-authentication. The
+entry is removed on sign-out and expires on its token window.
 
-| Key                          | Type                              | Notes                                                                                                    |
-| ---------------------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `dc.nyrimaRoot`              | `NyrimaRoot`                      | The verified root folder. Re-validated on every refresh; renames surface as a `rootError`.               |
-| `dc.recentFolders`           | `RecentFolder[]`                  | MRU + per-library stats (videoCount / runtimeMs / watchedCount / coverPosterUrl). Capped at 20.          |
-| `dc.userProfile`             | `UserProfile`                     | Optional OAuth-only profile; populated lazily.                                                           |
-| `dc.playbackState`           | `Record<fileId, PlaybackPosition>`| Resume positions; throttled writes (≥4 s apart) to avoid storage churn.                                  |
-| `dc.settings`                | `AppSettings`                     | Preferred sub language, autoplay-next, default volume, theme, subtitle styling, skip seconds, list view. |
-| `dc.metadataCache.v3`        | `Record<fileId, MovieMetadata>`   | Folder-placed `Poster.*` / `Backdrop.*` URLs. `v3` busted the legacy MAL/Jikan entries from `.v2`.       |
-| `dc.playbackEngineCache`     | `Record<fileId, "native"|"mse">`  | Per-file MKV playback-mode LRU so re-opening skips the watchdog.                                         |
-| `dc.apiKey` / `dc.oauthClientId` | `string`                      | User-configured auth credentials, set from the Setup dialog.                                             |
-| `dc.shareProfile`            | `ShareProfile`                    | User's share handle/name/avatar, stamped into entries and comments.                                      |
-| `dc.sharedFolderId`          | `string`                          | Cached Drive id of the user's flat `Shared/` folder.                                                     |
-| `dc.followedUsers`           | `FollowedUser[]`                  | Local follow graph; each row points at another user's public `Shared/` folder.                           |
-| `dc.socialInboxCache.v1`     | `{ v, items, lastSyncedAt }`      | Last-good flattened inbox rows so `/social` can render before the next Drive pull.                       |
-| `dc.directoryCache.v1`       | `{ source, fetchedAt, entries }`  | Cached public bootstrap directory from GitHub raw, refreshed on a 24 h TTL.                              |
+### IndexedDB caches
 
-Drive-created import folders live under `Nyrima/Imports/`. They are ordinary
-Drive folders, not a separate chrome.storage schema.
+[`../src/app/services/drive/idb.ts`](../src/app/services/drive/idb.ts) defines
+cache stores for folder scans, file metadata, subtitles, thumbnails, media
+segments, and watch-progress-related cache data. The account reset routine
+clears Drive-account-bound cache stores when the paired account/root changes.
 
-## Trade-offs & known limits
+### Drive-created data
 
-- **MSE memory.** The remux path appends fragments to a SourceBuffer.
-  We cap accumulated buffered audio+video to ~64 MB and trim behind the
-  current playhead to keep memory steady on multi-hour files.
-- **CORS on video frames.** Drive's media endpoint doesn't send CORS, so
-  we can't sample the live `<video>` frame for the ambient glow. We
-  sample the user's folder-placed `Poster.*` / `Backdrop.*` (served via
-  Drive's thumbnail CDN, CORS-friendly) instead.
-- **OAuth scope.** The current scope set is `drive.readonly` (browsing)
-  + `drive.file` (Shared/ writes and Imports/ copies) +
-  `userinfo.{email,profile}` (share handle). `drive.file` only grants
-  access to files the extension itself creates, which keeps the
-  blast radius of a stolen token small. A future Google Picker flow
-  could narrow `drive.readonly` further but is not gated on Phase 5.
-- **Drive social writes.** `index.json` and `comments.jsonl` use Drive
-  read-modify-write. Nyrima queues mutations locally per `Shared/` folder so
-  same-context share/comment actions do not overwrite each other, but two
-  devices can still race because there is no backend arbiter.
-- **Share semantics.** Publishing `Shared/index.json` exposes metadata and
-  target links only. Recipients still need Drive permission on the actual
-  video or library to open it or import it. If the owner disables copying,
-  Nyrima surfaces that as an import failure rather than falling back to local
-  download/re-upload.
-- **Browser support.** `content-visibility: auto` (P3.4 virtualisation)
-  and `:has()` (theatre-mode header dimming) are Chromium-only; this is
-  a Chrome extension so the assumption is safe.
+The app can create Drive content only through the current write features:
 
-## Open questions to revisit
+- `Shared/`, `index.json`, and `comments.jsonl`.
+- `Imports/` destination folders and copied accessible Drive files.
 
-- **Cross-device sync.** Writing playback positions + library stats to a
-  hidden `Nyrima/state.json` on the user's Drive would unlock multi-
-  device resume. Could ride alongside the Phase 5 privacy work since
-  both write user-owned state to Drive.
-- **Live-frame ambient glow.** Would require either a CORS-friendly Drive
-  proxy or a server. Not worth the complexity right now.
-- **WebCodecs audio pipeline.** Decoupling the audio side onto an
-  `AudioDecoder` + `AudioWorklet` would let us cover DTS/TrueHD and
-  drop the SourceBuffer `changeType` dance during dub swaps. Tradeoff:
-  manual A/V sync via `video.currentTime`, plus losing PiP/Cast for
-  audio. Defer until the current MSE path can't be made to behave on
-  a specific class of files.
+Those writes require OAuth and are bound by Google Drive scope and permission
+behavior.
+
+## Remote Endpoints
+
+The current manifest and code allow:
+
+- `www.googleapis.com`, `content.googleapis.com`, Google Drive media
+  redirects/thumbnail hosts, and Google OAuth endpoints used by Drive/OAuth
+  flows.
+- `drive.google.com` for content-script presence and Drive links.
+- `raw.githubusercontent.com` for the optional sharing bootstrap directory.
+
+The GitHub raw directory fetch uses `credentials: "omit"` and receives no
+Google OAuth token.
+
+## Trust Boundaries
+
+| Boundary | Architectural treatment |
+| --- | --- |
+| Drive web page -> extension | Content script sends folder/deep-link messages; it is not the app authority for tokens. |
+| App page -> service worker | Runtime messages request OAuth token work and tab/deep-link behavior. |
+| Extension -> Google Drive | Drive API enforces scopes, permissions, quotas, copy restrictions, and media availability. |
+| Followed public `Shared/index.json` -> UI | Public manifests are untrusted and sanitized before social-store use. |
+| Public directory JSON -> UI | Directory entries are sanitized and cached with a TTL. |
+| Same user on multiple devices | Drive JSON/JSONL writes can race because there is no backend arbiter. |
+
+## Manifest Permission Rationale
+
+The architecture uses these permission families:
+
+- `identity` for OAuth web auth.
+- `storage` for extension configuration and state.
+- `contextMenus` and `tabs` for Drive/app entry flows.
+- `alarms` for best-effort OAuth refresh cadence.
+- `declarativeNetRequestWithHostAccess` for OAuth media Authorization header
+  injection on allowed Drive media hosts.
+
+See [`permissions-and-data-use.md`](./permissions-and-data-use.md) for the
+full user-facing audit table.
+
+## Current Limits
+
+- Chrome/Chromium codec and MediaSource behavior still decide many playback
+  outcomes.
+- Some listed video extensions are intentionally rejected or fail at playback
+  when the current browser/remux path cannot support them.
+- Drive public API-key access can hit quota/rate limits independently of OAuth.
+- Watch progress is local to the current browser profile today.
+- Social manifest/comment writes are read-modify-write Drive operations;
+  local queues reduce same-context collisions but cannot provide cross-device
+  atomicity.
+- Publishing share metadata cannot revoke a copy another user already imported
+  or a cache they already saw.
+
+## Code Map
+
+| Area | Files |
+| --- | --- |
+| Manifest and extension contexts | `src/manifest.config.ts`, `src/background/service-worker.ts`, `src/content/`, `src/popup/` |
+| React app | `src/app/App.tsx`, `src/app/pages/`, `src/app/components/` |
+| Drive auth and API | `src/app/services/auth.ts`, `src/app/services/drive-api.ts`, `src/app/services/drive/` |
+| Local state | `src/app/services/storage.ts`, `src/app/stores/`, `src/app/services/drive/idb.ts` |
+| Playback | `src/app/pages/PlayerPage.tsx`, `src/app/components/DrivePlayer.tsx`, `src/app/services/mkv-remux/` |
+| Subtitles | `src/app/services/subtitles.ts`, `src/app/services/mkv-subtitles.ts`, subtitle overlay components |
+| Sharing | `src/app/services/sharing/`, `src/app/stores/sharing-store.ts`, `src/app/stores/social-store.ts` |
