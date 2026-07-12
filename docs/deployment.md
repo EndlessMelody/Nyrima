@@ -105,11 +105,12 @@ build command, output directory, and a SPA rewrite so client-routed pages
    | `VITE_DEVELOPER_EMAIL` | contact email shown on the landing page |
    | `VITE_NYRIMA_REPO_URL` | `https://github.com/EndlessMelody/Nyrima` |
 
-   Skip `VITE_API_BASE_URL` (unused), the deprecated `VITE_GOOGLE_OAUTH_CLIENT_ID`
-   alias, and everything in the `.env.example` "SERVER-ONLY" block
-   (`SUPABASE_SERVICE_ROLE_KEY`, `UPSTASH_REDIS_REST_*`,
-   `GOOGLE_OAUTH_CLIENT_ID/SECRET`) — none of it is consumed by any code path
-   yet.
+   `.env.example` intentionally lists nothing beyond this table — no
+   `SUPABASE_SERVICE_ROLE_KEY`, `UPSTASH_REDIS_REST_*`,
+   `GOOGLE_OAUTH_CLIENT_ID/SECRET`, unused `VITE_API_BASE_URL`, or deprecated
+   `VITE_GOOGLE_OAUTH_CLIENT_ID` alias — none of it is consumed by any code
+   path yet. See docs/supabase-and-cache-architecture.md if a server
+   component is ever added.
 3. **Settings → Domains**: add `nyrima.pldkhoa.io.vn` and point its DNS
    (per Vercel's shown records) at the project.
 4. Deploy.
