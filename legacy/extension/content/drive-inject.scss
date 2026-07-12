@@ -1,0 +1,163 @@
+/**
+ * Drive "Open in Nyrima" FAB.
+ *
+ * Lives inside a Shadow DOM, so no theme variables reach in — colors are
+ * hard-coded against the Midnight palette (deep navy base, neon pink brand,
+ * neon cyan accent) defined in `app/styles/anime-theme.scss`. Keep the
+ * values aligned with that file if the brand ever shifts.
+ *
+ * The Nyrima mark sits in a compact logo bubble until hover or keyboard
+ * focus reveals the label. Stale state desaturates everything to a neutral
+ * hairline so the FAB no longer looks interactive.
+ */
+
+.dc-fab {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  min-width: 48px;
+  min-height: 48px;
+  padding: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  border: 1px solid rgba(248, 247, 255, 0.1);
+  background: rgba(6, 8, 20, 0.94);
+  backdrop-filter: blur(16px) saturate(150%);
+  color: #f8f7ff;
+  cursor: pointer;
+  box-shadow:
+    0 12px 32px -12px rgba(0, 0, 0, 0.6),
+    0 2px 6px rgba(0, 0, 0, 0.35),
+    0 0 0 1px rgba(255, 79, 216, 0.16);
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    box-shadow 220ms ease,
+    gap 220ms ease,
+    padding 220ms ease,
+    transform 120ms ease;
+
+  &__mark {
+    width: 34px;
+    height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    overflow: hidden;
+    border: 1px solid rgba(255, 79, 216, 0.46);
+    border-radius: 999px;
+    background: rgba(255, 79, 216, 0.1);
+    box-shadow:
+      inset 0 0 10px rgba(255, 79, 216, 0.18),
+      0 0 14px -6px rgba(34, 211, 238, 0.8);
+  }
+
+  &__logo {
+    width: 29px;
+    height: 29px;
+    display: block;
+    object-fit: contain;
+    filter: drop-shadow(0 0 6px rgba(116, 224, 255, 0.22));
+  }
+
+  &__label {
+    max-width: 0;
+    overflow: hidden;
+    opacity: 0;
+    transform: translateX(-6px);
+    font:
+      600 11px/1 "Geist Mono",
+      ui-monospace,
+      "JetBrains Mono",
+      "SFMono-Regular",
+      "Cascadia Mono",
+      monospace;
+    letter-spacing: 0;
+    text-transform: uppercase;
+    white-space: nowrap;
+    color: #f8f7ff;
+    transition:
+      max-width 240ms ease,
+      opacity 140ms ease,
+      transform 220ms ease;
+  }
+
+  /* Mixed pink/cyan bloom on hover — same chord the lobby uses for its
+   * primary CTAs. The lift is GPU-cheap (transform + box-shadow) so it
+   * doesn't fight Drive's own scroll animations. */
+  &:is(:hover, :focus-visible) {
+    gap: 10px;
+    padding-right: 14px;
+    border-color: rgba(255, 79, 216, 0.38);
+    background: rgba(13, 16, 34, 0.96);
+    transform: translateY(-1px);
+    box-shadow:
+      0 14px 34px -10px rgba(0, 0, 0, 0.65),
+      0 0 0 1px rgba(255, 79, 216, 0.32),
+      0 0 24px -6px rgba(34, 211, 238, 0.28);
+  }
+
+  &:is(:hover, :focus-visible) &__mark {
+    border-color: rgba(255, 79, 216, 0.8);
+    background: rgba(255, 79, 216, 0.22);
+  }
+
+  &:is(:hover, :focus-visible) &__label,
+  &--error &__label,
+  &--stale &__label {
+    max-width: 220px;
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  &:focus-visible {
+    outline: 2px solid rgba(34, 211, 238, 0.65);
+    outline-offset: 3px;
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+
+  /* Transient error pulse — red border for ~1.8s after a failed sendMessage. */
+  &--error {
+    gap: 10px;
+    padding-right: 14px;
+    border-color: rgba(239, 68, 68, 0.6);
+    box-shadow:
+      0 0 0 1px rgba(239, 68, 68, 0.5),
+      0 12px 32px -12px rgba(0, 0, 0, 0.6);
+  }
+
+  &--error &__mark {
+    border-color: rgba(239, 68, 68, 0.6);
+    background: rgba(239, 68, 68, 0.14);
+  }
+
+  /* Stale state — extension was reloaded while this Drive tab was open.
+   * The content script can no longer reach the background, so the FAB
+   * desaturates to a neutral pearl hairline and stops looking actionable. */
+  &--stale {
+    gap: 10px;
+    padding-right: 14px;
+    border-style: dashed;
+    border-color: rgba(248, 247, 255, 0.2);
+    background: rgba(6, 8, 20, 0.72);
+    cursor: not-allowed;
+    opacity: 0.85;
+    box-shadow: none;
+  }
+
+  &--stale &__mark {
+    border-color: rgba(248, 247, 255, 0.18);
+    background: rgba(248, 247, 255, 0.04);
+    box-shadow: none;
+  }
+
+  &--stale &__logo {
+    opacity: 0.5;
+    filter: grayscale(1);
+  }
+}

@@ -28,6 +28,8 @@
 
 import { useEffect, useMemo } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { useAuth } from "@/auth/AuthProvider";
+import { SocialLockedState } from "../components/SocialLockedState";
 import { useSharingStore } from "../stores/sharing-store";
 import { useSocialStore } from "../stores/social-store";
 import { SocialToolbar, SyncControls } from "../components/social/SocialToolbar";
@@ -47,7 +49,18 @@ import "./SocialPage.scss";
 
 const DEFAULT_TAB: SocialTabKey = "inbox";
 
+/**
+ * Capability gate for the whole social hub. Guests have no `social:profile`
+ * capability, so they never mount `SocialHub` — meaning none of its social
+ * store loads / inbox syncs / backend reads fire. They see the friendly
+ * locked state instead.
+ */
 export function SocialPage() {
+  const { canAccess } = useAuth();
+  return canAccess("social:profile") ? <SocialHub /> : <SocialLockedState />;
+}
+
+function SocialHub() {
   const navigate = useNavigate();
   const params = useParams<{ tab?: string; folderId?: string }>();
   const location = useLocation();

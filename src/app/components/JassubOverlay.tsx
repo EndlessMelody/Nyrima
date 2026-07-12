@@ -25,13 +25,12 @@
 
 import { useEffect, useRef, type RefObject } from "react";
 // Vite emits these as separate asset URLs that the worker can fetch at
-// runtime from the chrome-extension://<id>/ origin. Importing this way
-// avoids hard-coding paths and keeps the worker/wasm versioned alongside
-// the `jassub` npm package.
+// runtime. Importing this way avoids hard-coding paths and keeps the
+// worker/wasm versioned alongside the `jassub` npm package.
 import workerUrl from "jassub/dist/wasm/jassub-worker.js?url";
 import wasmUrl from "jassub/dist/wasm/jassub-worker.wasm?url";
 import modernWasmUrl from "jassub/dist/wasm/jassub-worker-modern.wasm?url";
-import defaultFontUrl from "jassub/dist/default.woff2?url";
+import bundledAssFontUrl from "../assets/fonts/asap-variable.ttf?url";
 import { BUNDLED_ASS_FONT_FAMILY } from "../services/subtitles";
 import "./JassubOverlay.scss";
 
@@ -112,7 +111,7 @@ export function JassubOverlay({
           // Single registered family. `stripAssFontReferences` rewrites every
           // Style.Fontname column to BUNDLED_ASS_FONT_FAMILY so libass
           // resolves on the first lookup — no OS query, no Google Fonts.
-          availableFonts: { [BUNDLED_ASS_FONT_FAMILY]: defaultFontUrl },
+          availableFonts: { [BUNDLED_ASS_FONT_FAMILY]: bundledAssFontUrl },
           defaultFont: BUNDLED_ASS_FONT_FAMILY,
           // Skip the local-font query entirely. The user opted out of OS font
           // matching — we still honor every other ASS style (positioning,

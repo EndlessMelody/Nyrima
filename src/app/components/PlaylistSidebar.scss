@@ -9,13 +9,11 @@
       var(--surface-background) 0%,
       var(--surface-background-weak) 100%
     );
-  border: 1px solid var(--hairline-pink);
+  border: 1px solid var(--neutral-border-weak);
   border-radius: var(--ny-radius-md);
   height: 100%;
   overflow-y: auto;
-  box-shadow:
-    0 0 0 1px var(--hairline-pink),
-    0 12px 40px -16px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 12px 40px -16px rgba(0, 0, 0, 0.6);
 }
 
 .ny-playlist__summary {
@@ -213,22 +211,18 @@
       0 8px 24px -12px var(--brand-alpha-medium);
 
     &::before {
-      background: linear-gradient(
-        180deg,
-        var(--brand-solid-strong),
-        var(--accent-solid-strong)
-      );
+      background: var(--brand-solid-strong);
       box-shadow: 0 0 10px var(--brand-alpha-strong);
     }
   }
 
   &:hover:not(.is-current) {
     background: var(--surface-background-strong);
-    border-color: var(--accent-border-weak);
+    border-color: var(--neutral-border-medium);
     transform: translateX(2px);
 
     &::before {
-      background: var(--accent-alpha-strong);
+      background: var(--neutral-alpha-strong);
     }
   }
 
@@ -298,7 +292,7 @@
 }
 
 .ny-playlist__progress {
-  color: var(--accent-on-background-strong);
+  color: var(--neutral-on-background-strong);
   font-weight: 600;
 }
 
@@ -313,11 +307,7 @@
 
 .ny-playlist__progress-bar {
   height: 100%;
-  background: linear-gradient(
-    90deg,
-    var(--brand-solid-medium),
-    var(--accent-solid-medium)
-  );
+  background: var(--brand-solid-strong);
   border-radius: 3px;
   box-shadow: 0 0 8px var(--brand-alpha-medium);
 }

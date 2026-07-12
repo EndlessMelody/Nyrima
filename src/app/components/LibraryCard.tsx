@@ -10,7 +10,7 @@
  * still lives in `title` attributes for power-user debugging.
  */
 
-import { useMemo, type KeyboardEvent, type MouseEvent } from "react";
+import { memo, useMemo, type KeyboardEvent, type MouseEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import cn from "classnames";
 import type { PlaybackPosition, RecentFolder } from "@shared/types";
@@ -23,9 +23,11 @@ interface Props {
   folder: RecentFolder;
   /** All known positions; the card pulls the most-recent one in this folder. */
   positions: Record<string, PlaybackPosition>;
+  /** Optional explicit route for file-level aggregate cards. */
+  openPath?: string;
 }
 
-export function LibraryCard({ folder, positions }: Props) {
+export const LibraryCard = memo(function LibraryCard({ folder, positions, openPath }: Props) {
   const navigate = useNavigate();
   const { togglePin } = useRecentStore();
 
@@ -91,7 +93,7 @@ export function LibraryCard({ folder, positions }: Props) {
   // by LibraryPage on visit (lastSeenAt → now, pendingNewCount → 0).
   const newCount = folder.pendingNewCount ?? 0;
 
-  const onOpen = () => navigate(`/library/${encodeURIComponent(folder.id)}`);
+  const onOpen = () => navigate(openPath ?? `/library/${encodeURIComponent(folder.id)}`);
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Enter" || e.key === " ") {
@@ -100,7 +102,10 @@ export function LibraryCard({ folder, positions }: Props) {
     }
   };
 
-  const stop = (e: MouseEvent) => e.stopPropagation();
+  const onTogglePin = (e: MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    togglePin(folder.id);
+  };
 
   return (
     <div
@@ -135,28 +140,36 @@ export function LibraryCard({ folder, positions }: Props) {
           </div>
         )}
 
-        {folder.pinned && (
-          <span
-            className="ny-library-card__pin-pip"
-            aria-label="Pinned"
-            title="Pinned"
-          />
-        )}
+        <div className="ny-library-card__poster-tools">
+          <button
+            type="button"
+            className={cn("ny-library-card__pin-action", {
+              "is-active": folder.pinned,
+            })}
+            onClick={onTogglePin}
+            onKeyDown={(e) => e.stopPropagation()}
+            aria-label={folder.pinned ? "Unpin folder" : "Pin folder"}
+            aria-pressed={!!folder.pinned}
+            title={folder.pinned ? "Unpin" : "Pin"}
+          >
+            <PinIcon />
+          </button>
+
+          {watchedRatio && (
+            <span
+              className={cn("ny-library-card__progress-pill", {
+                "is-complete": watchedRatio.complete,
+              })}
+              title={`${watchedRatio.watched} of ${watchedRatio.total} watched`}
+            >
+              {watchedRatio.label}
+            </span>
+          )}
+        </div>
 
         {continueLabel && (
           <span className="ny-library-card__continue-pill">
             <PlayDotIcon /> {continueLabel}
-          </span>
-        )}
-
-        {watchedRatio && (
-          <span
-            className={cn("ny-library-card__progress-pill", {
-              "is-complete": watchedRatio.complete,
-            })}
-            title={`${watchedRatio.watched} of ${watchedRatio.total} watched`}
-          >
-            {watchedRatio.label}
           </span>
         )}
 
@@ -193,26 +206,13 @@ export function LibraryCard({ folder, positions }: Props) {
         </span>
       </div>
 
-      <span className="ny-library-card__actions" onClick={stop}>
-        <button
-          type="button"
-          className={cn("ny-library-card__action", {
-            "is-active": folder.pinned,
-          })}
-          onClick={() => togglePin(folder.id)}
-          aria-label={folder.pinned ? "Unpin folder" : "Pin folder"}
-          title={folder.pinned ? "Unpin" : "Pin"}
-        >
-          <PinIcon />
-        </button>
-      </span>
     </div>
   );
-}
+});
 
 function folderInitials(name: string): string {
   const words = name
-    .replace(/[\[\]\(\)]/g, " ")
+    .replace(/[[\]()]/g, " ")
     .split(/\s+/)
     .filter(Boolean);
   if (words.length === 0) return "Nm";

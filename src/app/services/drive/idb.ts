@@ -10,10 +10,16 @@
  * Falls back to an in-memory map when IndexedDB is unavailable (extension
  * service-worker contexts, locked-down profiles). Fallback is silently
  * non-persistent, which is acceptable for cache use.
+ *
+ * Every failure path still degrades gracefully (resolve with the fallback),
+ * but routes through `debugLog` first so a quota-exceeded / blocked-open /
+ * transaction abort is observable in dev instead of vanishing silently.
  */
 
+import { debugLog } from "../debug-log";
+
 const DB_NAME = "nyrima";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export const STORES = {
   FOLDER_SCAN: "folderScanCache",
@@ -22,6 +28,8 @@ export const STORES = {
   THUMBNAIL: "thumbnailCache",
   MEDIA_SEGMENT: "mediaSegmentCache",
   WATCH_PROGRESS: "watchProgress",
+  // v2: persisted FileSystemDirectoryHandle for the connected local library.
+  LOCAL_LIBRARY: "localLibraryHandles",
 } as const;
 
 export type StoreName = (typeof STORES)[keyof typeof STORES];
@@ -45,6 +53,7 @@ function open(): Promise<IDBDatabase | null> {
       // Extension service worker with no persistent storage permission can
       // hang on open(). Treat slow open as "not available" and fall back.
       timedOut = true;
+      debugLog("[idb] open() timed out — using in-memory fallback");
       resolve(null);
     }, 1500);
 
@@ -72,14 +81,17 @@ function open(): Promise<IDBDatabase | null> {
       };
       req.onerror = () => {
         clearTimeout(timer);
+        debugLog("[idb] open() failed — using in-memory fallback", req.error);
         resolve(null);
       };
       req.onblocked = () => {
         clearTimeout(timer);
+        debugLog("[idb] open() blocked — using in-memory fallback");
         resolve(null);
       };
-    } catch {
+    } catch (e) {
       clearTimeout(timer);
+      debugLog("[idb] open() threw — using in-memory fallback", e);
       resolve(null);
     }
   });
@@ -103,8 +115,12 @@ export async function idbGet<T>(
       const tx = db.transaction(store, "readonly");
       const req = tx.objectStore(store).get(key);
       req.onsuccess = () => resolve(req.result as T | undefined);
-      req.onerror = () => resolve(undefined);
-    } catch {
+      req.onerror = () => {
+        debugLog(`[idb] get failed for ${store}:${key}`, req.error);
+        resolve(undefined);
+      };
+    } catch (e) {
+      debugLog(`[idb] get threw for ${store}:${key}`, e);
       resolve(undefined);
     }
   });
@@ -125,9 +141,16 @@ export async function idbPut<T>(
       const tx = db.transaction(store, "readwrite");
       tx.objectStore(store).put(value as unknown as object, key);
       tx.oncomplete = () => resolve();
-      tx.onerror = () => resolve();
-      tx.onabort = () => resolve();
-    } catch {
+      tx.onerror = () => {
+        debugLog(`[idb] put failed for ${store}:${key}`, tx.error);
+        resolve();
+      };
+      tx.onabort = () => {
+        debugLog(`[idb] put aborted for ${store}:${key}`, tx.error);
+        resolve();
+      };
+    } catch (e) {
+      debugLog(`[idb] put threw for ${store}:${key}`, e);
       resolve();
     }
   });
@@ -147,9 +170,16 @@ export async function idbDelete(
       const tx = db.transaction(store, "readwrite");
       tx.objectStore(store).delete(key);
       tx.oncomplete = () => resolve();
-      tx.onerror = () => resolve();
-      tx.onabort = () => resolve();
-    } catch {
+      tx.onerror = () => {
+        debugLog(`[idb] delete failed for ${store}:${key}`, tx.error);
+        resolve();
+      };
+      tx.onabort = () => {
+        debugLog(`[idb] delete aborted for ${store}:${key}`, tx.error);
+        resolve();
+      };
+    } catch (e) {
+      debugLog(`[idb] delete threw for ${store}:${key}`, e);
       resolve();
     }
   });
@@ -168,9 +198,16 @@ export async function idbClear(store: StoreName): Promise<void> {
       const tx = db.transaction(store, "readwrite");
       tx.objectStore(store).clear();
       tx.oncomplete = () => resolve();
-      tx.onerror = () => resolve();
-      tx.onabort = () => resolve();
-    } catch {
+      tx.onerror = () => {
+        debugLog(`[idb] clear failed for ${store}`, tx.error);
+        resolve();
+      };
+      tx.onabort = () => {
+        debugLog(`[idb] clear aborted for ${store}`, tx.error);
+        resolve();
+      };
+    } catch (e) {
+      debugLog(`[idb] clear threw for ${store}`, e);
       resolve();
     }
   });
@@ -203,8 +240,12 @@ export async function idbEntries<T>(
         out.push([String(cursor.key), cursor.value as T]);
         cursor.continue();
       };
-      req.onerror = () => resolve(out);
-    } catch {
+      req.onerror = () => {
+        debugLog(`[idb] entries cursor failed for ${store}`, req.error);
+        resolve(out);
+      };
+    } catch (e) {
+      debugLog(`[idb] entries threw for ${store}`, e);
       resolve([]);
     }
   });

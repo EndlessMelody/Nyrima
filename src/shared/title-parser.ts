@@ -91,7 +91,7 @@ const EPISODE_PATTERNS: RegExp[] = [
   /\bE(\d{1,3})\b/,
   // Standalone numeric segment preceded by a common separator (incl.
   // `]` and `)` so bracket-prefix styles like `[GS]07` match too).
-  /(?:^|[\s\-_.\]\)])(\d{1,3})(?=\s*(?:v\d)?\s*(?:\[|\(|$|\.|\s))/,
+  /(?:^|[\s\-_.\])])(\d{1,3})(?=\s*(?:v\d)?\s*(?:\[|\(|$|\.|\s))/,
 ];
 
 // Season-subfolder detection.

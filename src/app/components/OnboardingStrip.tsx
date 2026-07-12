@@ -28,7 +28,7 @@ export function OnboardingStrip({
     <section className={`ny-onboard-strip${open ? " is-open" : ""}`}>
       <div className="ny-onboard-strip__row">
         <span className="ny-onboard-strip__eyebrow">
-          ヘルプ · GETTING STARTED
+          Getting Started
         </span>
         <span className="ny-onboard-strip__tagline">
           New folder, new key, or need a refresher?

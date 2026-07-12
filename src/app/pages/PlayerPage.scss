@@ -1,156 +1,2006 @@
 /**
- * Player page chrome — Obsidian Atelier player page surface.
+ * Watch room — the anime/movie player surface, styled to match the Music
+ * Player console (dark glass, neon pink/cyan accents, rounded panels, mono
+ * micro-labels). Layout mirrors the music page's stacked console:
+ *   row 1: video stage (left) + episode queue rail (right)
+ *   row 2: Subtitles & Audio + Watch Tuning deep panels
  *
- * Goals:
- *  - Frame the <video> with a hairline + champagne gold corner notches.
- *  - Keep decoration outside the video frame so it never overlaps controls.
- *  - All eyebrow/meta typography in mono for the instrument feel.
+ * Loading / error / unsupported early-states keep their class names and are
+ * restyled here to the same glass vocabulary.
  */
 
-.ny-player-page {
-  width: 100%;
+.watch-room {
+  position: relative;
+  isolation: isolate;
+  min-height: 100dvh;
+  padding: 16px clamp(16px, 2.6vw, 34px) 30px;
+  color: var(--neutral-on-background-strong);
+  // Height the 16:9 player is allowed to occupy. On wide stage columns the
+  // video — sized by width — would grow taller than the viewport and run into
+  // the top/bottom edges. Capping it to the viewport minus the sticky header
+  // and a breathing margin keeps it clear of the edges; the episode rail is
+  // stretched to the same row so the two columns stay balanced (see
+  // .watch-room__video / .watch-room__rail). The `max()` floor stops the cap
+  // collapsing on very short windows.
+  --watch-player-h: max(320px, calc(100dvh - 160px));
+  background:
+    radial-gradient(circle at 14% 4%, rgba(255, 79, 216, 0.18), transparent 34%),
+    linear-gradient(180deg, rgba(7, 9, 15, 0.96), rgba(7, 9, 15, 0.98));
+}
+
+.watch-room__ambient {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.028) 1px, transparent 1px);
+  background-size: 52px 52px;
+  mask-image: radial-gradient(circle at center, black 0%, transparent 78%);
+}
+
+.watch-room__svg-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
 }
 
 // ---------------------------------------------------------------------------
-// Theatre mode — dim the chrome around the player without going fullscreen.
-//
-// Hides the playlist sidebar and the info card below the video so the player
-// becomes the only thing in the room. The AppShell header stays visible so
-// the user can still navigate back; we just drop its opacity to keep focus
-// on the frame. The transition is timed slightly faster than fullscreen so
-// the toggle feels responsive without being abrupt.
+// Header
 // ---------------------------------------------------------------------------
-.ny-player-page {
-  transition: background 240ms ease;
-
-  &.is-theater {
-    background: rgba(2, 4, 10, 0.72);
-
-    .ny-player-main {
-      max-width: none;
-    }
-
-    .ny-player-info,
-    .ny-player-layout__aside {
-      display: none;
-    }
-
-    // CSS Grid tracks aren't reflowed by `display: none` on a child — the
-    // 360px sidebar column above would still consume its slot and leave a
-    // blank gap to the right of the player. Collapse the grid to a single
-    // column in theater mode so the player fills the full row width.
-    .ny-player-layout {
-      grid-template-columns: 1fr;
-    }
-  }
+.watch-room-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  width: min(1500px, 100%);
+  margin: 0 auto 16px;
+  min-height: 64px;
+  display: grid;
+  grid-template-columns: minmax(260px, auto) minmax(320px, 1fr);
+  align-items: center;
+  gap: 16px;
+  padding: 11px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.035)),
+    rgba(14, 17, 24, 0.74);
+  backdrop-filter: blur(24px) saturate(150%);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+  box-shadow:
+    0 18px 70px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
-// Let the player breathe past the standard 1280px page cap when theater
-// mode is on, so toggling theater actually makes the video bigger instead
-// of just hiding the sidebar in place. We can't reach `.dc-page` from a
-// descendant selector (it's an ancestor), so the body `:has()` selector
-// scopes the override to the player page only.
-body:has(.ny-player-page.is-theater) .dc-page {
-  max-width: min(1600px, 100vw - 48px);
-  transition: max-width 240ms ease;
-}
-
-// When theatre mode is on, the app-shell header (rendered outside this page)
-// can also be muted. We can't reach it from a descendant selector, so we
-// piggy-back on the body via :has() — supported in all evergreen browsers
-// and harmless in older ones (the rule simply doesn't fire).
-body:has(.ny-player-page.is-theater) .dc-shell__header {
-  opacity: 0.42;
-  transition: opacity 240ms ease;
-
-  &:hover,
-  &:focus-within {
-    opacity: 1;
-  }
-}
-
-.ny-player-main {
+.watch-room-header__left {
   display: flex;
-  flex-direction: column;
-  gap: 20px;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
 }
 
-.ny-player-info {
+.watch-back-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  height: 40px;
+  padding: 0 13px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--neutral-on-background-strong);
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease;
+
+  svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  &:hover {
+    border-color: var(--brand-border-strong);
+    background: var(--brand-alpha-medium);
+  }
+
+  &:active {
+    transform: translateY(1px) scale(0.99);
+  }
+}
+
+.watch-room-header__brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-family: var(--dc-font-wordmark);
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--brand-on-background-strong);
+}
+
+.watch-room-header__title {
+  display: grid;
+  min-width: 0;
+  line-height: 1.1;
+
+  span {
+    font-size: 0.95rem;
+    font-weight: 650;
+  }
+
+  small {
+    margin-top: 3px;
+    color: var(--neutral-on-background-weak);
+    font-family: var(--dc-font-mono);
+    font-size: 0.64rem;
+    text-transform: uppercase;
+    letter-spacing: 0.13em;
+  }
+}
+
+.watch-room-header__right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.watch-room-search {
+  flex: 1 1 240px;
+  min-width: 180px;
+  max-width: 380px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background: rgba(7, 9, 15, 0.32);
+  color: var(--neutral-on-background-medium);
+
+  svg {
+    width: 17px;
+    height: 17px;
+    flex-shrink: 0;
+  }
+
+  input {
+    width: 100%;
+    min-width: 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--neutral-on-background-strong);
+    font-size: 0.85rem;
+
+    &::placeholder {
+      color: var(--neutral-on-background-weak);
+    }
+  }
+}
+
+.watch-icon-button {
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.055);
+  color: var(--neutral-on-background-medium);
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    color 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease;
+
+  svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  &:hover {
+    color: var(--neutral-on-background-strong);
+    border-color: var(--neutral-border-strong);
+    background: var(--neutral-alpha-medium);
+  }
+
+  &.is-active {
+    color: var(--neutral-on-background-strong);
+    border-color: var(--brand-border-strong);
+    background: var(--brand-alpha-medium);
+    box-shadow: 0 0 18px var(--brand-alpha-medium);
+  }
+
+  &:active {
+    transform: translateY(1px) scale(0.98);
+  }
+}
+
+.watch-room-header__menu-host {
+  position: relative;
+}
+
+.watch-room-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  min-width: 188px;
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03)),
+    rgba(14, 17, 24, 0.94);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.45);
+
+  button {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 11px;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--neutral-on-background-medium);
+    font-size: 0.85rem;
+    text-align: left;
+    cursor: pointer;
+    transition:
+      color 140ms ease,
+      background 140ms ease;
+
+    svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    &:hover {
+      color: var(--neutral-on-background-strong);
+      background: var(--brand-alpha-medium);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Main grid
+// ---------------------------------------------------------------------------
+.watch-room__main {
+  width: min(1500px, 100%);
+  margin: 0 auto;
+  display: grid;
+  // Three columns on row 1: a fixed-width tech-HUD rail, the player, then the
+  // episode list. The brand rail is a fixed, slim width (pushing the player off
+  // the left edge). The player column is sized to the 16:9 frame's exact width
+  // (derived from its height cap) so the video fills it with no internal blank.
+  // The episode list takes the remaining slack (1fr) so the three boxes span
+  // the full header width with no gaps. On tall columns the player track grows
+  // toward the row width and the list falls back to its minimum.
+  grid-template-columns:
+    120px
+    minmax(0, calc(var(--watch-player-h) * 16 / 9))
+    minmax(300px, 1fr);
+  // Row 1 pairs the player with the episode rail (equal height). Row 2 is the
+  // title (under brand+player) with the capture card aligned under the episode
+  // list. Row 3 (deep) spans the full width.
+  grid-template-areas:
+    "brand video   rail"
+    "title title   capture"
+    "deep  deep    deep";
+  gap: 18px;
+  align-items: start;
+}
+
+// Title header — spans the brand + player columns, anchored at the left edge.
+// Stretches so it stays the same height as the capture card beside it.
+.watch-room__title {
+  grid-area: title;
+  min-width: 0;
+  align-self: stretch;
+}
+
+// Capture card — aligned under the episode list (third column), same height as
+// the title card.
+.watch-room__capture {
+  grid-area: capture;
+  min-width: 0;
+  align-self: stretch;
+}
+
+.watch-room__rail {
+  grid-area: rail;
+  position: relative;
+  // Stretch to the player's row height so the list panel matches the player
+  // instead of floating shorter; the player (in-flow) defines the row height,
+  // this column fills it.
+  align-self: stretch;
+  min-width: 0;
+  min-height: 0;
+
+  &.is-hidden {
+    display: none;
+  }
+}
+
+// The queue panel is taken out of flow to fill the stretched cell, so a long
+// episode list can't grow the row past the player — only its inner list
+// scrolls (see .watch-queue__list).
+.watch-room__rail > * {
+  position: absolute;
+  inset: 0;
+}
+
+// Left tech-HUD rail — matches the player row height. Its panel is taken out
+// of flow (like the episode rail) so a tall spec stack can't grow the row past
+// the player; the player alone defines the row height and both side panels
+// stretch to it.
+.watch-room__brand {
+  grid-area: brand;
+  position: relative;
+  align-self: stretch;
+  min-width: 0;
+  min-height: 0;
+}
+
+.watch-room__brand > * {
+  position: absolute;
+  inset: 0;
+}
+
+// Deep row: a small Playback card, then equal-width Picture Tuning + Tracks &
+// Timing panels. All three are balanced to one shared height taken from the
+// Watch Tuning column (its fixed slider grid is the natural reference). The
+// height is published as `--anime-control-panel-height` on this element by a
+// ResizeObserver in PlayerPage; the Playback and Tracks cells consume it.
+// `align-items: start` keeps each cell at its own height (no viewport-filling
+// stretch) so the shared height stays driven by the reference, not the row.
+.watch-room__deep {
+  grid-area: deep;
+  display: grid;
+  grid-template-columns: minmax(230px, 0.8fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.watch-room__deep-cell {
+  min-width: 0;
+  display: flex;
+}
+
+// The panel inside each cell fills its cell so the three balance.
+.watch-room__deep-cell > * {
+  flex: 1;
+  min-width: 0;
+}
+
+// Playback: match the reference height as a *minimum* so it never clips its
+// own content if it happens to run taller; space-between then distributes its
+// three sections to fill the height without holes.
+.watch-room__deep-cell--fill {
+  min-height: var(--anime-control-panel-height, 0);
+}
+
+// Tracks & Timing: pin to the reference height so a long track list scrolls
+// inside the panel (see .subs-panel) instead of stretching the column, and a
+// single-track list doesn't leave a mostly-empty column taller than this.
+.watch-room__deep-cell--scroll {
+  height: var(--anime-control-panel-height, auto);
+}
+
+.watch-room__video {
+  grid-area: video;
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  border-radius: 22px;
+
+  .dc-vlc {
+    border-radius: 20px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow:
+      0 26px 80px rgba(0, 0, 0, 0.5),
+      0 0 46px var(--brand-alpha-medium);
+  }
+
+  // Keep the strict 16:9 frame from overrunning the viewport on short windows:
+  // cap the height, and derive the matching max-width so the frame stays
+  // exactly 16:9. The column is already sized to this width, so the frame fills
+  // it and stays left-aligned with the header. Fullscreen opts out — it sizes
+  // itself to the screen via `.is-fullscreen`.
+  .dc-vlc:not(.is-fullscreen) {
+    max-height: var(--watch-player-h);
+    max-width: calc(var(--watch-player-h) * 16 / 9);
+    margin-inline: 0;
+  }
 }
 
-.ny-player-info__head {
+// Focus mode — collapse to the video only.
+.watch-room.is-focus {
+  .watch-room__main {
+    grid-template-columns: 1fr;
+    grid-template-areas: "video";
+  }
+
+  .watch-room__brand,
+  .watch-room__rail,
+  .watch-room__title,
+  .watch-room__capture,
+  .watch-room__deep {
+    display: none;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Left brand / now-watching rail (panel)
+// ---------------------------------------------------------------------------
+.watch-side-rail {
+  height: 100%;
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.ny-player-info__title {
-  font-family: var(--dc-font-display);
-  font-size: 1.25rem;
-  font-weight: 500;
-  letter-spacing: -0.02em;
-  color: var(--neutral-on-background-strong);
-  margin: 0;
-}
-
-.ny-player-info__filename {
-  font-family: var(--dc-font-mono);
-  font-size: 0.75rem;
-  color: var(--neutral-on-background-weak);
-  margin: 4px 0 0;
-}
-
-.ny-player-info__meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.ny-player-info__pill {
-  padding: 4px 10px;
-  border-radius: 6px;
-  background: var(--surface-background-strong);
-  border: var(--dc-hairline);
-  font-family: var(--dc-font-mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--neutral-on-background-medium);
-}
-
-.ny-player-info__progress {
-  height: 4px;
-  border-radius: 2px;
-  background: var(--neutral-alpha-weak);
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.035)),
+    rgba(14, 17, 24, 0.72);
+  box-shadow:
+    0 20px 70px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
   overflow: hidden;
 }
 
-.ny-player-info__progress-bar {
-  height: 100%;
-  border-radius: 2px;
-  background: linear-gradient(
-    90deg,
-    var(--brand-background-strong),
-    var(--accent-background-strong)
-  );
+// Tech-HUD stack — short, glanceable stream specs. The cards share the rail
+// height equally (flex: 1) so the full set always fits between the episode head
+// and the rail bottom — never scrollable, never clipped.
+.watch-side-rail__specs {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
-.ny-player-info__actions {
+.watch-side-rail__spec-list {
+  margin: 0;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.watch-side-rail__spec {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 11px;
+  background: rgba(7, 9, 15, 0.3);
+  text-align: center;
+
+  &.is-muted {
+    opacity: 0.5;
+  }
+
+  dt {
+    color: var(--neutral-on-background-weak);
+    font-family: var(--dc-font-mono);
+    font-size: 0.56rem;
+    font-weight: 650;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+  }
+
+  dd {
+    max-width: 100%;
+    margin: 0;
+    color: var(--neutral-on-background-strong);
+    font-family: var(--dc-font-mono);
+    font-size: 0.78rem;
+    font-weight: 650;
+    line-height: 1.1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+// Episode marker — a glass card pinned to the top of the rail, above the spec
+// stack.
+.watch-side-rail__head {
+  flex-shrink: 0;
+  display: grid;
+  justify-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 13px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 16px;
+  background:
+    linear-gradient(150deg, var(--brand-alpha-medium), transparent),
+    rgba(14, 17, 24, 0.55);
+  box-shadow:
+    0 14px 36px rgba(0, 0, 0, 0.3),
+    0 0 26px -8px var(--brand-alpha-strong),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(12px) saturate(150%);
+  -webkit-backdrop-filter: blur(12px) saturate(150%);
+}
+
+.watch-side-rail__ep {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+}
+
+.watch-side-rail__ep-kicker {
+  color: var(--brand-on-background-strong);
+  font-family: var(--dc-font-mono);
+  font-size: 0.6rem;
+  font-weight: 650;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.watch-side-rail__ep-num {
+  font-family: var(--dc-font-display);
+  font-size: 1.7rem;
+  font-weight: 760;
+  line-height: 1;
+  color: var(--neutral-on-background-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.watch-side-rail__progress {
+  width: 100%;
+  max-width: 84px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+
+  span {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: var(--brand-solid-strong);
+  }
+}
+
+.watch-side-rail__pct {
+  color: var(--neutral-on-background-weak);
+  font-family: var(--dc-font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+// ---------------------------------------------------------------------------
+// Shared glass panel scaffold (queue / subs / tuning)
+// ---------------------------------------------------------------------------
+.watch-panel,
+.watch-meta,
+.watch-controls,
+.watch-queue {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.035)),
+    rgba(14, 17, 24, 0.72);
+  box-shadow:
+    0 20px 70px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+}
+
+.watch-panel {
+  padding: 18px;
+}
+
+.watch-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.watch-panel__icon {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: 13px;
+  background:
+    linear-gradient(135deg, var(--brand-alpha-medium), transparent),
+    rgba(255, 255, 255, 0.05);
+  color: var(--accent-on-background-strong);
+
+  svg {
+    width: 20px;
+    height: 20px;
+  }
+}
+
+.watch-panel__header > div {
+  min-width: 0;
+
+  span {
+    color: var(--neutral-on-background-weak);
+    font-family: var(--dc-font-mono);
+    font-size: 0.66rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+  }
+
+  h2 {
+    margin: 3px 0 0;
+    color: var(--neutral-on-background-strong);
+    font-size: 1.12rem;
+    font-weight: 650;
+  }
+}
+
+.watch-panel__reset,
+.watch-panel__toggle {
+  margin-left: auto;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.055);
+  color: var(--neutral-on-background-medium);
+  font-size: 0.76rem;
+  font-weight: 560;
+  cursor: pointer;
+  transition:
+    color 150ms ease,
+    border-color 150ms ease,
+    background 150ms ease;
+
+  svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  &:hover {
+    color: var(--neutral-on-background-strong);
+    border-color: var(--neutral-border-strong);
+    background: var(--neutral-alpha-medium);
+  }
+
+  &.is-active {
+    color: var(--brand-on-solid-strong);
+    border-color: transparent;
+    background: var(--brand-solid-strong);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Metadata strip
+// ---------------------------------------------------------------------------
+.watch-meta {
+  height: 100%;
+  padding: 16px 18px;
+  display: grid;
+  align-content: center;
+  gap: 14px;
+}
+
+.watch-meta__head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+}
+
+.watch-meta__icon {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, var(--brand-alpha-medium), transparent),
+    rgba(255, 255, 255, 0.05);
+  color: var(--brand-on-background-strong);
+
+  svg {
+    width: 22px;
+    height: 22px;
+  }
+}
+
+.watch-meta__headings {
+  min-width: 0;
+}
+
+.watch-meta__kicker {
+  color: var(--brand-on-background-strong);
+  font-family: var(--dc-font-mono);
+  font-size: 0.68rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+}
+
+.watch-meta__title {
+  margin: 4px 0 0;
+  color: var(--neutral-on-background-strong);
+  font-size: clamp(1.15rem, 1.9vw, 1.6rem);
+  font-weight: 700;
+  line-height: 1.14;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.watch-meta__filename {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 6px 0 0;
+  color: var(--neutral-on-background-weak);
+  font-family: var(--dc-font-mono);
+  font-size: 0.74rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  svg {
+    width: 13px;
+    height: 13px;
+    flex-shrink: 0;
+  }
+}
+
+.watch-meta__progress-block {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+  min-width: 120px;
+}
+
+.watch-meta__progress-label {
+  color: var(--neutral-on-background-medium);
+  font-family: var(--dc-font-mono);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.watch-meta__progress {
+  width: 120px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.watch-meta__progress-bar {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--brand-solid-strong);
+}
+
+.watch-meta__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 9px;
+  margin: 0;
+
+  div {
+    padding: 10px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 13px;
+    background: rgba(7, 9, 15, 0.28);
+
+    &.is-muted {
+      opacity: 0.66;
+    }
+  }
+
+  dt {
+    margin-bottom: 5px;
+    color: var(--neutral-on-background-weak);
+    font-family: var(--dc-font-mono);
+    font-size: 0.64rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  dd {
+    margin: 0;
+    color: var(--neutral-on-background-strong);
+    font-size: 0.84rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Anime control strip
+// ---------------------------------------------------------------------------
+.watch-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+.watch-control {
+  flex: 1 1 200px;
+  min-width: 160px;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  padding: 11px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: rgba(7, 9, 15, 0.26);
+
+  &--compact {
+    flex: 0 1 auto;
+  }
+}
+
+.watch-control__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--neutral-on-background-weak);
+  font-family: var(--dc-font-mono);
+  font-size: 0.65rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+
+  svg {
+    width: 14px;
+    height: 14px;
+    color: var(--accent-on-background-strong);
+  }
+}
+
+.watch-control__hint {
+  color: var(--neutral-on-background-medium);
+  font-family: var(--dc-font-mono);
+  font-size: 0.68rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  &.is-live {
+    color: var(--brand-on-background-strong);
+  }
+}
+
+.watch-control__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.watch-select {
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--neutral-on-background-strong);
+  font-size: 0.82rem;
+  cursor: pointer;
+  appearance: none;
+
+  &:hover {
+    border-color: var(--neutral-border-strong);
+  }
+
+  &--static {
+    display: flex;
+    align-items: center;
+    cursor: default;
+    color: var(--neutral-on-background-medium);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  option {
+    color: var(--neutral-on-solid-strong);
+  }
+}
+
+.watch-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+// Speed pills laid out 3 per row (six options → exactly two rows). The 3×2
+// grid never reserves a third row, so the Speed section stays content-tall.
+.watch-pills--grid3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+
+  .watch-pill {
+    min-height: 34px;
+    padding: 0 6px;
+    text-align: center;
+  }
+}
+
+// Subtitle-timing nudges kept on one row, slightly enlarged so the section
+// reads as intentional rather than a thin strip. Equal-width so the five
+// buttons fill the card.
+.watch-pills--row {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+
+  .watch-pill {
+    flex: 1;
+    min-height: 36px;
+    padding: 0 4px;
+    text-align: center;
+  }
+}
+
+.watch-pill {
+  min-height: 32px;
+  padding: 0 11px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--neutral-on-background-medium);
+  font-size: 0.78rem;
+  font-weight: 560;
+  cursor: pointer;
+  transition:
+    color 150ms ease,
+    border-color 150ms ease,
+    background 150ms ease;
+
+  &:hover:not(:disabled) {
+    color: var(--neutral-on-background-strong);
+    border-color: var(--neutral-border-strong);
+    background: var(--neutral-alpha-medium);
+  }
+
+  &.is-active {
+    color: var(--brand-on-solid-strong);
+    border-color: transparent;
+    background: var(--brand-solid-strong);
+    box-shadow: 0 0 18px var(--brand-border-medium);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
+
+.watch-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 13px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--neutral-on-background-medium);
+  font-size: 0.82rem;
+  font-weight: 560;
+  cursor: pointer;
+  transition:
+    color 150ms ease,
+    border-color 150ms ease,
+    background 150ms ease;
+
+  &__dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.3);
+    transition: background 150ms ease, box-shadow 150ms ease;
+  }
+
+  &.is-on {
+    color: var(--neutral-on-background-strong);
+    border-color: var(--brand-border-strong);
+    background: var(--brand-alpha-medium);
+
+    .watch-toggle__dot {
+      background: var(--brand-solid-strong);
+      box-shadow: 0 0 10px var(--brand-alpha-strong);
+    }
+  }
+}
+
+.watch-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.055);
+  color: var(--neutral-on-background-medium);
+  font-size: 0.78rem;
+  font-weight: 560;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition:
+    color 150ms ease,
+    border-color 150ms ease,
+    background 150ms ease;
+
+  svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  &:hover:not(:disabled) {
+    color: var(--neutral-on-background-strong);
+    border-color: var(--brand-border-strong);
+    background: var(--brand-alpha-medium);
+  }
+
+  &.is-active {
+    color: var(--brand-on-solid-strong);
+    border-color: transparent;
+    background: var(--brand-solid-strong);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Capture card (title row, under the episode list)
+// ---------------------------------------------------------------------------
+.watch-capture {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.035)),
+    rgba(14, 17, 24, 0.72);
+  box-shadow:
+    0 18px 60px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+}
+
+.watch-capture__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--neutral-on-background-weak);
+  font-family: var(--dc-font-mono);
+  font-size: 0.65rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+
+  svg {
+    width: 14px;
+    height: 14px;
+    color: var(--accent-on-background-strong);
+  }
+}
+
+.watch-capture__buttons {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+
+  .watch-action {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
 }
 
-/* Loading state */
+// ---------------------------------------------------------------------------
+// Playback card (deep row — Speed + A-B loop)
+// ---------------------------------------------------------------------------
+.playback-card {
+  display: flex;
+  flex-direction: column;
 
+  // The shared `.watch-control` rule is `flex: 1 1 200px`, sized for the
+  // horizontal control strip. In this vertical card that 200px flex-basis
+  // becomes a 200px-tall floor per section, so three sections balloon the
+  // column far past the other panels. Reset to content height so each section
+  // is only as tall as its label + buttons.
+  .watch-control {
+    flex: 0 0 auto;
+    padding: 9px 12px;
+    gap: 7px;
+  }
+
+  // A-B loop: three equal-width, slightly taller buttons that fill the row so
+  // the section feels intentional and stays compact.
+  .watch-control__buttons {
+    display: flex;
+    gap: 8px;
+
+    .watch-action {
+      flex: 1;
+      min-height: 40px;
+      justify-content: center;
+    }
+  }
+}
+
+// The three sections (speed / loop / timing) sit compactly at the top of the
+// card with even gaps; the card itself is held to the shared Watch Tuning
+// reference height (see .watch-room__deep-cell--fill), so any slack falls as
+// quiet space below the last section — matching the Tracks & Timing panel
+// rather than stretching the section cards.
+.playback-card__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 14px;
+}
+
+// Live subtitle-offset readout sat inline in the Timing section label.
+.playback-card__offset {
+  margin-left: auto;
+  color: var(--neutral-on-background-medium);
+  font-family: var(--dc-font-mono);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  text-transform: none;
+  letter-spacing: 0;
+
+  &.is-live {
+    color: var(--brand-on-background-strong);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Episode queue rail
+// ---------------------------------------------------------------------------
+.watch-queue {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+}
+
+.watch-queue__summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 7px;
+  color: var(--neutral-on-background-medium);
+  font-family: var(--dc-font-mono);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.watch-queue__summary-bar {
+  height: 4px;
+  margin-bottom: 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+
+  div {
+    height: 100%;
+    border-radius: 999px;
+    background: var(--brand-solid-strong);
+  }
+}
+
+.watch-queue__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  padding-right: 2px;
+  scrollbar-width: thin;
+}
+
+.watch-queue__group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 8px 2px 4px;
+
+  strong {
+    color: var(--neutral-on-background-medium);
+    font-size: 0.78rem;
+    font-weight: 650;
+  }
+
+  em {
+    color: var(--neutral-on-background-weak);
+    font-family: var(--dc-font-mono);
+    font-size: 0.66rem;
+    font-style: normal;
+  }
+}
+
+.watch-queue__group:first-child .watch-queue__group-head {
+  margin-top: 0;
+}
+
+.watch-queue__item {
+  position: relative;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.045);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    background 150ms ease;
+
+  &:hover {
+    border-color: var(--neutral-border-strong);
+    background: var(--neutral-alpha-medium);
+  }
+
+  &.is-current {
+    border-color: var(--brand-border-strong);
+    background: var(--brand-alpha-medium);
+  }
+}
+
+.watch-queue__thumb {
+  width: 56px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 9px;
+  background: linear-gradient(135deg, var(--brand-alpha-medium), transparent);
+  color: var(--accent-on-background-strong);
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  svg {
+    width: 20px;
+    height: 20px;
+  }
+}
+
+.watch-queue__body {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.watch-queue__label {
+  color: var(--neutral-on-background-strong);
+  font-size: 0.84rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.watch-queue__file {
+  color: var(--neutral-on-background-weak);
+  font-family: var(--dc-font-mono);
+  font-size: 0.66rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.watch-queue__meta {
+  display: flex;
+  gap: 8px;
+  color: var(--neutral-on-background-weak);
+  font-family: var(--dc-font-mono);
+  font-size: 0.66rem;
+
+  .is-watched {
+    color: var(--accent-on-background-medium);
+  }
+
+  .is-progress {
+    color: var(--brand-on-background-strong);
+  }
+}
+
+.watch-queue__bar {
+  display: block;
+  height: 3px;
+  margin-top: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+
+  span {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: var(--brand-solid-strong);
+  }
+}
+
+.watch-queue__now {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 2px 7px;
+  border-radius: 7px;
+  background: var(--brand-solid-strong);
+  color: var(--brand-on-solid-strong);
+  font-family: var(--dc-font-mono);
+  font-size: 0.58rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.watch-queue__empty,
+.watch-queue__searchnote {
+  padding: 18px 12px;
+  color: var(--neutral-on-background-weak);
+  font-size: 0.82rem;
+  text-align: center;
+
+  svg {
+    display: block;
+    width: 20px;
+    height: 20px;
+    margin: 0 auto 8px;
+  }
+}
+
+.watch-queue__searchnote {
+  padding: 8px;
+  font-family: var(--dc-font-mono);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+// ---------------------------------------------------------------------------
+// Tabs (subtitles & audio panel)
+// ---------------------------------------------------------------------------
+.watch-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+
+  button {
+    height: 34px;
+    padding: 0 12px;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--neutral-on-background-medium);
+    font-size: 0.78rem;
+    font-weight: 560;
+    cursor: pointer;
+    transition:
+      color 150ms ease,
+      border-color 150ms ease,
+      background 150ms ease;
+
+    &:hover {
+      color: var(--neutral-on-background-strong);
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    &.is-active {
+      color: var(--brand-on-solid-strong);
+      border-color: rgba(255, 255, 255, 0.2);
+      background: var(--brand-solid-strong);
+    }
+  }
+}
+
+// Tracks & Timing panel: a flex column so the tab body can take the leftover
+// height and scroll internally (the cell height is pinned to the shared
+// reference — see .watch-room__deep-cell--scroll).
+.subs-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+// The active tab's content fills the remaining panel height. A multi-track rip
+// with more rows than fit scrolls inside the panel instead of inflating the
+// column; a single-track list simply sits at the top. Overflow is inset from
+// the panel edge so the scrollbar reads as an intentional, separated region.
+.watch-panel__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-width: thin;
+}
+
+.subs-list {
+  display: grid;
+  gap: 6px;
+}
+
+// Source subheader inside the Subtitles tab (Embedded / External).
+.subs-list__group {
+  margin: 6px 2px 1px;
+  color: var(--neutral-on-background-weak);
+  font-family: var(--dc-font-mono);
+  font-size: 0.64rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+
+  &:first-child {
+    margin-top: 0;
+  }
+}
+
+.subs-list__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--neutral-on-background-medium);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    color 150ms ease,
+    border-color 150ms ease,
+    background 150ms ease;
+
+  &:hover:not(.is-disabled) {
+    color: var(--neutral-on-background-strong);
+    border-color: var(--neutral-border-strong);
+    background: var(--neutral-alpha-medium);
+  }
+
+  &.is-active {
+    color: var(--brand-on-solid-strong);
+    border-color: transparent;
+    background: var(--brand-solid-strong);
+
+    .subs-list__badge,
+    .subs-list__lang {
+      color: rgba(7, 9, 15, 0.7);
+      border-color: rgba(7, 9, 15, 0.2);
+    }
+  }
+
+  &.is-disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+}
+
+.subs-list__name {
+  min-width: 0;
+  font-size: 0.86rem;
+  font-weight: 560;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.subs-list__tags {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.subs-list__lang,
+.subs-list__badge {
+  padding: 2px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 7px;
+  font-family: var(--dc-font-mono);
+  font-size: 0.62rem;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+}
+
+.timing-tab {
+  display: grid;
+  gap: 16px;
+}
+
+.timing-row {
+  display: grid;
+  gap: 9px;
+  padding: 13px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 14px;
+  background: rgba(7, 9, 15, 0.26);
+
+  &.is-disabled {
+    opacity: 0.6;
+  }
+
+  &__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+
+    output {
+      color: var(--neutral-on-background-medium);
+      font-family: var(--dc-font-mono);
+      font-size: 0.78rem;
+
+      &.is-live {
+        color: var(--brand-on-background-strong);
+      }
+    }
+  }
+
+  &__note {
+    margin: 0;
+    color: var(--neutral-on-background-weak);
+    font-size: 0.74rem;
+    line-height: 1.4;
+  }
+}
+
+.notes-list {
+  display: grid;
+  gap: 7px;
+}
+
+.notes-list__item {
+  display: flex;
+  align-items: stretch;
+  gap: 7px;
+}
+
+.notes-list__jump {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--neutral-on-background-strong);
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    background 150ms ease;
+
+  svg {
+    width: 15px;
+    height: 15px;
+    color: var(--accent-on-background-strong);
+  }
+
+  span {
+    font-size: 0.86rem;
+    font-weight: 600;
+  }
+
+  em {
+    margin-left: auto;
+    color: var(--neutral-on-background-weak);
+    font-family: var(--dc-font-mono);
+    font-size: 0.66rem;
+    font-style: normal;
+  }
+
+  &:hover {
+    border-color: var(--neutral-border-strong);
+    background: var(--neutral-alpha-medium);
+  }
+}
+
+.notes-list__remove {
+  width: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--neutral-on-background-weak);
+  cursor: pointer;
+  transition:
+    color 150ms ease,
+    border-color 150ms ease,
+    background 150ms ease;
+
+  svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  &:hover {
+    color: #ff9b9b;
+    border-color: rgba(255, 120, 120, 0.4);
+    background: rgba(255, 120, 120, 0.1);
+  }
+}
+
+.subs-panel__style {
+  // The reused SubtitleConfigPanel brings its own internal layout.
+  min-width: 0;
+}
+
+// ---------------------------------------------------------------------------
+// Watch tuning panel
+// ---------------------------------------------------------------------------
+.tuning-presets {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  margin-bottom: 14px;
+  // Single row; scroll horizontally instead of wrapping to a second line.
+  overflow-x: auto;
+  overflow-y: hidden;
+  // Hold the horizontal scrollbar a couple of px clear of the preset buttons
+  // so the indicator never visually touches the row above it.
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+
+  button {
+    flex-shrink: 0;
+    white-space: nowrap;
+    height: 34px;
+    padding: 0 12px;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--neutral-on-background-medium);
+    font-size: 0.76rem;
+    font-weight: 560;
+    cursor: pointer;
+    transition:
+      color 150ms ease,
+      border-color 150ms ease,
+      background 150ms ease;
+
+    &:hover:not(:disabled) {
+      color: var(--neutral-on-background-strong);
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    &.is-active {
+      color: var(--brand-on-solid-strong);
+      border-color: rgba(255, 255, 255, 0.2);
+      background: var(--brand-solid-strong);
+    }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+  }
+}
+
+.tuning-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.tuning-slider {
+  display: grid;
+  gap: 11px;
+  padding: 13px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+
+  &.is-disabled {
+    opacity: 0.55;
+  }
+
+  &__head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    svg {
+      width: 17px;
+      height: 17px;
+      flex-shrink: 0;
+      color: var(--accent-on-background-strong);
+    }
+
+    span {
+      flex: 1;
+      min-width: 0;
+      color: var(--neutral-on-background-strong);
+      font-size: 0.84rem;
+      font-weight: 560;
+    }
+
+    output {
+      color: var(--brand-on-background-strong);
+      font-family: var(--dc-font-mono);
+      font-size: 0.74rem;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Empty states (shared)
+// ---------------------------------------------------------------------------
+.watch-empty {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  min-height: 180px;
+  padding: 28px 18px;
+  text-align: center;
+  border: 1px dashed rgba(255, 255, 255, 0.16);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 50% 10%, var(--brand-alpha-medium), transparent 38%),
+    rgba(7, 9, 15, 0.24);
+
+  &--inline {
+    min-height: 0;
+    padding: 16px;
+  }
+
+  svg {
+    width: 30px;
+    height: 30px;
+    color: var(--accent-on-background-strong);
+  }
+
+  h3 {
+    margin: 0;
+    font-size: 1.05rem;
+    color: var(--neutral-on-background-strong);
+  }
+
+  p {
+    max-width: 420px;
+    margin: 0;
+    color: var(--neutral-on-background-medium);
+    font-size: 0.84rem;
+    line-height: 1.5;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Range inputs (scoped to watch room)
+// ---------------------------------------------------------------------------
+.watch-room input[type="range"] {
+  height: 18px;
+  background: transparent;
+  cursor: pointer;
+  accent-color: var(--brand-solid-strong);
+
+  &::-webkit-slider-runnable-track {
+    height: 6px;
+    border-radius: 999px;
+    background:
+      linear-gradient(90deg, var(--brand-solid-strong) 0%, rgba(255, 255, 255, 0.11) var(--progress, 0%)),
+      rgba(255, 255, 255, 0.11);
+  }
+
+  &::-webkit-slider-thumb {
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    margin-top: -5px;
+    border: 2px solid rgba(7, 9, 15, 0.9);
+    border-radius: 50%;
+    background: #ffffff;
+    box-shadow:
+      0 0 0 3px var(--brand-alpha-medium),
+      0 0 16px var(--brand-alpha-strong);
+  }
+
+  &::-moz-range-track {
+    height: 6px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.11);
+  }
+
+  &::-moz-range-progress {
+    height: 6px;
+    border-radius: 999px;
+    background: var(--brand-solid-strong);
+  }
+
+  &::-moz-range-thumb {
+    width: 15px;
+    height: 15px;
+    border: 2px solid rgba(7, 9, 15, 0.9);
+    border-radius: 50%;
+    background: #ffffff;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Responsive
+// ---------------------------------------------------------------------------
+@media (max-width: 1280px) {
+  .watch-room__main {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "video"
+      "rail"
+      "title"
+      "capture"
+      "deep";
+  }
+
+  // The left brand rail only makes sense beside the player; drop it when the
+  // layout stacks into a single column.
+  .watch-room__brand {
+    display: none;
+  }
+
+  // Stacked: the player goes full-width again and the rail flows naturally
+  // below it with an internally-scrolling list.
+  .watch-room__video .dc-vlc:not(.is-fullscreen) {
+    max-width: 100%;
+    max-height: none;
+    margin-inline: 0;
+  }
+
+  .watch-room__rail {
+    align-self: start;
+  }
+
+  .watch-room__rail > * {
+    position: static;
+  }
+
+  .watch-queue {
+    height: auto;
+  }
+
+  .watch-queue__list {
+    max-height: 420px;
+  }
+
+  .watch-room__deep {
+    grid-template-columns: 1fr;
+  }
+
+  // Stacked single column: drop the shared desktop reference height so each
+  // control panel flows at its natural height, and let the track list grow
+  // rather than scroll inside a pinned box.
+  .watch-room__deep-cell--fill,
+  .watch-room__deep-cell--scroll {
+    min-height: 0;
+    height: auto;
+  }
+
+  .watch-panel__body {
+    overflow: visible;
+  }
+}
+
+@media (max-width: 720px) {
+  .watch-room-header {
+    grid-template-columns: 1fr;
+  }
+
+  .watch-room-header__right {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .watch-room-search {
+    min-width: 100%;
+    max-width: none;
+  }
+
+  .watch-meta__head {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .watch-meta__progress-block {
+    grid-column: 1 / -1;
+    justify-items: start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .watch-back-button,
+  .watch-icon-button,
+  .watch-pill,
+  .watch-action,
+  .watch-toggle {
+    transition: none;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Early states — loading / error / unsupported (glass restyle)
+// ---------------------------------------------------------------------------
 .ny-player-loading {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  min-height: 100dvh;
+  padding: 20px clamp(16px, 2.6vw, 34px);
+  background:
+    radial-gradient(circle at 14% 4%, rgba(255, 79, 216, 0.16), transparent 36%),
+    linear-gradient(180deg, rgba(7, 9, 15, 0.96), rgba(7, 9, 15, 0.98));
 }
 
 .ny-player-loading__head {
@@ -160,23 +2010,26 @@ body:has(.ny-player-page.is-theater) .dc-shell__header {
 }
 
 .ny-player-loading__stage {
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  padding: 80px 32px;
-  border: var(--dc-hairline);
-  border-radius: var(--ny-radius-md);
-  background: var(--surface-background-weak);
+  gap: 14px;
+  padding: 60px 32px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 22px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03)),
+    rgba(14, 17, 24, 0.7);
 }
 
 .ny-player-loading__spin {
-  width: 40px;
-  height: 40px;
+  width: 42px;
+  height: 42px;
   border-radius: 999px;
-  border: 2px solid var(--neutral-alpha-weak);
-  border-top-color: var(--brand-background-strong);
+  border: 2px solid rgba(255, 255, 255, 0.14);
+  border-top-color: var(--brand-solid-strong);
   animation: ny-spin 0.9s linear infinite;
 }
 
@@ -187,26 +2040,31 @@ body:has(.ny-player-page.is-theater) .dc-shell__header {
 }
 
 .ny-player-loading__text {
-  font-family: var(--dc-font-body);
-  font-size: 0.875rem;
-  color: var(--neutral-on-background-weak);
+  color: var(--neutral-on-background-medium);
+  font-size: 0.9rem;
 }
 
-/* Error card */
+.dc-tracker {
+  font-family: var(--dc-font-mono);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--accent-on-background-strong);
+}
 
 .ny-player-error {
   display: flex;
   flex-direction: column;
   gap: 18px;
-  padding: 24px;
-  border: 1px solid var(--accent-border-medium);
-  border-radius: var(--ny-radius-md);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--accent-alpha-weak) 60%, var(--surface-background))
-      0%,
-    var(--surface-background) 100%
-  );
+  max-width: 640px;
+  margin: clamp(40px, 8vh, 120px) auto;
+  padding: 26px;
+  border: 1px solid var(--brand-border-strong);
+  border-radius: 22px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03)),
+    rgba(14, 17, 24, 0.78);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.4);
 }
 
 .ny-player-error__head {
@@ -222,31 +2080,29 @@ body:has(.ny-player-page.is-theater) .dc-shell__header {
 }
 
 .ny-player-error__title {
-  font-family: var(--dc-font-display);
-  font-size: 1.125rem;
-  font-weight: 500;
-  color: var(--neutral-on-background-strong);
   margin: 0;
+  color: var(--neutral-on-background-strong);
+  font-size: 1.2rem;
+  font-weight: 650;
 }
 
 .ny-player-error__reason {
-  display: inline-block;
+  align-self: flex-start;
   padding: 2px 8px;
+  border: 1px solid var(--brand-border-strong);
+  border-radius: 6px;
+  color: var(--brand-on-background-strong);
   font-family: var(--dc-font-mono);
-  font-size: 0.625rem;
-  letter-spacing: 0.1em;
+  font-size: 0.62rem;
   text-transform: uppercase;
-  color: var(--accent-on-background-strong);
-  border: 1px solid var(--accent-border-medium);
-  border-radius: 4px;
+  letter-spacing: 0.1em;
 }
 
 .ny-player-error__text {
-  font-family: var(--dc-font-body);
-  font-size: 0.875rem;
-  color: var(--neutral-on-background-medium);
   margin: 0;
-  line-height: 1.5;
+  color: var(--neutral-on-background-medium);
+  font-size: 0.9rem;
+  line-height: 1.55;
 }
 
 .ny-player-error__actions {
@@ -254,5 +2110,3 @@ body:has(.ny-player-page.is-theater) .dc-shell__header {
   flex-wrap: wrap;
   gap: 8px;
 }
-
-/* .ny-btn / .ny-btn--primary / .ny-btn--ghost live in anime-theme.scss. */

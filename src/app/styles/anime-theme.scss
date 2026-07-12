@@ -1,21 +1,37 @@
 /**
- * Nyrima Cinematic — Neon Pink × Neon Blue color system.
+ * Nyrima Cinematic — "Neon, One Lamp" color system.
+ *
+ * One light source, not two. Neon pink is the system's single accent — it
+ * appears as *light*: focus rings, active/playing states, progress, the
+ * wordmark. It never paints surfaces and never gradients into the cyan.
+ * Cyan is demoted to a quiet functional "info" color (links, info badges)
+ * and is never placed adjacent to pink.
  *
  * Two moods, mapped to the existing data-theme="light|dark" attribute Once UI
  * already drives:
  *
- *   dark   → "Midnight"   — deep navy surfaces, neon pink brand, cyan accent.
- *                           Dark glossy movie-lobby aesthetic.
+ *   dark   → "Midnight"   — near-black blue ink, cool pearl text, the pink
+ *                           lamp glows once in the corner.
  *
- *   light  → "Pearl"      — icy blush base, darker pink/blue variants for
+ *   light  → "Pearl"      — cool paper base, deep magenta/cyan variants for
  *                           readable text, icons, and borders.
  *
  * Token strategy:
  *   - `--neutral-*` → grayscale ink scale (background → text)
- *   - `--brand-*`  → neon pink (primary brand)
- *   - `--accent-*` → neon cyan (highlight accent)
+ *   - `--brand-*`  → neon pink ("the lamp" — primary accent, used as light)
+ *   - `--accent-*` → info cyan (quiet, functional — never gradiented w/ brand)
  *   - `--dc-*`     → custom tokens mapped to new palette for backwards
  *                    compatibility with existing component files.
+ *
+ * Hard rules enforced by this file:
+ *   1. No linear-gradient between --brand-* and --accent-*. Primary buttons
+ *      are solid pink, flat; hover brightens to a single lighter pink.
+ *   2. No hex-grid background, no dual radial blooms. Page background is a
+ *      faint film-grain texture plus ONE low-alpha pink bloom (top-left).
+ *   3. Glow is reserved for interactive light: focus rings and
+ *      active/playing indicators. Card hover is a plain elevation shadow +
+ *      neutral border — no colored hairline, no bloom. Status dots keep a
+ *      small glow (they're indicator lights by definition).
  */
 
 /* ───────────────────────── Light: Pearl ──────────────────────────────── */
@@ -26,78 +42,111 @@
   --ny-radius-md: 12px;
   --ny-radius-lg: 18px;
 
+  /* ── Motion — one duration ladder + the house spring ──────────────────────
+     The whole app should breathe on the same timing. `--ny-ease-spring` is the
+     de-facto house curve already used in `.dc-card-glow` and AppShell; reuse it
+     for hovers/morphs. `--ny-ease-out` is the gentle entrance curve for
+     reveals/fade-ups. Always pair new animation with a reduced-motion branch. */
+  --ny-dur-fast: 160ms;
+  --ny-dur-base: 220ms;
+  --ny-dur-slow: 320ms;
+  --ny-dur-ambient: 800ms;
+  --ny-ease-spring: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ny-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* ── Spacing — 4px base ladder ────────────────────────────────────────────
+     Replace scattered gap/padding magic numbers with these as files are
+     touched. Not a forced repo-wide sweep — adopt opportunistically. */
+  --ny-space-1: 4px;
+  --ny-space-2: 8px;
+  --ny-space-3: 12px;
+  --ny-space-4: 16px;
+  --ny-space-5: 24px;
+  --ny-space-6: 32px;
+  --ny-space-7: 48px;
+  --ny-space-8: 64px;
+
+  /* ── Elevation scale — plain shadows, no colored ring (rule 3) ─────────────
+     Dark drop-shadows read correctly on both Midnight and Pearl. The named
+     card/hero hovers below stay as-is (they carry an intentional hairline ring)
+     and remain the canonical tokens for those specific surfaces. */
+  --ny-shadow-sm: 0 2px 8px -4px rgba(0, 0, 0, 0.3);
+  --ny-shadow-md: 0 8px 24px -12px rgba(0, 0, 0, 0.4);
+  --ny-shadow-lg: 0 16px 40px -16px rgba(0, 0, 0, 0.5);
+  --ny-shadow-xl: 0 28px 70px -24px rgba(0, 0, 0, 0.6);
+
   /* Cinematic dark scrim — used over backdrops/posters regardless of theme */
-  --ny-scrim-medium: rgba(6, 8, 20, 0.4);
-  --ny-scrim-strong: rgba(6, 8, 20, 0.6);
+  --ny-scrim-medium: rgba(5, 6, 12, 0.4);
+  --ny-scrim-strong: rgba(5, 6, 12, 0.6);
 
   /* Hairline on top of media (always pearl, regardless of theme) */
-  --ny-ink-alpha-weak: rgba(248, 247, 255, 0.12);
+  --ny-ink-alpha-weak: rgba(238, 240, 246, 0.12);
 
-  /* Hover elevations */
+  /* Hover elevation — plain shadow, no colored ring (rule 3) */
   --ny-shadow-card-hover:
-    0 0 0 1px var(--hairline-pink),
-    0 12px 40px -12px rgba(0, 0, 0, 0.5);
+    0 0 0 1px var(--neutral-border-strong),
+    0 12px 32px -16px rgba(0, 0, 0, 0.45);
   --ny-shadow-hero-hover:
-    0 0 0 1px var(--hairline-pink),
-    0 16px 48px -16px rgba(0, 0, 0, 0.6);
+    0 0 0 1px var(--neutral-border-strong),
+    0 16px 40px -16px rgba(0, 0, 0, 0.5);
 }
 
 :root[data-theme="light"],
 :root:not([data-theme="dark"]) {
-  /* Page + surfaces — icy blush base */
-  --page-background: #fbf8ff;
-  --overlay-background: rgba(251, 248, 255, 0.78);
+  /* Page + surfaces — cool paper base */
+  --page-background: #f8f9fc;
+  --overlay-background: rgba(248, 249, 252, 0.78);
 
   --surface-background: #ffffff;
-  --surface-background-strong: #f3f0ff;
-  --surface-background-weak: #fdfbff;
+  --surface-background-strong: #eef0f6;
+  --surface-background-weak: #fbfcfe;
 
-  /* Foreground (neutral) — deep ink with a cool violet undertone */
-  --neutral-on-background-strong: #171022;
-  --neutral-on-background-medium: rgba(23, 16, 34, 0.7);
-  --neutral-on-background-weak: rgba(23, 16, 34, 0.5);
-  --neutral-on-solid-strong: #fbf8ff;
+  /* Foreground (neutral) — deep cool ink */
+  --neutral-on-background-strong: #11131a;
+  --neutral-on-background-medium: rgba(17, 19, 26, 0.7);
+  --neutral-on-background-weak: rgba(17, 19, 26, 0.5);
+  --neutral-on-solid-strong: #f8f9fc;
   --neutral-on-solid-medium: #ffffff;
 
-  --neutral-background-strong: rgba(23, 16, 34, 0.12);
-  --neutral-background-medium: rgba(23, 16, 34, 0.07);
-  --neutral-background-weak: rgba(23, 16, 34, 0.04);
-  --neutral-alpha-strong: rgba(23, 16, 34, 0.12);
-  --neutral-alpha-medium: rgba(23, 16, 34, 0.07);
-  --neutral-alpha-weak: rgba(23, 16, 34, 0.04);
+  --neutral-background-strong: rgba(17, 19, 26, 0.12);
+  --neutral-background-medium: rgba(17, 19, 26, 0.07);
+  --neutral-background-weak: rgba(17, 19, 26, 0.04);
+  --neutral-alpha-strong: rgba(17, 19, 26, 0.12);
+  --neutral-alpha-medium: rgba(17, 19, 26, 0.07);
+  --neutral-alpha-weak: rgba(17, 19, 26, 0.04);
 
   /* Hairline borders */
-  --neutral-border-strong: rgba(23, 16, 34, 0.14);
-  --neutral-border-medium: rgba(23, 16, 34, 0.08);
-  --neutral-border-weak: rgba(23, 16, 34, 0.05);
+  --neutral-border-strong: rgba(17, 19, 26, 0.14);
+  --neutral-border-medium: rgba(17, 19, 26, 0.08);
+  --neutral-border-weak: rgba(17, 19, 26, 0.05);
 
-  /* Brand — darker pink for readability on light backgrounds */
-  --brand-on-background-strong: #a21caf;
-  --brand-on-background-medium: #d946ef;
-  --brand-on-background-weak: #f0abfc;
-  --brand-on-solid-strong: #fbf8ff;
+  /* Brand — the lamp. Deep magenta for readability on light backgrounds. */
+  --brand-on-background-strong: #b0179a;
+  --brand-on-background-medium: #d6149a;
+  --brand-on-background-weak: #f5b8e8;
+  --brand-on-solid-strong: #fdf7fc;
   --brand-on-solid-medium: #ffffff;
   --brand-on-solid-weak: #f3f0ff;
 
-  --brand-background-strong: #d946ef;
-  --brand-background-medium: #c026d3;
-  --brand-background-weak: #a21caf;
-  --brand-solid-strong: #d946ef;
-  --brand-solid-medium: #c026d3;
-  --brand-solid-weak: #a21caf;
+  --brand-background-strong: #d6149a;
+  --brand-background-medium: #c0179e;
+  --brand-background-weak: #a3128a;
+  --brand-solid-strong: #d6149a;
+  --brand-solid-medium: #c0179e;
+  --brand-solid-weak: #a3128a;
 
-  --brand-alpha-strong: rgba(217, 70, 239, 0.24);
-  --brand-alpha-medium: rgba(217, 70, 239, 0.12);
-  --brand-alpha-weak: rgba(217, 70, 239, 0.06);
-  --brand-border-strong: rgba(217, 70, 239, 0.3);
-  --brand-border-medium: rgba(217, 70, 239, 0.16);
-  --brand-border-weak: rgba(217, 70, 239, 0.08);
+  --brand-alpha-strong: rgba(214, 20, 154, 0.24);
+  --brand-alpha-medium: rgba(214, 20, 154, 0.12);
+  --brand-alpha-weak: rgba(214, 20, 154, 0.06);
+  --brand-border-strong: rgba(214, 20, 154, 0.3);
+  --brand-border-medium: rgba(214, 20, 154, 0.16);
+  --brand-border-weak: rgba(214, 20, 154, 0.08);
 
-  /* Accent — cyan, tuned down for light backgrounds */
+  /* Accent — info cyan, quiet and functional. Never paired with brand. */
   --accent-on-background-strong: #0369a1;
   --accent-on-background-medium: #0284c7;
   --accent-on-background-weak: #7dd3fc;
-  --accent-on-solid-strong: #fbf8ff;
+  --accent-on-solid-strong: #f8f9fc;
   --accent-on-solid-medium: #ffffff;
 
   --accent-background-strong: #0284c7;
@@ -121,70 +170,70 @@
   --info-solid-strong: #0369a1;
 
   /* Custom Nyrima tokens — mapped to new palette for backwards compatibility */
-  --dc-gold: #d946ef;
-  --dc-gold-soft: #f0abfc;
-  --dc-sakura: #d946ef;
+  --dc-gold: #d6149a;
+  --dc-gold-soft: #f5b8e8;
+  --dc-sakura: #d6149a;
   --dc-hud-cyan: #0284c7;
-  --dc-ink: #171022;
-  --dc-paper: #fbf8ff;
+  --dc-ink: #11131a;
+  --dc-paper: #f8f9fc;
 
   /* Hairline tokens */
-  --dc-hairline: 1px solid rgba(23, 16, 34, 0.08);
-  --dc-hairline-strong: 1px solid rgba(23, 16, 34, 0.14);
+  --dc-hairline: 1px solid rgba(17, 19, 26, 0.08);
+  --dc-hairline-strong: 1px solid rgba(17, 19, 26, 0.14);
 
-  /* New cinematic hairlines */
-  --hairline-pink: rgba(217, 70, 239, 0.2);
+  /* "Lit" hairlines — reserved for active/selected states, not hover/idle */
+  --hairline-pink: rgba(214, 20, 154, 0.24);
   --hairline-blue: rgba(2, 132, 199, 0.18);
 
-  /* Neon glow — soft mixed bloom */
-  --dc-glow:
-    0 0 0 1px rgba(217, 70, 239, 0.1), 0 8px 32px -16px rgba(23, 16, 34, 0.18);
+  /* Elevation — plain shadow, no colored ring (rule 3) */
+  --dc-glow: 0 8px 32px -16px rgba(17, 19, 26, 0.18);
 }
 
 /* ───────────────────────── Dark: Midnight (primary mood) ───────────────── */
 
 :root[data-theme="dark"] {
-  /* Page + surfaces — deep navy */
-  --page-background: #060814;
-  --overlay-background: rgba(6, 8, 20, 0.78);
+  /* Page + surfaces — near-black blue ink */
+  --page-background: #07090f;
+  --overlay-background: rgba(7, 9, 15, 0.78);
 
-  --surface-background: #0d1022;
-  --surface-background-strong: #141832;
-  --surface-background-weak: #080b18;
+  --surface-background: #0e1118;
+  --surface-background-strong: #141926;
+  --surface-background-weak: #0a0d14;
 
-  /* Foreground — high-contrast pearl white */
-  --neutral-on-background-strong: #f8f7ff;
-  --neutral-on-background-medium: rgba(248, 247, 255, 0.72);
-  --neutral-on-background-weak: rgba(248, 247, 255, 0.5);
-  --neutral-on-solid-strong: #060814;
-  --neutral-on-solid-medium: #0d1022;
+  /* Foreground — cool pearl */
+  --neutral-on-background-strong: #eef0f6;
+  --neutral-on-background-medium: rgba(238, 240, 246, 0.72);
+  --neutral-on-background-weak: rgba(238, 240, 246, 0.5);
+  --neutral-on-solid-strong: #07090f;
+  --neutral-on-solid-medium: #0e1118;
 
-  --neutral-background-strong: rgba(248, 247, 255, 0.14);
-  --neutral-background-medium: rgba(248, 247, 255, 0.08);
-  --neutral-background-weak: rgba(248, 247, 255, 0.04);
-  --neutral-alpha-strong: rgba(248, 247, 255, 0.14);
-  --neutral-alpha-medium: rgba(248, 247, 255, 0.08);
-  --neutral-alpha-weak: rgba(248, 247, 255, 0.04);
+  --neutral-background-strong: rgba(238, 240, 246, 0.14);
+  --neutral-background-medium: rgba(238, 240, 246, 0.08);
+  --neutral-background-weak: rgba(238, 240, 246, 0.04);
+  --neutral-alpha-strong: rgba(238, 240, 246, 0.14);
+  --neutral-alpha-medium: rgba(238, 240, 246, 0.08);
+  --neutral-alpha-weak: rgba(238, 240, 246, 0.04);
 
   /* Hairline borders */
-  --neutral-border-strong: rgba(248, 247, 255, 0.14);
-  --neutral-border-medium: rgba(248, 247, 255, 0.08);
-  --neutral-border-weak: rgba(248, 247, 255, 0.05);
+  --neutral-border-strong: rgba(238, 240, 246, 0.14);
+  --neutral-border-medium: rgba(238, 240, 246, 0.08);
+  --neutral-border-weak: rgba(238, 240, 246, 0.05);
 
-  /* Brand — neon pink */
+  /* Brand — the lamp. Neon pink, used as light: focus, active, progress,
+     wordmark, now-playing — never as a surface fill. */
   --brand-on-background-strong: #ff9bea;
   --brand-on-background-medium: #ff4fd8;
   --brand-on-background-weak: #d946ef;
-  --brand-on-solid-strong: #060814;
-  --brand-on-solid-medium: #0d1022;
-  --brand-on-solid-weak: #141832;
+  --brand-on-solid-strong: #07090f;
+  --brand-on-solid-medium: #0e1118;
+  --brand-on-solid-weak: #141926;
 
   --brand-background-strong: #ff4fd8;
   --brand-background-medium: #d946ef;
   --brand-background-weak: #a21caf;
-  --brand-solid-strong: #ff9bea;
-  --brand-solid-medium: #ff4fd8;
-  --brand-solid-weak: #d946ef;
+  --brand-solid-strong: #ff4fd8;
+  --brand-solid-medium: #d946ef;
+  --brand-solid-weak: #a21caf;
 
   --brand-alpha-strong: rgba(255, 79, 216, 0.28);
   --brand-alpha-medium: rgba(255, 79, 216, 0.14);
@@ -193,26 +242,27 @@
   --brand-border-medium: rgba(255, 79, 216, 0.18);
   --brand-border-weak: rgba(255, 79, 216, 0.1);
 
-  /* Accent — neon cyan */
-  --accent-on-background-strong: #7dd3fc;
-  --accent-on-background-medium: #22d3ee;
-  --accent-on-background-weak: #0ea5e9;
-  --accent-on-solid-strong: #060814;
-  --accent-on-solid-medium: #0d1022;
+  /* Accent — info cyan, softened. Quiet and functional, never gradiented
+     with brand. */
+  --accent-on-background-strong: #9adcf2;
+  --accent-on-background-medium: #5bc8e8;
+  --accent-on-background-weak: #2f93b8;
+  --accent-on-solid-strong: #07090f;
+  --accent-on-solid-medium: #0e1118;
 
-  --accent-background-strong: #22d3ee;
-  --accent-background-medium: #0ea5e9;
-  --accent-background-weak: #0369a1;
-  --accent-solid-strong: #7dd3fc;
-  --accent-solid-medium: #22d3ee;
-  --accent-solid-weak: #0ea5e9;
+  --accent-background-strong: #5bc8e8;
+  --accent-background-medium: #2f93b8;
+  --accent-background-weak: #1d6e8f;
+  --accent-solid-strong: #9adcf2;
+  --accent-solid-medium: #5bc8e8;
+  --accent-solid-weak: #2f93b8;
 
-  --accent-alpha-strong: rgba(34, 211, 238, 0.24);
-  --accent-alpha-medium: rgba(34, 211, 238, 0.12);
-  --accent-alpha-weak: rgba(34, 211, 238, 0.06);
-  --accent-border-strong: rgba(34, 211, 238, 0.32);
-  --accent-border-medium: rgba(34, 211, 238, 0.16);
-  --accent-border-weak: rgba(34, 211, 238, 0.08);
+  --accent-alpha-strong: rgba(91, 200, 232, 0.24);
+  --accent-alpha-medium: rgba(91, 200, 232, 0.12);
+  --accent-alpha-weak: rgba(91, 200, 232, 0.06);
+  --accent-border-strong: rgba(91, 200, 232, 0.32);
+  --accent-border-medium: rgba(91, 200, 232, 0.16);
+  --accent-border-weak: rgba(91, 200, 232, 0.08);
 
   /* Status */
   --warning-solid-strong: #f59e0b;
@@ -224,87 +274,62 @@
   --dc-gold: #ff4fd8;
   --dc-gold-soft: #ff9bea;
   --dc-sakura: #ff4fd8;
-  --dc-hud-cyan: #22d3ee;
-  --dc-ink: #f8f7ff;
-  --dc-paper: #060814;
+  --dc-hud-cyan: #5bc8e8;
+  --dc-ink: #eef0f6;
+  --dc-paper: #07090f;
 
   /* Hairline tokens */
-  --dc-hairline: 1px solid rgba(248, 247, 255, 0.08);
-  --dc-hairline-strong: 1px solid rgba(248, 247, 255, 0.14);
+  --dc-hairline: 1px solid rgba(238, 240, 246, 0.08);
+  --dc-hairline-strong: 1px solid rgba(238, 240, 246, 0.14);
 
-  /* New cinematic hairlines */
-  --hairline-pink: rgba(255, 79, 216, 0.18);
-  --hairline-blue: rgba(34, 211, 238, 0.16);
+  /* "Lit" hairlines — reserved for active/selected states, not hover/idle */
+  --hairline-pink: rgba(255, 79, 216, 0.28);
+  --hairline-blue: rgba(91, 200, 232, 0.2);
 
-  /* Neon glow — mixed pink/blue bloom */
-  --dc-glow:
-    0 0 0 1px rgba(255, 79, 216, 0.12), 0 8px 32px -16px rgba(0, 0, 0, 0.6);
+  /* Elevation — plain shadow, no colored ring (rule 3) */
+  --dc-glow: 0 8px 32px -16px rgba(0, 0, 0, 0.6);
 }
 
 /* ───────────────────────── Page background + texture ─────────────────────
  *
- * Three layers, painted bottom-up:
+ * Two layers, painted bottom-up:
  *
- *   1. body background-color  → the solid page tint (Midnight navy / Pearl).
- *   2. body background-image  → techno honeycomb grid. A pointy-top hex
- *                                tile drawn as cyan polygon outlines at very
- *                                low alpha. Sits at the very bottom so the
- *                                radial blooms above can wash colored light
- *                                over it; reads as faint sci-fi HUD scanlines
- *                                rather than a competing pattern.
- *   3. body::before           → neon pink top-left + cyan bottom-right radial
- *                                blooms. Same colors as before; they sit on
- *                                top of the hex layer to tint it.
- *
- * The hex tile is sized so each tile contains two full hexes + three partial
- * hexes at the bottom row; their out-of-tile vertices get clipped to viewBox
- * and resume in the adjacent tile, producing seamless tiling. Stroke at 1
- * user-unit + background-size at the SVG's natural size keeps the strokes at
- * 1px regardless of viewport so the grid stays crisp at any zoom.
+ *   1. body background-color + background-image → solid page tint
+ *      (Midnight ink / Pearl paper) plus a faint film-grain texture. The
+ *      grain is white noise at very low alpha via feTurbulence — it reads
+ *      as a subtle photographic texture on either theme rather than a
+ *      competing pattern.
+ *   2. body::before → ONE low-alpha pink bloom, top-left. The lamp in the
+ *      room. No second bloom, no cyan, no gradient mixing.
  */
 
 body {
   background-color: var(--page-background);
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='48.5' height='42' viewBox='0 0 48.5 42'><g fill='none' stroke='%2322d3ee' stroke-width='1' stroke-opacity='0.075'><polygon points='12.12,0 24.25,7 24.25,21 12.12,28 0,21 0,7'/><polygon points='36.37,0 48.5,7 48.5,21 36.37,28 24.25,21 24.25,7'/><polygon points='0,21 12.12,28 12.12,42 0,49 -12.12,42 -12.12,28'/><polygon points='24.25,21 36.37,28 36.37,42 24.25,49 12.12,42 12.12,28'/><polygon points='48.5,21 60.62,28 60.62,42 48.5,49 36.37,42 36.37,28'/></g></svg>");
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch' result='noise'/><feColorMatrix in='noise' type='matrix' values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.025 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
   background-repeat: repeat;
   background-attachment: fixed;
-  background-size: 48.5px 42px;
-  background-position: center;
+  background-size: 200px 200px;
   font-family: var(--dc-font-body);
   font-feature-settings: "ss01", "cv11", "tnum";
   letter-spacing: -0.005em;
 }
 
-/* Light theme — pearl base needs a darker line color since cyan at 7% on
- * icy blush nearly vanishes. We swap to a deeper accent stroke; same tile
- * geometry, just a different fill. */
-:root[data-theme="light"] body,
-:root:not([data-theme="dark"]) body {
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='48.5' height='42' viewBox='0 0 48.5 42'><g fill='none' stroke='%230369a1' stroke-width='1' stroke-opacity='0.06'><polygon points='12.12,0 24.25,7 24.25,21 12.12,28 0,21 0,7'/><polygon points='36.37,0 48.5,7 48.5,21 36.37,28 24.25,21 24.25,7'/><polygon points='0,21 12.12,28 12.12,42 0,49 -12.12,42 -12.12,28'/><polygon points='24.25,21 36.37,28 36.37,42 24.25,49 12.12,42 12.12,28'/><polygon points='48.5,21 60.62,28 60.62,42 48.5,49 36.37,42 36.37,28'/></g></svg>");
-}
-
-/* Two subtle radial blooms — neon pink top-left, neon blue bottom-right.
- * Painted above the hex grid so the blooms tint the lattice. */
+/* One low-alpha pink bloom, top-left — the lamp. */
 body::before {
   content: "";
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 0;
-  background:
-    radial-gradient(
-      800px 600px at 0% 0%,
-      rgba(255, 79, 216, 0.1) 0%,
-      transparent 60%
-    ),
-    radial-gradient(
-      800px 600px at 100% 100%,
-      rgba(34, 211, 238, 0.08) 0%,
-      transparent 60%
-    );
+  background: radial-gradient(
+    900px 700px at 0% 0%,
+    var(--brand-alpha-weak) 0%,
+    transparent 60%
+  );
 }
 
-/* Headings wear the display font with tight, premium tracking. */
+/* Headings wear the display font (Bricolage Grotesque) with tight,
+   premium tracking — the system's headline voice. */
 h1,
 h2,
 h3,
@@ -320,7 +345,7 @@ h6,
 
 [class*="display-"] {
   letter-spacing: -0.04em;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 /* Tabular numerals everywhere a number appears */
@@ -412,8 +437,7 @@ h6,
   bottom: 0.2em;
   width: 2px;
   border-radius: 1px;
-  background: var(--brand-solid-medium);
-  box-shadow: 0 0 12px var(--brand-alpha-medium);
+  background: var(--brand-solid-strong);
 }
 
 .dc-hairline {
@@ -424,40 +448,32 @@ h6,
 
 .dc-card-glow {
   transition:
-    transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    border-color 200ms ease,
-    background 200ms ease,
-    box-shadow 200ms ease;
+    transform var(--ny-dur-base) var(--ny-ease-spring),
+    border-color var(--ny-dur-base) ease,
+    background var(--ny-dur-base) ease,
+    box-shadow var(--ny-dur-base) ease;
 }
 
 .dc-card-glow:hover {
   transform: translateY(-2px);
-  border-color: var(--accent-border-medium) !important;
+  border-color: var(--neutral-border-strong) !important;
   background: var(--surface-background-strong) !important;
-  box-shadow:
-    0 0 0 1px var(--hairline-pink),
-    0 12px 40px -12px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--dc-glow);
 }
 
-/* Primary buttons — pink-to-blue gradient. */
+/* Primary buttons — solid pink (the lamp), flat. Hover brightens to a
+   single lighter pink; never a gradient into accent. */
 button[class*="primary"],
 [role="button"][class*="primary"] {
-  background: linear-gradient(
-    135deg,
-    var(--brand-background-strong),
-    var(--accent-background-strong)
-  );
+  background: var(--brand-solid-strong);
   border: none;
-  color: var(--neutral-on-solid-strong);
+  color: var(--brand-on-solid-strong);
+  transition: background var(--ny-dur-fast) ease;
 }
 
-:root[data-theme="light"] button[class*="primary"],
-:root[data-theme="light"] [role="button"][class*="primary"] {
-  background: linear-gradient(
-    135deg,
-    var(--brand-background-strong),
-    var(--accent-background-strong)
-  );
+button[class*="primary"]:hover,
+[role="button"][class*="primary"]:hover {
+  background: var(--brand-on-background-strong);
 }
 
 .dc-mono {
@@ -492,21 +508,9 @@ button[class*="primary"],
 
 /* ───────────────────────── Themed scrollbars ─────────────────────────────
  *
- * Applied globally so every overflow container picks up the brand look.
- * The thumb is a 135deg pink → cyan gradient (matches the primary-button
- * chord and the AppShell wordmark), pinched inside a transparent 2px
- * border via `background-clip: padding-box` so the gradient sits in a
- * neat inset rather than rubbing against the scrollbar edges. Hover and
- * active intensify the same gradient and add a soft neon halo.
- *
- * Per-surface tightening (popup, dropdowns, playlist) overrides the
- * scrollbar's *width* via `::-webkit-scrollbar { width: … }` but does
- * NOT override the thumb's `background`, so the gradient still applies
- * — a narrower rail of pink-cyan glow instead of a thicker one.
- *
- * Firefox: `scrollbar-color` accepts a single thumb colour, not a
- * gradient, so we hand it the brand pink with reasonable alpha so the
- * scrollbar still reads as themed (just without the cyan fade).
+ * Neutral by default — the scrollbar is chrome, not a light source. The
+ * thumb only picks up the brand pink on hover/active, so the lamp shows up
+ * as a response to interaction rather than ambient decoration.
  */
 
 ::-webkit-scrollbar {
@@ -519,37 +523,20 @@ button[class*="primary"],
 }
 
 ::-webkit-scrollbar-thumb {
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--brand-on-background-medium) 70%, transparent) 0%,
-    color-mix(in srgb, var(--accent-on-background-medium) 70%, transparent) 100%
-  );
+  background: var(--neutral-alpha-strong);
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: padding-box;
-  transition:
-    box-shadow 200ms ease,
-    background 200ms ease;
+  transition: background var(--ny-dur-fast) ease;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(
-    135deg,
-    var(--brand-on-background-medium) 0%,
-    var(--accent-on-background-medium) 100%
-  );
+  background: var(--brand-alpha-strong);
   background-clip: padding-box;
-  box-shadow:
-    0 0 8px var(--brand-alpha-medium),
-    0 0 16px var(--accent-alpha-weak);
 }
 
 ::-webkit-scrollbar-thumb:active {
-  background: linear-gradient(
-    135deg,
-    var(--brand-on-background-strong) 0%,
-    var(--accent-on-background-strong) 100%
-  );
+  background: var(--brand-solid-strong);
   background-clip: padding-box;
 }
 
@@ -559,7 +546,7 @@ button[class*="primary"],
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--brand-alpha-strong) transparent;
+  scrollbar-color: var(--neutral-alpha-strong) transparent;
 }
 
 ::selection {
@@ -594,12 +581,41 @@ button[class*="primary"],
 .ny-shimmer--ink {
   background: linear-gradient(
     110deg,
-    rgba(248, 247, 255, 0.08) 30%,
-    rgba(248, 247, 255, 0.14) 50%,
-    rgba(248, 247, 255, 0.08) 70%
+    rgba(238, 240, 246, 0.08) 30%,
+    rgba(238, 240, 246, 0.14) 50%,
+    rgba(238, 240, 246, 0.08) 70%
   );
   background-size: 200% 100%;
   animation: ny-shimmer 1.4s infinite linear;
+}
+
+/* ───────────────────────── Entrance reveal ──────────────────────────────
+ *
+ * Gentle fade + rise for sections/shelves/heroes as they mount, so a page
+ * assembles itself rather than snapping in. One-shot (`both` fill mode) so it
+ * never replays on hover or scroll. Add `--ny-reveal-delay` inline to stagger
+ * sibling sections. Fully disabled under reduced-motion.
+ */
+@keyframes ny-reveal-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.ny-reveal {
+  animation: ny-reveal-up var(--ny-dur-slow) var(--ny-ease-out) both;
+  animation-delay: var(--ny-reveal-delay, 0ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ny-reveal {
+    animation: none;
+  }
 }
 
 /* ───────────────────────── Focus rings ─────────────────────────────────── */
@@ -634,10 +650,10 @@ button:focus-visible,
   gap: 6px;
   cursor: pointer;
   transition:
-    background 160ms ease,
-    border-color 160ms ease,
-    color 160ms ease,
-    opacity 160ms ease;
+    background var(--ny-dur-fast) ease,
+    border-color var(--ny-dur-fast) ease,
+    color var(--ny-dur-fast) ease,
+    opacity var(--ny-dur-fast) ease;
 }
 
 .ny-btn:hover {
@@ -647,17 +663,13 @@ button:focus-visible,
 }
 
 .ny-btn--primary {
-  background: linear-gradient(
-    135deg,
-    var(--brand-background-strong),
-    var(--accent-background-strong)
-  );
+  background: var(--brand-solid-strong);
   border: none;
-  color: var(--neutral-on-solid-strong);
+  color: var(--brand-on-solid-strong);
 }
 
 .ny-btn--primary:hover {
-  opacity: 0.92;
+  background: var(--brand-on-background-strong);
 }
 
 .ny-btn--ghost {

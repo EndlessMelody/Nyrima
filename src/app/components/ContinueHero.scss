@@ -51,11 +51,6 @@
       var(--brand-alpha-strong) 0%,
       transparent 60%
     ),
-    radial-gradient(
-      ellipse at 70% 80%,
-      var(--accent-alpha-strong) 0%,
-      transparent 60%
-    ),
     var(--surface-background-strong);
   opacity: 0.85;
 }
@@ -67,14 +62,14 @@
   background:
     linear-gradient(
       90deg,
-      rgba(6, 8, 20, 0.92) 0%,
-      rgba(6, 8, 20, 0.6) 45%,
-      rgba(6, 8, 20, 0.1) 80%,
+      rgba(7, 9, 15, 0.92) 0%,
+      rgba(7, 9, 15, 0.6) 45%,
+      rgba(7, 9, 15, 0.1) 80%,
       transparent 100%
     ),
     linear-gradient(
       0deg,
-      rgba(6, 8, 20, 0.85) 0%,
+      rgba(7, 9, 15, 0.85) 0%,
       transparent 60%
     );
 }
@@ -83,35 +78,29 @@
   background:
     linear-gradient(
       90deg,
-      rgba(251, 248, 255, 0.92) 0%,
-      rgba(251, 248, 255, 0.65) 45%,
-      rgba(251, 248, 255, 0.15) 80%,
+      rgba(248, 249, 252, 0.92) 0%,
+      rgba(248, 249, 252, 0.65) 45%,
+      rgba(248, 249, 252, 0.15) 80%,
       transparent 100%
     ),
     linear-gradient(
       0deg,
-      rgba(251, 248, 255, 0.7) 0%,
+      rgba(248, 249, 252, 0.7) 0%,
       transparent 60%
     );
 }
 
-// Neon edge bloom on the top-right + bottom-left
+// Single lamp bloom in the top-right corner
 .ny-continue-hero__neon {
   position: absolute;
   inset: 0;
   z-index: 1;
   pointer-events: none;
-  background:
-    radial-gradient(
-      600px 360px at 100% 0%,
-      var(--brand-alpha-weak) 0%,
-      transparent 60%
-    ),
-    radial-gradient(
-      500px 320px at 0% 100%,
-      var(--accent-alpha-weak) 0%,
-      transparent 60%
-    );
+  background: radial-gradient(
+    600px 360px at 100% 0%,
+    var(--brand-alpha-weak) 0%,
+    transparent 60%
+  );
   mix-blend-mode: screen;
 }
 
@@ -168,14 +157,14 @@
   line-height: 1.1;
   color: var(--neutral-on-background-strong);
   margin: 0;
-  text-shadow: 0 2px 12px rgba(6, 8, 20, 0.45);
+  text-shadow: 0 2px 12px rgba(7, 9, 15, 0.45);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 :root[data-theme="light"] .ny-continue-hero__title {
-  text-shadow: 0 2px 6px rgba(251, 248, 255, 0.6);
+  text-shadow: 0 2px 6px rgba(248, 249, 252, 0.6);
 }
 
 .ny-continue-hero__filename {
@@ -200,23 +189,19 @@
 .ny-continue-hero__progress-track {
   height: 4px;
   border-radius: 4px;
-  background: rgba(248, 247, 255, 0.18);
+  background: rgba(238, 240, 246, 0.18);
   overflow: hidden;
   position: relative;
 }
 
 :root[data-theme="light"] .ny-continue-hero__progress-track {
-  background: rgba(23, 16, 34, 0.14);
+  background: rgba(17, 19, 26, 0.14);
 }
 
 .ny-continue-hero__progress-bar {
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(
-    90deg,
-    var(--brand-solid-medium),
-    var(--accent-solid-medium)
-  );
+  background: var(--brand-solid-strong);
   box-shadow: 0 0 12px var(--brand-alpha-medium);
   transition: width 280ms ease;
 }
@@ -237,7 +222,7 @@
 }
 
 .ny-continue-hero__remaining {
-  color: var(--accent-on-background-strong);
+  color: var(--neutral-on-background-strong);
   font-weight: 500;
 }
 
@@ -266,7 +251,7 @@
     transform: translateY(-1px);
     box-shadow:
       0 14px 30px -8px var(--brand-alpha-strong),
-      0 0 28px var(--accent-alpha-medium),
+      0 0 28px var(--brand-alpha-medium),
       0 0 0 1px rgba(255, 255, 255, 0.22) inset;
     opacity: 1;
   }

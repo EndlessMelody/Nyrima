@@ -1,0 +1,156 @@
+/**
+ * Landing base styles.
+ *
+ * Adapted from the promo site's `global.css`. The promo applied page-level
+ * resets (body background, `scroll-snap-type` on <html>, link/focus resets)
+ * globally — which would break the authenticated app routes. Here those rules
+ * are gated behind `html.ny-landing-active` / `.ny-site` so they only take
+ * effect while the public landing is mounted (PublicSite toggles the class).
+ *
+ * The `--ny-*` design tokens are kept at :root: they don't collide with the
+ * app's own `--ny-*` names (verified) and harmlessly define the landing
+ * palette. PublicSite still sets data-brand=pink/data-accent=cyan on mount so
+ * Once UI components match the promo look.
+ */
+
+:root {
+  --ny-page: #07090f;
+  --ny-page-2: #141926;
+  --ny-surface: rgba(14, 17, 24, 0.72);
+  --ny-surface-strong: rgba(20, 25, 38, 0.86);
+  --ny-ink: #f8f7ff;
+  --ny-muted: rgba(248, 247, 255, 0.72);
+  --ny-faint: rgba(248, 247, 255, 0.5);
+  --ny-line: rgba(248, 247, 255, 0.18);
+  --ny-line-strong: rgba(248, 247, 255, 0.3);
+  --ny-pink: #ff55cf;
+  --ny-pink-soft: #ff9bea;
+  --ny-cyan: #5bc8e8;
+  --ny-mint: #67f8c5;
+  --ny-amber: #ffc76b;
+  --ny-radius: 8px;
+  --ny-font-body: "Geist Sans", ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --ny-font-display: "Bricolage Grotesque Variable", "Geist Sans",
+    ui-sans-serif, system-ui, sans-serif;
+  --ny-font-title: "Zen Kaku Gothic New", "Bricolage Grotesque Variable",
+    "Segoe UI", sans-serif;
+  --ny-font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Consolas,
+    "Liberation Mono", monospace;
+
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  --container-max: 1180px;
+  --section-pad-x: clamp(28px, 5vw, 76px);
+  --section-pad-y: clamp(82px, 8.5vh, 104px);
+  --section-gap: clamp(18px, 3.2vh, 30px);
+  --grid-gap: 14px;
+  --card-pad: 18px;
+  --card-pad-lg: 20px;
+
+  --motion-reveal: 520ms;
+  --motion-reveal-short: 380ms;
+  --motion-micro: 200ms;
+  --motion-stagger: 65ms;
+  --motion-ease-out: cubic-bezier(0.2, 0.78, 0.2, 1);
+}
+
+/* Box-sizing is universally safe and the app already assumes it. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* Page-level behaviour — landing only.
+ *
+ * Free, continuous scrolling: the page reads as one travelling journey, not a
+ * deck of slides. `scroll-snap-type` is intentionally NOT set here — the old
+ * `y mandatory` snap (plus the JS wheel/key/touch hijack in
+ * useLandingPageUi.ts) forced a full-section jump on every single scroll tick.
+ * Smooth scroll is kept only so in-page anchor links (nav, progress rail) glide
+ * to their target. */
+html.ny-landing-active {
+  scroll-behavior: smooth;
+  scroll-padding-top: 78px;
+}
+
+html.ny-landing-active,
+html.ny-landing-active body,
+html.ny-landing-active #root {
+  min-height: 100%;
+  margin: 0;
+  width: 100%;
+  overflow-x: hidden;
+}
+
+html.ny-landing-active body {
+  background: var(--ny-page);
+  color: var(--ny-ink);
+  font-family: var(--ny-font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Component-level resets, scoped to the landing root so they never touch the
+ * authenticated app. */
+.ny-site a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.ny-site :where(a, button, input, textarea, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--ny-pink);
+  outline-offset: 3px;
+}
+
+.ny-site button,
+.ny-site input,
+.ny-site textarea,
+.ny-site select {
+  font: inherit;
+}
+
+.ny-site button svg,
+.ny-site a svg {
+  flex-shrink: 0;
+}
+
+.ny-site ::selection {
+  background: rgba(255, 85, 207, 0.35);
+  color: var(--ny-ink);
+}
+
+/* Header CTA cluster (GitHub + Open app) added in the web migration. */
+.ny-site .site-header__cta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── Containment of app base styles on the landing ─────────────────────────
+ * The app's global stylesheet (src/app/styles/anime-theme.scss) is authored as
+ * if the app owns the whole document and now loads on every route. Two rules
+ * bleed onto the public landing; neutralize them within the landing scope only
+ * so the authenticated app is unaffected:
+ *   1. `body::before` paints app-themed radial blooms fixed over the viewport.
+ *   2. an `!important` rule forces the app display font (Geist) + weight 500
+ *      onto every heading, flattening the promo's display typography. */
+html.ny-landing-active body::before {
+  display: none;
+}
+
+.ny-site :is(h1, h2, h3, h4, h5, h6) {
+  font-family: var(--ny-font-display) !important;
+}
+
+.ny-site :is(h1, h2, h3) {
+  font-weight: 700 !important;
+}

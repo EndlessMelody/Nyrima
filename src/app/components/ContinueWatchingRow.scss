@@ -1,7 +1,7 @@
 .ny-continue {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--ny-space-3);
 }
 
 .ny-continue__heading {
@@ -16,10 +16,27 @@
 
 .ny-continue__scroll {
   display: flex;
-  gap: 12px;
+  gap: var(--ny-space-3);
   overflow-x: auto;
-  padding-bottom: 8px;
+  padding-bottom: var(--ny-space-2);
   scrollbar-width: thin;
+  /* Edge-fade: the row dissolves into the page at both ends so the horizontal
+     scroll reads as "more beyond the edge" rather than a hard clip. The fade
+     zones are small enough not to hide the first/last tile's content. */
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    transparent 0,
+    #000 24px,
+    #000 calc(100% - 24px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    90deg,
+    transparent 0,
+    #000 24px,
+    #000 calc(100% - 24px),
+    transparent 100%
+  );
 }
 
 /* The Continue Watching row sits inside cards; a slimmer rail keeps the

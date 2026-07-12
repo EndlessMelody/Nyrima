@@ -19,7 +19,20 @@
       "Bash(curl -s http://127.0.0.1:9222/json/version)",
       "mcp__playwright__browser_tabs",
       "mcp__playwright__browser_navigate",
-      "mcp__playwright__browser_snapshot"
+      "mcp__playwright__browser_snapshot",
+      "Bash(npx eslint *)",
+      "Bash(docker --version)",
+      "Bash(where emcc *)",
+      "Bash(where git *)",
+      "Bash(pkill -f \"vite\")",
+      "Bash(netstat -ano)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5173/ --max-time 5)",
+      "Bash(taskkill //PID 16104 //F)",
+      "Bash(git -C /d/Nyrima status --short)",
+      "PowerShell(if \\(Test-Path node_modules/sass\\) { npx sass --no-source-map src/landing/landing-vn/entry-flow.scss \"$env:TEMP/entry-flow-check.css\"; if \\($?\\) { \"SCSS compiles OK\" } } else { \"sass not installed locally\" })",
+      "Bash(sed -i 's|@/landing/landing-vn/mascotArt|@/landing/mascotArt|' src/pages/login-page-content.ts src/pages/LoginPage.tsx)",
+      "Bash(sed -i 's|\\(see landing-vn/mascotArt\\)|\\(see landing/mascotArt\\)|' src/pages/login-page-content.ts)",
+      "Bash(npm ls *)"
     ]
   },
   "enableAllProjectMcpServers": true

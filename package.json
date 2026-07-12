@@ -2,67 +2,99 @@
   "name": "nyrima",
   "private": true,
   "version": "0.1.0",
-  "description": "A personal video cinema that lives on Google Drive. Built as a Chrome Extension.",
+  "description": "A personal anime cinema that lives on Google Drive. A web app.",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "icons": "node scripts/make-icons.mjs",
-    "prebuild": "node scripts/make-icons.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "lint": "npm run typecheck",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "icons": "node scripts/make-icons.mjs",
     "docs:check": "node scripts/check-docs.mjs",
-    "verify:extension": "node scripts/verify-extension.mjs",
-    "inspect:manifest": "node scripts/inspect-manifest.mjs",
     "probe:mkv": "node scripts/probe-mkv.mjs",
-    "check": "npm run typecheck && npm test && npm run docs:check",
-    "release:check": "npm run build && npm test && npm run docs:check && npm run verify:extension",
-    "package:dist": "node scripts/package-extension.mjs",
-    "package": "npm run build && npm run verify:extension && npm run package:dist",
-    "zip": "node scripts/zip.mjs"
+    "check": "npm run typecheck && npm run lint && npm test && npm run docs:check"
   },
   "dependencies": {
+    "@blocknote/core": "^0.51.4",
+    "@blocknote/mantine": "^0.51.4",
+    "@blocknote/react": "^0.51.4",
+    "@fontsource-variable/bricolage-grotesque": "^5.2.10",
     "@fontsource/comic-neue": "^5.2.7",
     "@fontsource/geist-mono": "^5.2.7",
     "@fontsource/geist-sans": "^5.2.5",
     "@fontsource/itim": "^5.2.7",
     "@fontsource/klee-one": "^5.2.8",
+    "@fontsource/lora": "^5.2.8",
     "@fontsource/m-plus-rounded-1c": "^5.2.10",
+    "@fontsource/merriweather": "^5.2.11",
+    "@fontsource/noto-sans": "^5.2.10",
+    "@fontsource/nunito": "^5.2.7",
+    "@fontsource/roboto": "^5.2.10",
     "@fontsource/zen-kaku-gothic-new": "^5.2.7",
+    "@mantine/core": "^8.3.18",
+    "@mantine/hooks": "^8.3.18",
     "@mediabunny/ac3": "^1.45.3",
     "@once-ui-system/core": "1.6.4",
+    "@supabase/supabase-js": "^2.106.2",
     "classnames": "^2.5.1",
     "jassub": "^2.5.1",
+    "lucide-react": "^0.468.0",
     "mediabunny": "^1.45.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.2",
+    "three": "^0.167.1",
     "zustand": "^4.5.5"
   },
   "overrides": {
     "sharp": "^0.34.5",
-    "@crxjs/vite-plugin": {
-      "rollup": "2.80.0"
-    },
     "vite": {
       "rollup": "^4.60.3"
     },
     "postcss": "^8.5.14"
   },
   "devDependencies": {
-    "@crxjs/vite-plugin": "2.4.0",
+    "@eslint/js": "^10.0.1",
     "@types/chrome": "^0.0.270",
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
+    "@types/three": "^0.184.1",
+    "@types/wicg-file-system-access": "^2023.10.7",
     "@vitejs/plugin-react": "^4.3.4",
     "adm-zip": "^0.5.17",
+    "eslint": "^10.5.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "globals": "^17.6.0",
+    "jsdom": "^29.1.1",
+    "prettier": "^3.8.4",
     "sass": "^1.79.3",
     "sharp": "^0.34.5",
     "typescript": "^5.6.2",
+    "typescript-eslint": "^8.61.1",
     "vite": "^6.4.2",
     "vitest": "^4.1.6"
-  }
+  },
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EndlessMelody/Nyrima.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/EndlessMelody/Nyrima/issues"
+  },
+  "homepage": "https://github.com/EndlessMelody/Nyrima#readme"
 }

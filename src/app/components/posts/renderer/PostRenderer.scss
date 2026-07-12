@@ -1,0 +1,134 @@
+.ny-post-renderer {
+  font-family: var(--dc-font-body);
+  color: var(--neutral-on-background-strong);
+  line-height: 1.7;
+  max-width: 760px;
+
+  p {
+    margin: 0 0 1em;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--dc-font-display);
+    margin: 1.4em 0 0.6em;
+    line-height: 1.25;
+  }
+
+  h1 {
+    font-size: 1.75rem;
+  }
+  h2 {
+    font-size: 1.4rem;
+  }
+  h3 {
+    font-size: 1.15rem;
+  }
+
+  blockquote {
+    margin: 0 0 1em;
+    padding: 4px 0 4px 16px;
+    border-left: 3px solid var(--neutral-alpha-weak);
+    color: var(--neutral-on-background-medium);
+  }
+
+  ul,
+  ol {
+    margin: 0 0 1em;
+    padding-left: 1.4em;
+  }
+
+  ul.ny-post-renderer__checklist {
+    list-style: none;
+    padding-left: 0.2em;
+
+    li {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+  }
+
+  &__nested {
+    margin-top: 4px;
+  }
+
+  &__code {
+    margin: 0 0 1em;
+    padding: 12px 14px;
+    border-radius: var(--ny-radius-sm, 6px);
+    background: var(--neutral-alpha-weak);
+    overflow-x: auto;
+
+    code {
+      font-family: var(--dc-font-mono);
+      font-size: 0.8125rem;
+    }
+  }
+}
+
+.ny-post-unsupported-block {
+  margin: 0 0 1em;
+  padding: 10px 12px;
+  border: 1px dashed var(--neutral-alpha-weak);
+  border-radius: var(--ny-radius-sm, 6px);
+  color: var(--neutral-on-background-weak);
+  font-family: var(--dc-font-mono);
+  font-size: 0.75rem;
+}
+
+.ny-post-image {
+  margin: 0 0 1.4em;
+  display: flex;
+  flex-direction: column;
+
+  img {
+    display: block;
+    max-width: 100%;
+    border-radius: var(--ny-radius-sm, 6px);
+  }
+
+  figcaption {
+    margin-top: 6px;
+    font-size: 0.8125rem;
+    color: var(--neutral-on-background-weak);
+    text-align: center;
+  }
+
+  &--inline img {
+    max-width: 320px;
+  }
+
+  &--full {
+    img {
+      max-width: none;
+      width: 100%;
+      border-radius: 0;
+    }
+  }
+
+  &--left {
+    align-items: flex-start;
+  }
+  &--center {
+    align-items: center;
+  }
+  &--right {
+    align-items: flex-end;
+  }
+}
+
+.ny-post-image__placeholder {
+  padding: 32px;
+  text-align: center;
+  border-radius: var(--ny-radius-sm, 6px);
+  background: var(--neutral-alpha-weak);
+  color: var(--neutral-on-background-weak);
+  font-family: var(--dc-font-mono);
+  font-size: 0.75rem;
+
+  &--error {
+    color: var(--danger-on-background-strong, #ff8a8a);
+  }
+}

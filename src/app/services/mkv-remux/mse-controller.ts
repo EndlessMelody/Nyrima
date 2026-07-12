@@ -33,6 +33,7 @@ import {
 } from "./mp4-generator";
 import { buildMediaUrl } from "../drive-api";
 import { authedFetch } from "../auth";
+import type { MediaByteSource } from "../media-source/byte-source";
 import {
   useRateLimitStore,
   isCoolingDown,
@@ -98,6 +99,17 @@ interface ClusterIndexEntry {
   hasVideoKeyframe: boolean;
 }
 
+/**
+ * Error raised when an audio SourceBuffer rejects an append. `stage: "init"`
+ * means the very first append (the fMP4 init segment) failed — typically a
+ * browser that reported `MediaSource.isTypeSupported` true but cannot actually
+ * decode this codec. The UI uses this marker to transparently restart on the
+ * external WebCodecs audio path instead of stranding the user on an error.
+ */
+export interface MseAudioInitError extends Error {
+  mseAudioFailure?: { stage: "init" | "media"; mime: string };
+}
+
 export class MkvMseController {
   private mediaSource: MediaSource | null = null;
   /**
@@ -115,6 +127,9 @@ export class MkvMseController {
    *  for any TrackNumber without a second Range request. */
   private headerBuf: Uint8Array | null = null;
   private fileId = "";
+  /** When set, byte reads/streams come from this source instead of Drive
+   *  Range-fetches — used for local files (see `LocalFileByteSource`). */
+  private byteSource: MediaByteSource | null = null;
   private fileSize = 0;
   private fetchOffset = 0;
   private videoSeq = 0;
@@ -260,14 +275,27 @@ export class MkvMseController {
    * @param opts.externalAudio When set to "webcodecs", FLAC audio is decoded
    *   outside MSE and clocked against the video element. This mirrors VLC's
    *   separate audio-output path and keeps the video SourceBuffer untouched.
+   * @param opts.knownFileSize Authoritative total size (bytes) from Drive
+   *   metadata. Wins over the Content-Range-derived size, which a cross-origin
+   *   fetch can't read on the web build — without it `this.fileSize` collapses
+   *   to the 4 MB header chunk and the progressive streamer stops immediately
+   *   (no audio/video body ever reaches the SourceBuffers).
+   * @param opts.byteSource When set, all byte reads come from this source
+   *   (e.g. a local `File`) instead of Drive Range-fetches.
    */
   async start(
     fileId: string,
     videoElement: HTMLVideoElement,
     preloaded?: { buf: Uint8Array; fileSize: number },
-    opts?: { audioTrackNumber?: number; externalAudio?: "webcodecs" },
+    opts?: {
+      audioTrackNumber?: number;
+      externalAudio?: "webcodecs";
+      knownFileSize?: number;
+      byteSource?: MediaByteSource;
+    },
   ): Promise<void> {
     this.fileId = fileId;
+    this.byteSource = opts?.byteSource ?? null;
     this.videoElement = videoElement;
     this.destroyed = false;
     this.videoSeq = 0;
@@ -288,9 +316,17 @@ export class MkvMseController {
     try {
       let buf: Uint8Array;
 
+      // Drive metadata size wins over any Content-Range-derived value (which is
+      // unreadable cross-origin on the web build — see the `knownFileSize` doc).
+      const trustedSize =
+        Number.isFinite(opts?.knownFileSize) &&
+        (opts?.knownFileSize as number) > 0
+          ? (opts?.knownFileSize as number)
+          : 0;
+
       if (preloaded) {
         buf = preloaded.buf;
-        this.fileSize = preloaded.fileSize;
+        this.fileSize = trustedSize || preloaded.fileSize;
         // eslint-disable-next-line no-console
         console.info(
           `[mse] using preloaded header buf=${buf.length} size=${this.fileSize}`,
@@ -306,7 +342,7 @@ export class MkvMseController {
         markPlayback("media:first-range:end");
         if (this.destroyed) return;
         buf = result.buf;
-        this.fileSize = result.total;
+        this.fileSize = trustedSize || result.total;
         // eslint-disable-next-line no-console
         console.info(`[mse] header arrived; fileSize=${this.fileSize}`);
       }
@@ -458,12 +494,12 @@ export class MkvMseController {
             });
             this.audioSourceBuffer.addEventListener("error", () => {
               const stage = this.audioAppendCount <= 1 ? "init" : "media";
-              this.fireError(
-                new Error(
-                  `Audio SourceBuffer error (stage=${stage}, mime=${audioMime}, ` +
-                  `appendCount=${this.audioAppendCount}).`,
-                ),
+              const err: MseAudioInitError = new Error(
+                `Audio SourceBuffer error (stage=${stage}, mime=${audioMime}, ` +
+                `appendCount=${this.audioAppendCount}).`,
               );
+              err.mseAudioFailure = { stage, mime: audioMime };
+              this.fireError(err);
             });
           }
 
@@ -825,35 +861,10 @@ export class MkvMseController {
           this.consumeStreamRestartOffset();
           streamAttempt = 0;
         }
-        const url = buildMediaUrl(this.fileId);
-        const res = await authedFetch(
-          url,
-          {
-            headers: { Range: `bytes=${this.fetchOffset}-` },
-            signal: this.abortController?.signal,
-          },
-          {
-            kind: "media-stream",
-            priority: "critical",
-            signal: this.abortController?.signal,
-          },
-        );
+        const reader = await this.openByteStream(this.fetchOffset);
         if (this.destroyed) break;
 
-        const reader = res.body?.getReader();
-        if (!reader) {
-          // Fallback: ReadableStream not available — read the tail as a single
-          // ArrayBuffer. This is the rare path (older WebView only).
-          const ab = await res.arrayBuffer();
-          if (this.destroyed) break;
-          const data = new Uint8Array(ab);
-          const full = this.leftoverBuf
-            ? concatBuffers(this.leftoverBuf, data)
-            : data;
-          this.leftoverBuf = null;
-          this.processChunk(full);
-          this.fetchOffset = this.fileSize;
-        } else {
+        {
           this.streamReader = reader;
           let accumulated: Uint8Array | null = this.leftoverBuf;
           this.leftoverBuf = null;
@@ -2241,22 +2252,10 @@ export class MkvMseController {
       !this.destroyed &&
       !linkedSignal.aborted &&
       this.audioCatchUpSerial === serial;
-    const url = buildMediaUrl(this.fileId);
-
     try {
       if (!shouldContinue()) return;
-      const res = await authedFetch(
-        url,
-        {
-          headers: { Range: `bytes=${startOffset}-${endOffset - 1}` },
-          signal: linkedSignal,
-        },
-        { kind: "media-range", priority: "critical", signal: linkedSignal },
-      );
+      const { buf: data } = await this.fetchRange(startOffset, endOffset - 1, linkedSignal);
       if (!shouldContinue()) return;
-      const ab = await res.arrayBuffer();
-      if (!shouldContinue()) return;
-      const data = new Uint8Array(ab);
 
       // eslint-disable-next-line no-console
       console.info(
@@ -2363,21 +2362,10 @@ export class MkvMseController {
       !this.destroyed &&
       !linkedSignal.aborted &&
       this.audioCatchUpSerial === catchUpSerial;
-    const url = buildMediaUrl(this.fileId);
     try {
       if (!shouldContinue()) return;
-      const res = await authedFetch(
-        url,
-        {
-          headers: { Range: `bytes=${startOffset}-${endOffset - 1}` },
-          signal: linkedSignal,
-        },
-        { kind: "media-range", priority: "critical", signal: linkedSignal },
-      );
+      const { buf: data } = await this.fetchRange(startOffset, endOffset - 1, linkedSignal);
       if (!shouldContinue()) return;
-      const ab = await res.arrayBuffer();
-      if (!shouldContinue()) return;
-      const data = new Uint8Array(ab);
 
       // eslint-disable-next-line no-console
       console.info(
@@ -2437,7 +2425,13 @@ export class MkvMseController {
   private async fetchRange(
     start: number,
     end: number,
+    signal?: AbortSignal,
   ): Promise<{ buf: Uint8Array; total: number }> {
+    const linkedSignal = signal ?? this.abortController?.signal;
+    if (this.byteSource) {
+      const { bytes, total } = await this.byteSource.readRange(start, end, linkedSignal);
+      return { buf: bytes, total };
+    }
     const url = buildMediaUrl(this.fileId);
     // Retries (429/5xx/network) and backoff live in DriveRequestQueue now.
     // Header fetch is "critical" because nothing else can start until it
@@ -2446,12 +2440,12 @@ export class MkvMseController {
       url,
       {
         headers: { Range: `bytes=${start}-${end}` },
-        signal: this.abortController?.signal,
+        signal: linkedSignal,
       },
       {
         kind: "media-range",
         priority: "critical",
-        signal: this.abortController?.signal,
+        signal: linkedSignal,
       },
     );
 
@@ -2465,11 +2459,52 @@ export class MkvMseController {
     const ab = await res.arrayBuffer();
     return { buf: new Uint8Array(ab), total };
   }
+
+  /**
+   * Open a stream of the remaining bytes from `offset` through EOF. For
+   * Drive, a single open-ended Range request; for local files, delegates to
+   * `byteSource.openStream` (`File.slice().stream()`, never null). Falls back
+   * to a one-shot reader over the full response body on the rare WebView that
+   * doesn't expose a readable stream on `Response.body`.
+   */
+  private async openByteStream(offset: number): Promise<ReadableStreamDefaultReader<Uint8Array>> {
+    if (this.byteSource) {
+      return this.byteSource.openStream(offset, this.abortController?.signal);
+    }
+    const url = buildMediaUrl(this.fileId);
+    const res = await authedFetch(
+      url,
+      {
+        headers: { Range: `bytes=${offset}-` },
+        signal: this.abortController?.signal,
+      },
+      {
+        kind: "media-stream",
+        priority: "critical",
+        signal: this.abortController?.signal,
+      },
+    );
+    const reader = res.body?.getReader();
+    if (reader) return reader;
+    const ab = await res.arrayBuffer();
+    return singleChunkReader(new Uint8Array(ab));
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** Wraps a single already-fetched buffer in a one-shot reader so a streaming
+ *  consumer (`progressiveStream`) can treat it like any other chunked read. */
+function singleChunkReader(data: Uint8Array): ReadableStreamDefaultReader<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(data);
+      controller.close();
+    },
+  }).getReader();
+}
 
 function bufferedRangeEndAt(sb: SourceBuffer | null, anchorSec: number): number {
   if (!sb) return 0;

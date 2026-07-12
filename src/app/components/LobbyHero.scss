@@ -45,7 +45,7 @@
   inset: 0;
   background: linear-gradient(
     to right,
-    rgba(6, 8, 20, 0.92) 0%,
+    rgba(7, 9, 15, 0.92) 0%,
     var(--ny-scrim-strong) 45%,
     transparent 75%
   );
@@ -150,10 +150,6 @@
 }
 
 .ny-hero__btn--primary {
-  background: linear-gradient(
-    135deg,
-    var(--brand-background-strong),
-    var(--accent-background-strong)
-  );
-  color: var(--neutral-on-solid-strong);
+  background: var(--brand-solid-strong);
+  color: var(--brand-on-solid-strong);
 }

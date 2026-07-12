@@ -46,7 +46,7 @@ export function LibraryHealthCard({
   return (
     <aside className="ny-health" aria-label="Library health">
       <header className="ny-health__head">
-        <span className="ny-health__eyebrow">状況 · LIBRARY HEALTH</span>
+        <span className="ny-health__eyebrow">Library Health</span>
         <StatusDot configured={apiKeyConfigured} hasFolders={folders.length > 0} />
       </header>
 

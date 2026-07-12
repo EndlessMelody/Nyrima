@@ -99,7 +99,7 @@ export function AppFooter() {
       </div>
 
       <div className="dc-footer__cluster dc-footer__cluster--center">
-        <span className="dc-footer__kana">ナイリマ</span>
+        <span className="dc-footer__kana">Nyrima</span>
         <span className="dc-footer__brand">
           nyrima · personal cinema for google drive
         </span>

@@ -1,15 +1,67 @@
 # OAuth Setup For Development And Testers
 
-Nyrima's current OAuth flow is bring-your-own-client-ID. The app does not ship
-a shared Google OAuth client ID in a manifest `oauth2` block. A developer or
-tester creates a Google Cloud OAuth client for the Chrome extension ID they are
-loading and pastes that client ID into the Nyrima UI.
+> **Web app (current).** Nyrima now runs as a Vite web app. Drive OAuth uses a
+> **Web application** Google client and a full-page redirect to
+> `/auth/google/callback` — no `chrome.identity`, no `*.chromiumapp.org`. The
+> token flow is frontend-only (implicit token grant), so **no client secret is
+> ever shipped to the browser**. The legacy Chrome-extension flow below is
+> retained for reference only.
 
-OAuth is required for current signed-in Drive behavior such as private Drive
-folders, profile-backed sharing, app-created share/import writes, and
-publishing the app-created `Shared/` folder.
+OAuth is Drive-access-only: it grants read access so a user — **signed in OR in
+"Try Nyrima" guest mode** — can browse and watch their own files. It does not
+create a Nyrima account and is separate from the Supabase account/social layer.
 
-## Current OAuth Flow
+## Web App OAuth Flow (current)
+
+1. Configure `VITE_GOOGLE_CLIENT_ID` (a Google **Web** OAuth client id) and
+   optionally `VITE_GOOGLE_OAUTH_REDIRECT_URI` (see `.env.example`). Users may
+   still paste their own client id (BYOK) in Settings → Connect Drive.
+2. "Connect Google Drive" calls `startDriveConnect()`, which navigates the
+   browser to Google via `getGoogleOAuthUrl()` (`src/config/googleOAuth.ts`).
+   The `state` param carries a CSRF nonce + the guest/authenticated mode + the
+   return path.
+3. Google returns to `/auth/google/callback` with the access token in the URL
+   fragment. `AuthGoogleCallbackPage` validates `state`, stores the token, and
+   returns the user to the app (default `/app`).
+4. The token is cached in session storage (partitioned per account/guest) and
+   used for Drive API/media requests for the 72-hour interactive window.
+5. After expiry, the user reconnects with the same redirect flow.
+
+### Google Cloud Console settings (web app)
+
+Create an OAuth client of type **Web application** and set:
+
+**Authorized JavaScript origins**
+
+- `http://localhost:5173`
+- `http://127.0.0.1:5173` (if you use that host)
+
+**Authorized redirect URIs**
+
+- `http://localhost:5173/auth/google/callback`
+- `http://127.0.0.1:5173/auth/google/callback` (if needed)
+- `https://<production-domain>/auth/google/callback` (production)
+
+The `redirect_uri` the app sends must EXACTLY match one of these, or Google
+returns `redirect_uri_mismatch`.
+
+### Web app scopes (least-privilege)
+
+| Scope | Purpose |
+| --- | --- |
+| `https://www.googleapis.com/auth/drive.readonly` | List + stream the user's Drive files, and read the profile name/avatar via the Drive About API. |
+
+`drive.file`, `userinfo.email`, and `userinfo.profile` are intentionally NOT
+requested by the web build — `drive.readonly` covers browsing, watching, and
+the connected-account display. Override with `VITE_GOOGLE_DRIVE_SCOPE` only if a
+feature genuinely needs more.
+
+---
+
+## Legacy: Chrome-Extension OAuth Flow (reference only)
+
+The retired extension build used bring-your-own-client-ID with a **Chrome
+Extension** OAuth client and `chrome.identity.launchWebAuthFlow`:
 
 1. The user pastes a Google OAuth client ID into Nyrima API/OAuth settings.
 2. The background service worker builds a Google OAuth URL with the current
@@ -18,22 +70,12 @@ publishing the app-created `Shared/` folder.
    `chrome.identity.launchWebAuthFlow`.
 4. The returned short-lived access token is cached in the extension service
    worker/session storage and used for Drive API/media requests.
-5. After the current 24-hour interactive-consent window expires, Nyrima asks
+5. After the current 72-hour interactive-consent window expires, Nyrima asks
    the user to consent again.
 
-Do not paste a client ID into `src/manifest.config.ts`. That is old behavior
-and does not match the current build.
-
-## Scope Set Used Today
-
-The service worker requests:
-
-| Scope | Current purpose |
-| --- | --- |
-| `https://www.googleapis.com/auth/drive.readonly` | List and stream Drive folders/files the signed-in user can read. |
-| `https://www.googleapis.com/auth/drive.file` | Create/update app-created `Shared/` and `Imports/` data and app-created share folder permission changes. |
-| `https://www.googleapis.com/auth/userinfo.email` | Profile identity data used by sharing surfaces. |
-| `https://www.googleapis.com/auth/userinfo.profile` | Profile name/avatar data used by sharing surfaces. |
+The extension build additionally requested `drive.file`,
+`userinfo.email`, and `userinfo.profile` for sharing surfaces. The steps below
+describe that legacy extension setup.
 
 ## Recommended Project Layout
 
@@ -138,6 +180,24 @@ OAuth is separate from the optional Google Drive API key.
 | Private Drive folder | No | Yes |
 | App-created share/import writes | No | Yes |
 | Profile-backed share identity | No | Yes |
+
+### Restrict the API key to your origins
+
+Unlike the OAuth client id, the optional Drive API key is a bearer credential:
+it's shipped to the browser and visible on every request the app makes
+(`...?key=...`). Anyone who copies it can call the Drive API from their own
+site unless it's restricted. In Google Cloud Console → **Credentials** → the
+API key → **Application restrictions**:
+
+- Choose **Websites** (HTTP referrers) and add the exact origins the app is
+  served from, e.g.:
+  - `http://localhost:5173/*` (dev)
+  - `https://<production-domain>/*`
+- Under **API restrictions**, limit the key to **Google Drive API** only.
+
+A key restricted this way still works for "Anyone with the link" Drive
+folders from the app's own origins, but is useless if leaked or scraped from
+the bundle.
 
 ## Common Problems
 

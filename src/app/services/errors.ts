@@ -11,7 +11,7 @@ export type DriveAccessReason =
   | "rate-limited" // 429 from Drive
   | "auth-required" // 401 — token expired or missing
   | "needs-oauth" // API key 403'd; OAuth client configured but no token cached
-  | "needs-reconsent" // 24h interactive window expired; user must sign in again
+  | "needs-reconsent" // interactive window expired; user must sign in again
   | "unknown";
 
 export class DriveAccessError extends Error {

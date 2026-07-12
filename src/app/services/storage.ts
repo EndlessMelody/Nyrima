@@ -15,11 +15,17 @@ import type {
   NyrimaRoot,
 } from "@shared/types";
 import { DEFAULT_SETTINGS } from "@shared/types";
+import { isSupabaseConfigured } from "../../lib/supabase";
+import { getActiveAccount } from "../../platform/storage-adapter";
+import { getRepository } from "../../server/db/repository";
+import type { UserSettings } from "../../server/db/schema";
 
 type LegacyAppSettings = Partial<AppSettings> & {
   subtitleFont?: string;
   preferredSubtitleLanguage?: unknown;
 };
+
+const GUEST_ACCOUNT_ID = "guest";
 
 async function get<T>(key: string): Promise<T | undefined> {
   const obj = await chrome.storage.local.get(key);
@@ -214,6 +220,12 @@ export function isInProgress(
 // --- Settings --------------------------------------------------------------
 
 export async function getSettings(): Promise<AppSettings> {
+  const userId = getRepositorySettingsUserId();
+  if (userId) {
+    const stored = await getRepository().settings.getSettings(userId);
+    if (stored) return settingsFromRepositoryRecord(stored);
+  }
+
   const stored = await get<LegacyAppSettings>(STORAGE_KEYS.SETTINGS);
   const migrated = stored ? migrateSettings(stored) : {};
   return { ...DEFAULT_SETTINGS, ...migrated };
@@ -256,8 +268,58 @@ export async function saveSettings(
 ): Promise<AppSettings> {
   const current = await getSettings();
   const next = { ...current, ...patch };
+  const userId = getRepositorySettingsUserId();
+  if (userId) {
+    await getRepository().settings.saveSettings(
+      settingsToRepositoryRecord(userId, next),
+    );
+    return next;
+  }
   await set(STORAGE_KEYS.SETTINGS, next);
   return next;
+}
+
+function getRepositorySettingsUserId(): string | null {
+  if (!isSupabaseConfigured()) return null;
+  const active = getActiveAccount();
+  return active && active !== GUEST_ACCOUNT_ID ? active : null;
+}
+
+function settingsFromRepositoryRecord(record: UserSettings): AppSettings {
+  const migrated = migrateSettings(record.appSettings ?? {});
+  return {
+    ...DEFAULT_SETTINGS,
+    ...migrated,
+    theme: record.theme,
+    autoplayNext: record.autoplayNext,
+    defaultVolume: clampVolume(record.defaultVolume),
+    skipSeconds: toSkipSeconds(record.skipSeconds),
+  };
+}
+
+function settingsToRepositoryRecord(
+  userId: string,
+  settings: AppSettings,
+): UserSettings {
+  return {
+    userId,
+    theme: settings.theme,
+    autoplayNext: settings.autoplayNext,
+    defaultVolume: clampVolume(settings.defaultVolume),
+    skipSeconds: settings.skipSeconds,
+    appSettings: settings,
+    updatedAt: Date.now(),
+  };
+}
+
+function clampVolume(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 1;
+}
+
+function toSkipSeconds(value: number): AppSettings["skipSeconds"] {
+  return value === 5 || value === 10 || value === 15 || value === 30
+    ? value
+    : DEFAULT_SETTINGS.skipSeconds;
 }
 
 // --- Per-library view state ------------------------------------------------

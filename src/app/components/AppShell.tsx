@@ -29,12 +29,16 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import cn from "classnames";
+import { useAuth } from "@/auth/AuthProvider";
 import { NyrimaMark } from "./NyrimaMark";
 import { UserChip } from "./UserChip";
 import { TopbarSearch } from "./TopbarSearch";
 import { AppFooter } from "./AppFooter";
+import { GuestBanner } from "./GuestBanner";
 import { useSocialStore } from "../stores/social-store";
 import { debugLog } from "../services/debug-log";
+import { isLibraryChromeRoute } from "../navigation/sidebar-nav";
+import { MUSIC_PLAYER_ROUTE_PREFIX } from "../services/music-player";
 import "./AppShell.scss";
 
 /** Scroll distance past which the topbar collapses into the compact pill. */
@@ -43,7 +47,44 @@ const COMPACT_SCROLL_THRESHOLD = 24;
 export function AppShell({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const isLobbyRoute = location.pathname === "/app";
+  // The unified Library hub and dedicated category routes own their own
+  // sidebar + command bar chrome. Drive-folder routes under /library/:folderId
+  // keep the historical topbar, so this check is exact-route based.
+  const isMusicPlayerRoute = location.pathname.startsWith(MUSIC_PLAYER_ROUTE_PREFIX);
+  // The watch room (video player) owns its own glass header + back control, so
+  // it runs full-bleed like the music player rather than under the app topbar.
+  const isWatchRoomRoute = location.pathname.startsWith("/play/");
+  // The Light Novel reader owns its own quiet two-column chrome and runs
+  // full-bleed — the app topbar would fight its calm, reading-first layout.
+  const isReaderRoute = location.pathname.startsWith("/read/");
+  const isImmersiveRoute =
+    isLobbyRoute ||
+    isLibraryChromeRoute(location.pathname) ||
+    isMusicPlayerRoute ||
+    isWatchRoomRoute ||
+    isReaderRoute;
   const isCompact = useScrollPastThreshold(COMPACT_SCROLL_THRESHOLD);
+  // Sharing publishes to the social backend — a guest can't, so the Share CTA
+  // is hidden for them. The Social button stays (it leads to a friendly
+  // sign-in prompt, not a dead end).
+  const { canAccess } = useAuth();
+  const canShare = canAccess("social:profile");
+
+  // Apply the app palette while inside protected routes. The lobby owns the
+  // pink/cyan dashboard identity; older routed chrome keeps its existing
+  // yellow/red Once UI accent mapping.
+  useEffect(() => {
+    const html = document.documentElement;
+    const prevBrand = html.getAttribute("data-brand");
+    const prevAccent = html.getAttribute("data-accent");
+    html.setAttribute("data-brand", isImmersiveRoute ? "pink" : "yellow");
+    html.setAttribute("data-accent", isImmersiveRoute ? "cyan" : "red");
+    return () => {
+      if (prevBrand) html.setAttribute("data-brand", prevBrand);
+      if (prevAccent) html.setAttribute("data-accent", prevAccent);
+    };
+  }, [isImmersiveRoute]);
 
   // Topbar unread badge — pulls live from the social store. The store is a
   // zero-cost subscription when nothing's followed (initial state).
@@ -61,6 +102,16 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const onSocialRoute = location.pathname.startsWith("/social");
 
+  if (isImmersiveRoute) {
+    return (
+      <div className="dc-shell dc-shell--lobby">
+        <main className="dc-lobby-page">
+          {children}
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="dc-shell">
       <header
@@ -69,7 +120,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       >
         <Sakura />
 
-        <Link to="/" className="dc-shell__brand" aria-label="Nyrima home">
+        <Link to="/app" className="dc-shell__brand" aria-label="Nyrima lobby">
           <NyrimaMark size="header" />
           <span className="dc-shell__wordmark">
             <span className="dc-shell__name">
@@ -84,9 +135,11 @@ export function AppShell({ children }: { children: ReactNode }) {
           <button
             type="button"
             className={cn("dc-shell__nav-btn", {
-              "is-current": location.pathname === "/" || location.pathname.startsWith("/library"),
+              "is-current":
+                location.pathname === "/app" ||
+                location.pathname.startsWith("/library"),
             })}
-            onClick={() => navigate("/")}
+            onClick={() => navigate("/app")}
             aria-label="Libraries"
             title="Libraries"
           >
@@ -117,13 +170,44 @@ export function AppShell({ children }: { children: ReactNode }) {
             )}
           </button>
 
-          <ShareButton />
+          <button
+            type="button"
+            className={cn("dc-shell__nav-btn", {
+              "is-current": location.pathname.startsWith("/posts"),
+            })}
+            onClick={() => navigate("/posts")}
+            aria-label="Posts"
+            title="Posts — write and read blog posts"
+          >
+            <PostsIcon />
+            <span className="dc-shell__nav-btn-label">Posts</span>
+          </button>
+
+          {canShare && <ShareButton />}
+
+          <button
+            type="button"
+            className={cn("dc-shell__nav-btn", {
+              "is-current":
+                location.pathname === "/settings" ||
+                location.pathname === "/account",
+            })}
+            onClick={() => navigate("/settings")}
+            aria-label="Settings"
+            title="Settings"
+          >
+            <GearIcon />
+            <span className="dc-shell__nav-btn-label">Settings</span>
+          </button>
 
           <UserChip />
         </nav>
       </header>
 
-      <main className="dc-page">{children}</main>
+      <main className="dc-page">
+        <GuestBanner />
+        {children}
+      </main>
 
       <AppFooter />
     </div>
@@ -272,6 +356,28 @@ function SocialIcon() {
   );
 }
 
+function PostsIcon() {
+  // A page with a folded corner + text lines — reads as "article/post"
+  // alongside the Social people-glyph and Settings gear.
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M4 2h5l3 3v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+      <path d="M9 2v3h3" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+      <path
+        d="M5 8.5h6M5 10.8h4"
+        stroke="currentColor"
+        strokeWidth="1.1"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 function ShareIcon() {
   return (
     <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -280,6 +386,20 @@ function ShareIcon() {
       <circle cx="12" cy="12.5" r="1.9" stroke="currentColor" strokeWidth="1.2" />
       <path
         d="m5.7 7.05 4.6-2.5M5.7 8.95l4.6 2.5"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <circle cx="8" cy="8" r="2.1" stroke="currentColor" strokeWidth="1.2" />
+      <path
+        d="M8 1.6v1.8M8 12.6v1.8M14.4 8h-1.8M3.4 8H1.6M12.5 3.5l-1.3 1.3M4.8 11.2l-1.3 1.3M12.5 12.5l-1.3-1.3M4.8 4.8 3.5 3.5"
         stroke="currentColor"
         strokeWidth="1.2"
         strokeLinecap="round"

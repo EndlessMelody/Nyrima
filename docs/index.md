@@ -20,6 +20,7 @@ user or policy docs.
 | --- | --- |
 | Detailed current system architecture | [`architecture.md`](./architecture.md) |
 | Google Cloud OAuth setup for development and testers | [`oauth-setup.md`](./oauth-setup.md) |
+| Set up the Supabase social database and deploy to Vercel | [`deployment.md`](./deployment.md) |
 | Manifest permissions, OAuth scopes, endpoints, and data placement | [`permissions-and-data-use.md`](./permissions-and-data-use.md) |
 | Privacy policy | [`privacy-policy.md`](./privacy-policy.md) |
 | Terms of use | [`terms-of-use.md`](./terms-of-use.md) |

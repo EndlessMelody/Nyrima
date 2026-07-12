@@ -77,7 +77,7 @@ Check:
 
 ### Connect Drive works, then expires later
 
-Nyrima intentionally keeps a 24-hour interactive-consent ceiling. Sign in again
+Nyrima intentionally keeps a 72-hour interactive-consent ceiling. Sign in again
 when the app reports the signed-in session needs consent again.
 
 ## API Key And Drive Access Problems

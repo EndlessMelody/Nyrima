@@ -77,7 +77,7 @@ export function SettingsPopover({
   looping,
   onToggleLoop,
 }: Props) {
-  const [tab, setTab] = useState<SettingsTab>("audio");
+  const [tab, setTab] = useState<SettingsTab>("playback");
   const settings = useSettingsStore((s) => s.settings);
   const patch = useSettingsStore((s) => s.patch);
   const setScale = useSettingsStore((s) => s.setScale);
@@ -88,7 +88,7 @@ export function SettingsPopover({
     <div className="dc-vlc__menu dc-vlc__menu--settings" role="dialog" aria-label="Player settings">
       <div className="dc-vlc__settings-head">
         <div>
-          <div className="dc-vlc__menu-kana">設定 · Settings</div>
+          <div className="dc-vlc__menu-kana">Settings</div>
           <div className="dc-vlc__settings-title">Player controls</div>
         </div>
         <button
@@ -104,9 +104,9 @@ export function SettingsPopover({
       <div className="dc-vlc__settings-tabs" role="tablist" aria-label="Settings sections">
         {(
           [
+            ["playback", "Playback"],
             ["audio", "Audio & Subs"],
             ["subtitles", "Subtitles"],
-            ["playback", "Playback"],
           ] as const
         ).map(([id, label]) => (
           <button

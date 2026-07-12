@@ -32,6 +32,10 @@ import {
   invalidateFolder,
 } from "../services/drive/metadata-service";
 import {
+  findMediaFolder,
+  type MediaLibraryKind,
+} from "../services/media-library-source";
+import {
   getNyrimaRoot,
   setNyrimaRoot,
   clearNyrimaRoot,
@@ -56,6 +60,8 @@ interface NyrimaRootState {
   /** Immediate child folders of the root. The lobby's library shelf binds
    *  directly to this list. */
   libraries: DriveFile[];
+  /** Expected media child folders under the root, keyed by page/source. */
+  mediaFolders: Partial<Record<MediaLibraryKind, DriveFile>>;
   /** True while the initial load (root read + first child scan) is running. */
   loading: boolean;
   /** True when the rendered libraries came from cache and a refresh is in
@@ -78,6 +84,7 @@ export type SetRootOutcome =
 export const useNyrimaRootStore = create<NyrimaRootState>((set, get) => ({
   root: null,
   libraries: [],
+  mediaFolders: {},
   loading: false,
   refreshing: false,
   rootError: null,
@@ -86,7 +93,7 @@ export const useNyrimaRootStore = create<NyrimaRootState>((set, get) => ({
     set({ loading: true, rootError: null });
     const stored = await getNyrimaRoot();
     if (!stored) {
-      set({ root: null, libraries: [], loading: false });
+      set({ root: null, libraries: [], mediaFolders: {}, loading: false });
       return;
     }
     set({ root: stored });
@@ -124,7 +131,7 @@ export const useNyrimaRootStore = create<NyrimaRootState>((set, get) => ({
       verifiedAt: Date.now(),
     };
     await setNyrimaRoot(root);
-    set({ root, libraries: [] });
+    set({ root, libraries: [], mediaFolders: {} });
 
     await runScan(folderId, set);
     set({ loading: false });
@@ -165,7 +172,7 @@ export const useNyrimaRootStore = create<NyrimaRootState>((set, get) => ({
 
   reset: async () => {
     await clearNyrimaRoot();
-    set({ root: null, libraries: [], rootError: null });
+    set({ root: null, libraries: [], mediaFolders: {}, rootError: null });
   },
 }));
 
@@ -184,6 +191,7 @@ if (typeof chrome !== "undefined" && chrome.storage?.onChanged) {
     useNyrimaRootStore.setState((state) => ({
       root: next,
       libraries: next ? state.libraries : [],
+      mediaFolders: next ? state.mediaFolders : {},
     }));
     if (next) void useNyrimaRootStore.getState().refresh();
   });
@@ -209,10 +217,21 @@ async function runScan(
     const libraries = result.files
       .filter(isFolder)
       .sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
-    set({ libraries, refreshing: result.revalidating });
+    set({ libraries, mediaFolders: resolveMediaFolders(libraries), refreshing: result.revalidating });
   } catch (e) {
-    set({ libraries: [], refreshing: false, rootError: toDriveError(e) });
+    set({ libraries: [], mediaFolders: {}, refreshing: false, rootError: toDriveError(e) });
   }
+}
+
+function resolveMediaFolders(
+  libraries: DriveFile[],
+): Partial<Record<MediaLibraryKind, DriveFile>> {
+  return {
+    movies: findMediaFolder(libraries, "movies") ?? undefined,
+    manga: findMediaFolder(libraries, "manga") ?? undefined,
+    "light-novel": findMediaFolder(libraries, "light-novel") ?? undefined,
+    music: findMediaFolder(libraries, "music") ?? undefined,
+  };
 }
 
 function toDriveError(e: unknown): RootError {

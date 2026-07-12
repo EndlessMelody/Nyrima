@@ -1,8 +1,8 @@
 /**
  * SearchFilterBar — search input + filter chip row.
  *
- * Glass panel with hairline border. Focuses to a neon-blue ring. Chips
- * use a subtle pill style that highlights pink when active.
+ * Glass panel with hairline border. Focuses to a pink ring (the lamp).
+ * Chips use a subtle pill style that highlights pink when active.
  */
 
 .ny-search-bar {
@@ -18,9 +18,7 @@
     var(--surface-background) 0%,
     var(--surface-background-weak) 100%
   );
-  box-shadow:
-    0 0 0 1px var(--hairline-blue),
-    0 8px 32px -16px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 8px 32px -16px rgba(0, 0, 0, 0.4);
 }
 
 .ny-search-bar__input {
@@ -39,8 +37,8 @@
     box-shadow 160ms ease;
 
   &:focus-within {
-    border-color: var(--accent-border-strong);
-    box-shadow: 0 0 0 3px var(--accent-alpha-weak);
+    border-color: var(--brand-border-strong);
+    box-shadow: 0 0 0 3px var(--brand-alpha-weak);
   }
 
   > svg {

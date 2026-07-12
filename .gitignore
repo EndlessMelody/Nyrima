@@ -18,6 +18,9 @@ dist-zip
 build
 *.tsbuildinfo
 
+# Vercel CLI project link metadata
+.vercel
+
 # Local env
 .env
 .env.local
@@ -49,6 +52,10 @@ coverage
 # Misc
 *.local
 .cache
+
+# Root-level dev screenshots (regenerated ad hoc, never shipped)
+/*.png
+progress.txt
 
 # Local dev scratch — large MKV fixtures, debug logs, MCP & per-machine config.
 # Kept on disk for local probing, never committed.

@@ -35,11 +35,6 @@
       color-mix(in srgb, var(--brand-on-background-medium) 8%, transparent),
       transparent 55%
     ),
-    radial-gradient(
-      140% 220% at 100% 0%,
-      color-mix(in srgb, var(--accent-on-background-medium) 6%, transparent),
-      transparent 55%
-    ),
     color-mix(in srgb, var(--page-background) 88%, transparent);
 }
 

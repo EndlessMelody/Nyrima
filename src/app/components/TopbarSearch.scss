@@ -48,8 +48,7 @@
     linear-gradient(
       90deg,
       color-mix(in srgb, var(--brand-on-background-medium) 8%, transparent),
-      color-mix(in srgb, var(--page-background) 60%, transparent) 50%,
-      color-mix(in srgb, var(--accent-on-background-medium) 6%, transparent)
+      color-mix(in srgb, var(--page-background) 70%, transparent) 60%
     );
   border: 1px solid color-mix(in srgb, var(--neutral-border-medium) 70%, transparent);
   border-radius: 999px;
@@ -73,8 +72,7 @@
     linear-gradient(
       90deg,
       color-mix(in srgb, var(--brand-on-background-medium) 14%, transparent),
-      color-mix(in srgb, var(--page-background) 70%, transparent) 50%,
-      color-mix(in srgb, var(--accent-on-background-medium) 12%, transparent)
+      color-mix(in srgb, var(--page-background) 70%, transparent) 60%
     );
 }
 
@@ -104,7 +102,7 @@
 
 .dc-topbar-search__field:focus-within .dc-topbar-search__icon {
   transform: rotate(-12deg) scale(1.08);
-  filter: drop-shadow(0 0 6px color-mix(in srgb, #ffa8c4 50%, transparent));
+  filter: drop-shadow(0 0 6px var(--brand-alpha-strong));
 }
 
 .dc-topbar-search__input {

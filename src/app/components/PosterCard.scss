@@ -51,9 +51,9 @@
   background: var(--surface-background-strong);
   border: 1px solid var(--neutral-border-weak);
   transition:
-    transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    border-color 200ms ease,
-    box-shadow 200ms ease,
+    transform var(--ny-dur-base) var(--ny-ease-spring),
+    border-color var(--ny-dur-base) ease,
+    box-shadow var(--ny-dur-base) ease,
     outline 120ms ease;
 
   .ny-poster-card--poster & {
@@ -66,10 +66,11 @@
   }
 }
 
-.ny-poster-card:hover .ny-poster-card__frame {
-  transform: translateY(-2px);
-  border-color: var(--accent-border-medium);
-  box-shadow: var(--ny-shadow-card-hover);
+.ny-poster-card:hover .ny-poster-card__frame,
+.ny-poster-card:focus-visible .ny-poster-card__frame {
+  transform: translateY(-4px);
+  border-color: var(--neutral-border-strong);
+  box-shadow: var(--ny-shadow-lg);
 }
 
 .ny-poster-card__img {
@@ -77,11 +78,23 @@
   height: 100%;
   object-fit: cover;
   opacity: 0;
-  transition: opacity 300ms ease;
+  /* Slow cover-zoom on hover — the frame's overflow:hidden clips it so only the
+     scene moves, not the card. Pairs with the lift for a single coherent
+     "stepping forward" gesture. */
+  transform: scale(1);
+  transform-origin: center;
+  transition:
+    opacity var(--ny-dur-slow) ease,
+    transform var(--ny-dur-slow) var(--ny-ease-spring);
 }
 
 .ny-poster-card__img.is-loaded {
   opacity: 1;
+}
+
+.ny-poster-card:hover .ny-poster-card__img.is-loaded,
+.ny-poster-card:focus-visible .ny-poster-card__img.is-loaded {
+  transform: scale(1.05);
 }
 
 .ny-poster-card__skeleton {
@@ -125,12 +138,19 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--ny-scrim-medium);
+  /* Bottom-weighted scrim so the title/progress edge reads, while the centre
+     stays clear enough to keep the artwork legible under the play knob. */
+  background: linear-gradient(
+    180deg,
+    transparent 30%,
+    var(--ny-scrim-medium) 100%
+  );
   opacity: 0;
-  transition: opacity 200ms ease;
+  transition: opacity var(--ny-dur-fast) ease;
 }
 
-.ny-poster-card:hover .ny-poster-card__overlay {
+.ny-poster-card:hover .ny-poster-card__overlay,
+.ny-poster-card:focus-visible .ny-poster-card__overlay {
   opacity: 1;
 }
 
@@ -145,11 +165,19 @@
   align-items: center;
   justify-content: center;
   border: 1px solid var(--ny-ink-alpha-weak);
+  /* Knob settles in from a touch smaller, in step with the overlay fade. */
+  transform: scale(0.82);
+  transition: transform var(--ny-dur-base) var(--ny-ease-spring);
 
   .ny-poster-card--backdrop & {
     width: 40px;
     height: 40px;
   }
+}
+
+.ny-poster-card:hover .ny-poster-card__play,
+.ny-poster-card:focus-visible .ny-poster-card__play {
+  transform: scale(1);
 }
 
 .ny-poster-card__play svg {
@@ -181,6 +209,38 @@
   color: var(--neutral-on-solid-strong);
 }
 
+/* "Xm left" readout — bottom-left of a backdrop tile, sitting just above the
+   progress bar. Reveals with the overlay on hover so the resting tile stays
+   clean. Mono/tabular so the number doesn't jitter. */
+.ny-poster-card__remaining {
+  position: absolute;
+  left: 8px;
+  bottom: 10px;
+  z-index: 3;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-family: var(--dc-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.625rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--neutral-on-background-strong);
+  background: var(--ny-scrim-strong);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--ny-ink-alpha-weak);
+  opacity: 0;
+  transform: translateY(4px);
+  transition:
+    opacity var(--ny-dur-fast) ease,
+    transform var(--ny-dur-fast) var(--ny-ease-spring);
+}
+
+.ny-poster-card:hover .ny-poster-card__remaining,
+.ny-poster-card:focus-visible .ny-poster-card__remaining {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .ny-poster-card__progress {
   position: absolute;
   bottom: 0;
@@ -202,11 +262,7 @@
 .ny-poster-card__progress-bar {
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(
-    90deg,
-    var(--brand-background-strong),
-    var(--accent-background-strong)
-  );
+  background: var(--brand-solid-strong);
 }
 
 .ny-poster-card__title {
@@ -261,4 +317,32 @@
   border-top: var(--dc-hairline);
   padding-top: 8px;
   border-radius: 0;
+}
+
+/* Quiet the lift + cover-zoom + knob-scale for motion-sensitive users; the
+   overlay/play affordance still appears on hover, just without movement. */
+@media (prefers-reduced-motion: reduce) {
+  .ny-poster-card:hover .ny-poster-card__frame,
+  .ny-poster-card:focus-visible .ny-poster-card__frame {
+    transform: none;
+  }
+
+  .ny-poster-card:hover .ny-poster-card__img.is-loaded,
+  .ny-poster-card:focus-visible .ny-poster-card__img.is-loaded {
+    transform: none;
+  }
+
+  .ny-poster-card__play {
+    transform: none;
+  }
+
+  .ny-poster-card__remaining {
+    transform: none;
+    transition: opacity var(--ny-dur-fast) ease;
+  }
+
+  .ny-poster-card:hover .ny-poster-card__remaining,
+  .ny-poster-card:focus-visible .ny-poster-card__remaining {
+    transform: none;
+  }
 }

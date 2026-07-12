@@ -7,13 +7,23 @@ export interface DriveFile {
   name: string;
   mimeType: string;
   size?: string; // Drive API returns size as string (int64)
+  createdTime?: string;
   modifiedTime?: string;
   iconLink?: string;
   thumbnailLink?: string;
+  webViewLink?: string;
+  md5Checksum?: string;
   videoMediaMetadata?: {
     width?: number;
     height?: number;
     durationMillis?: string;
+  };
+  imageMediaMetadata?: {
+    width?: number;
+    height?: number;
+    rotation?: number;
+    time?: string;
+    [key: string]: string | number | undefined;
   };
   capabilities?: {
     canCopy?: boolean;
@@ -147,6 +157,10 @@ export interface AppSettings {
   librarySort: LibrarySortKey;
   /** Last-used library video layout. */
   libraryView: LibraryViewMode;
+  /** Cropped lobby banner image. Null means use the bundled default banner. */
+  lobbyBannerImageDataUrl: string | null;
+  /** Epoch ms of the last lobby banner update. Null when default is active. */
+  lobbyBannerUpdatedAt: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -347,4 +361,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   skipSeconds: 10,
   librarySort: "name",
   libraryView: "grouped",
+  lobbyBannerImageDataUrl: null,
+  lobbyBannerUpdatedAt: null,
 };

@@ -10,11 +10,14 @@
  */
 
 import { useCallback, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import cn from "classnames";
+import { useAuth } from "@/auth/AuthProvider";
 import { useTheme } from "../providers/AppProviders";
 import { useSettingsStore } from "../stores/settings-store";
-import { signOut, tryGetAccessToken } from "../services/auth";
-import { clearUserProfile, getUserProfile } from "../services/user-profile";
+import { signOut } from "../services/auth";
+import { clearUserProfile } from "../services/user-profile";
+import { startDriveConnect, DriveConnectError } from "../services/drive-connect";
 import { useDevModeStore } from "../services/drive/dev-mode";
 import { SubtitleConfigPanel } from "./SubtitleConfigPanel";
 import { ApiConfigPanel } from "./ApiConfigPanel";
@@ -32,6 +35,9 @@ interface Props {
 }
 
 export function UserCenter({ profile, onClose, onProfileChange }: Props) {
+  const navigate = useNavigate();
+  const { status, exitGuestMode } = useAuth();
+  const isGuest = status === "guest";
   const { mode, setMode } = useTheme();
   const settings = useSettingsStore((s) => s.settings);
   const patch = useSettingsStore((s) => s.patch);
@@ -47,21 +53,29 @@ export function UserCenter({ profile, onClose, onProfileChange }: Props) {
     onClose();
   }, [onClose, onProfileChange]);
 
+  // Leave "Try Nyrima" guest mode. Clears only the local guest marker (Drive
+  // stays connected for a later visit) and returns to the login threshold.
+  const handleExitGuest = useCallback(() => {
+    exitGuestMode();
+    onClose();
+    navigate("/login", { replace: true });
+  }, [exitGuestMode, onClose, navigate]);
+
   const handleSignIn = useCallback(async () => {
+    // Full-page web redirect to Google's consent screen. On return,
+    // AuthGoogleCallbackPage stores the token and brings us back here.
     try {
-      // Trigger interactive OAuth flow.
-      const token = await tryGetAccessToken(true);
-      if (token) {
-        // Now fetch the profile with the fresh token.
-        const p = await getUserProfile();
-        if (p) onProfileChange(p);
-      } else {
-        alert("Please enter your OAuth Client ID in the API Settings panel (click the Key icon below) to enable Connect Drive.");
-      }
+      await startDriveConnect({
+        returnTo: window.location.pathname + window.location.search,
+      });
     } catch (e) {
-      alert("Failed to sign in: " + (e instanceof Error ? e.message : String(e)));
+      alert(
+        e instanceof DriveConnectError
+          ? e.message
+          : "Failed to connect Drive. Please try again.",
+      );
     }
-  }, [onProfileChange]);
+  }, []);
 
   const handleClearHistory = useCallback(async () => {
     setClearing(true);
@@ -117,6 +131,28 @@ export function UserCenter({ profile, onClose, onProfileChange }: Props) {
 
   return (
     <div className="dc-uc" role="dialog" aria-label="User center">
+      {/* ── Guest session ─────────────────────────────────────────── */}
+      {isGuest && (
+        <>
+          <div className="dc-uc__guest">
+            <div className="dc-uc__guest-text">
+              <span className="dc-uc__guest-tag">Guest mode</span>
+              <span className="dc-uc__guest-sub">
+                No Nyrima account — social &amp; cloud sync are off.
+              </span>
+            </div>
+            <button
+              type="button"
+              className="dc-uc__sign-out"
+              onClick={handleExitGuest}
+            >
+              Exit guest mode
+            </button>
+          </div>
+          <div className="dc-uc__divider" />
+        </>
+      )}
+
       {/* ── Identity ──────────────────────────────────────────────── */}
       <div className="dc-uc__identity">
         {profile?.picture ? (
@@ -141,7 +177,7 @@ export function UserCenter({ profile, onClose, onProfileChange }: Props) {
             className="dc-uc__sign-out"
             onClick={() => void handleSignOut()}
           >
-            Sign out
+            Disconnect Drive
           </button>
         ) : (
           <button
@@ -158,7 +194,7 @@ export function UserCenter({ profile, onClose, onProfileChange }: Props) {
 
       {/* ── Appearance ────────────────────────────────────────────── */}
       <div className="dc-uc__section">
-        <div className="dc-uc__section-label">外観 · Appearance</div>
+        <div className="dc-uc__section-label">Appearance</div>
         <div className="dc-uc__pills">
           {(["dark", "light", "system"] as const).map((m) => (
             <button
@@ -183,7 +219,7 @@ export function UserCenter({ profile, onClose, onProfileChange }: Props) {
 
       {/* ── Playback defaults ─────────────────────────────────────── */}
       <div className="dc-uc__section">
-        <div className="dc-uc__section-label">再生 · Playback</div>
+        <div className="dc-uc__section-label">Playback</div>
 
         <div className="dc-uc__row">
           <span className="dc-uc__row-label">Auto-play next</span>
@@ -253,7 +289,7 @@ export function UserCenter({ profile, onClose, onProfileChange }: Props) {
 
       {/* ── Storage ───────────────────────────────────────────────── */}
       <div className="dc-uc__section">
-        <div className="dc-uc__section-label">保存 · Storage</div>
+        <div className="dc-uc__section-label">Storage</div>
         <div className="dc-uc__actions">
           <button
             type="button"

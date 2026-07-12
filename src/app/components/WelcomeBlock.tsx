@@ -54,7 +54,7 @@ export function WelcomeBlock({
         <NyrimaMark size="splash" className="ny-welcome__mark" />
         <div className="ny-welcome__hero-body">
           <span className="ny-welcome__eyebrow">
-            個人的な映画館 · NYRIMA
+            Personal Cinema - Nyrima
           </span>
           <h1 className="ny-welcome__title">
             Your Drive, made&nbsp;cinematic.
@@ -80,19 +80,13 @@ export function WelcomeBlock({
             >
               {secondary.label}
             </button>
-            {keyConfigured && (
-              <span className="ny-welcome__status">
-                <span className="dc-status-dot dc-status-dot--ok" />
-                <span>API key paired</span>
-              </span>
-            )}
-            {rootPaired && rootName && (
-              <span className="ny-welcome__status">
-                <span className="dc-status-dot dc-status-dot--ok" />
-                <span>Folder: {rootName}</span>
-              </span>
-            )}
           </div>
+
+          <ProgressStepper
+            keyConfigured={keyConfigured}
+            rootPaired={rootPaired}
+            rootName={rootName}
+          />
         </div>
       </header>
 
@@ -154,6 +148,82 @@ export function WelcomeBlock({
         />
       </ol>
     </section>
+  );
+}
+
+/**
+ * ProgressStepper — the two real setup gates (API key, Nyrima folder) shown
+ * as a live stepper rather than after-the-fact status pills. The first
+ * not-yet-done gate is the "active" step (gently pulsing), so the user always
+ * sees where they are and what's next. Derives entirely from existing props —
+ * no new state.
+ */
+function ProgressStepper({
+  keyConfigured,
+  rootPaired,
+  rootName,
+}: {
+  keyConfigured: boolean | null;
+  rootPaired: boolean;
+  rootName: string | null;
+}) {
+  const steps = [
+    {
+      label: "Drive API key",
+      done: Boolean(keyConfigured),
+      detail: keyConfigured ? "Paired" : "Paste your free key",
+    },
+    {
+      label: "Nyrima folder",
+      done: rootPaired,
+      detail: rootPaired ? rootName ?? "Paired" : "Point at one Drive folder",
+    },
+  ];
+  // The active step is the first one not yet done; once both are done there's
+  // no active step (every marker shows its check).
+  const activeIndex = steps.findIndex((s) => !s.done);
+
+  return (
+    <ol className="ny-welcome__progress" aria-label="Setup progress">
+      {steps.map((s, i) => {
+        const state = s.done
+          ? "done"
+          : i === activeIndex
+            ? "active"
+            : "pending";
+        return (
+          <li
+            key={s.label}
+            className={`ny-welcome__progress-step is-${state}`}
+            aria-current={state === "active" ? "step" : undefined}
+          >
+            <span className="ny-welcome__progress-marker" aria-hidden="true">
+              {s.done ? <CheckIcon /> : i + 1}
+            </span>
+            <span className="ny-welcome__progress-text">
+              <span className="ny-welcome__progress-label">{s.label}</span>
+              <span className="ny-welcome__progress-detail" title={s.detail}>
+                {s.detail}
+              </span>
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="m3.5 8.5 3 3 6-7"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 

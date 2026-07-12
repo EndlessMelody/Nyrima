@@ -10,6 +10,12 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import type { SubCue } from "../services/subtitles";
 import "./SubtitleOverlay.scss";
 
+// Comic Neue is a subtitle-font fallback (see --dc-font-subtitle in
+// fonts.scss). Only the player needs it, so it loads with this chunk instead
+// of on every page.
+import "@fontsource/comic-neue/700.css";
+import "@fontsource/comic-neue/700-italic.css";
+
 interface Props {
   /** Reference to the <video> element we should sync against. */
   videoRef: React.RefObject<HTMLVideoElement>;

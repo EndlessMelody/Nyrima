@@ -27,17 +27,29 @@ const API_BASE = "https://www.googleapis.com/drive/v3";
 const UPLOAD_API_BASE = "https://www.googleapis.com/upload/drive/v3";
 const FOLDER_MIME = "application/vnd.google-apps.folder";
 
+/**
+ * Hard ceiling for `downloadFile` / `downloadTextFile`. These helpers
+ * materialize the entire response in memory and are meant only for small files
+ * (subtitles, posters, JSON manifests) — video is streamed via range/MSE
+ * instead. Without a cap a pathological multi-hundred-MB subtitle would be
+ * pulled into a single Blob and could OOM the tab.
+ */
+export const MAX_TEXT_DOWNLOAD_BYTES = 25 * 1024 * 1024; // 25 MB
+
 const DEFAULT_FILE_FIELDS = [
   "id",
   "name",
   "mimeType",
   "size",
+  "createdTime",
   "modifiedTime",
   "md5Checksum",
   "thumbnailLink",
+  "webViewLink",
   "parents",
   "capabilities(canCopy,canDownload)",
   "videoMediaMetadata(width,height,durationMillis)",
+  "imageMediaMetadata(width,height,rotation,time)",
 ].join(",");
 
 const LIST_FIELDS = `nextPageToken,files(${DEFAULT_FILE_FIELDS})`;
@@ -223,38 +235,37 @@ export function buildMediaUrl(fileId: string): string {
 }
 
 /**
- * Build a directly-streamable URL that can be assigned to <video src>.
+ * Build a URL that can be assigned directly to `<video src>` for native
+ * playback, or `null` when no such URL exists for the current auth state.
  *
- * Preference order:
- *   1. **OAuth via DNR** — when a live OAuth token is available, return the
- *      bare media URL. The background service worker installs a
- *      declarativeNetRequest rule that stamps `Authorization: Bearer` onto
- *      these requests, so the browser can issue native Range requests on
- *      demand and start playback in seconds. Bandwidth is billed against the
- *      user's personal Drive quota, not the throttled public-key quota.
- *   2. **API key** — for "Anyone with the link" folders without OAuth, fall
- *      back to the `?key=...` URL. Same native-Range fast path, but only
- *      works for public files.
- *   3. Neither — return null. The caller falls through to a blob/MSE path.
+ * A `<video>` element issues opaque (no-CORS) media requests and cannot attach
+ * an `Authorization` header. On the web build there are therefore exactly two
+ * outcomes:
  *
- * Why we don't use `?access_token=` in the URL: Drive rejects it for many
- * file/account combos (silent 403), and once <video> fails there's no clean
- * recovery. DNR header injection sidesteps that entirely.
+ *   1. **API key** — return the `?key=...` URL. The key rides in the
+ *      querystring, so the no-CORS media load works for "Anyone with the link"
+ *      files. (Throttled public-key quota.)
+ *   2. **OAuth-only** — return `null`. The Bearer token can't be put on a
+ *      `<video>` request, and the Chrome-extension `declarativeNetRequest`
+ *      rule that used to inject the header on `<video>`'s Range requests does
+ *      not exist in the web app. Callers fall through to the authedFetch-based
+ *      paths (MSE remux for MKV, blob for other containers) which DO send the
+ *      Bearer header — and bill the user's own, far larger, Drive quota.
+ *
+ * We deliberately do NOT return the bare media URL when a token is present:
+ * without the (now-removed) DNR header injection the `<video>` would 401 on
+ * every Range request. We also don't use `?access_token=` — Drive silently
+ * 403s it for many file/account combos and `<video>` can't recover.
  */
 export async function buildPublicStreamUrl(
   fileId: string,
 ): Promise<string | null> {
-  // OAuth path: DNR will stamp the Authorization header on <video>'s outgoing
-  // Range requests. Returning the bare URL avoids the 403 -> blob ricochet
-  // that used to force a full-file prefetch for OAuth-only users.
+  // OAuth wins for quota, but a token isn't usable on a <video> element here —
+  // return null so the caller uses the authedFetch (MSE/blob) path instead.
   const token = await tryGetAccessToken(false);
-  if (token) {
-    return buildMediaUrl(fileId);
-  }
+  if (token) return null;
   const key = await getApiKey();
-  if (key) {
-    return appendApiKey(buildMediaUrl(fileId), key);
-  }
+  if (key) return appendApiKey(buildMediaUrl(fileId), key);
   return null;
 }
 
@@ -306,7 +317,24 @@ export async function downloadFile(
         signal: reqOpts.signal,
       },
     );
-    return await res.blob();
+    // Reject runaway files before pulling the whole body into memory. Check the
+    // advertised length first (cheap), then re-check the materialized blob to
+    // cover chunked responses that omit Content-Length.
+    const declared = Number(res.headers.get("content-length"));
+    if (Number.isFinite(declared) && declared > MAX_TEXT_DOWNLOAD_BYTES) {
+      throw new Error(
+        `downloadFile(${safeFileId}): ${declared} bytes exceeds the ` +
+          `${MAX_TEXT_DOWNLOAD_BYTES}-byte limit for small/text files.`,
+      );
+    }
+    const blob = await res.blob();
+    if (blob.size > MAX_TEXT_DOWNLOAD_BYTES) {
+      throw new Error(
+        `downloadFile(${safeFileId}): ${blob.size} bytes exceeds the ` +
+          `${MAX_TEXT_DOWNLOAD_BYTES}-byte limit for small/text files.`,
+      );
+    }
+    return blob;
   });
 }
 
@@ -573,6 +601,50 @@ export async function deleteFile(
 }
 
 /**
+ * Multipart upload of a binary file (post images, uploaded media). Same
+ * envelope as `uploadJsonFile`/`uploadTextFile`, but the body is assembled
+ * as a `Blob` of parts rather than a concatenated string — binary bytes
+ * (e.g. JPEG data) would be corrupted by UTF-8 string concatenation, since
+ * arbitrary byte sequences aren't valid UTF-16 text.
+ */
+export async function uploadBinaryFile(
+  parentId: string,
+  name: string,
+  data: Blob,
+  mimeType: string,
+  reqOpts: RequestOptions = {},
+): Promise<DriveFile> {
+  const safeParentId = assertDriveId(parentId, "Drive parent folder ID");
+  const boundary = `nyrima-${Math.random().toString(36).slice(2)}`;
+  const metadata = { name, parents: [safeParentId], mimeType };
+  const body = new Blob([
+    `--${boundary}\r\n`,
+    `Content-Type: application/json; charset=UTF-8\r\n\r\n`,
+    `${JSON.stringify(metadata)}\r\n`,
+    `--${boundary}\r\n`,
+    `Content-Type: ${mimeType}\r\n\r\n`,
+    data,
+    `\r\n--${boundary}--`,
+  ]);
+  const url = `${UPLOAD_API_BASE}/files?uploadType=multipart&fields=${encodeURIComponent(DEFAULT_FILE_FIELDS)}&supportsAllDrives=true`;
+  const res = await authedFetch(
+    url,
+    {
+      method: "POST",
+      headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
+      body,
+      signal: reqOpts.signal,
+    },
+    {
+      kind: reqOpts.kind ?? "metadata",
+      priority: reqOpts.priority ?? "normal",
+      signal: reqOpts.signal,
+    },
+  );
+  return (await res.json()) as DriveFile;
+}
+
+/**
  * Multipart upload of a raw-text file (used for the comments JSONL stream).
  * Same multipart envelope as `uploadJsonFile`, but the inner Content-Type
  * is configurable so Drive's preview shows JSONL as plain text.
@@ -657,6 +729,7 @@ export async function downloadJsonFile<T = unknown>(
   } catch (e) {
     throw new Error(
       `downloadJsonFile(${fileId}): invalid JSON — ${(e as Error).message}`,
+      { cause: e },
     );
   }
 }

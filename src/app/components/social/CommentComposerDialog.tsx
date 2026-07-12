@@ -29,6 +29,7 @@ import {
 import { useSharingStore } from "../../stores/sharing-store";
 import { useSocialStore } from "../../stores/social-store";
 import { MAX_SHARE_COMMENT_CHARS } from "@shared/constants";
+import { isSupabaseConfigured } from "@/lib/supabase";
 
 interface Props {
   isOpen: boolean;
@@ -174,8 +175,10 @@ export function CommentComposerDialog({ isOpen, onClose, target }: Props) {
             onBackground="neutral-weak"
             style={{ fontFamily: "var(--dc-font-mono)" }}
           >
-            Posting as @{profile.handle}. Your comment lands in your own
-            <code> Shared/comments.jsonl </code>, not theirs.
+            Posting as @{profile.handle}.{" "}
+            {isSupabaseConfigured()
+              ? "Saved to Nyrima and visible to anyone who opens this share."
+              : "Your comment lands in your own Shared/comments.jsonl, not theirs."}
           </Text>
         )}
 

@@ -1,16 +1,14 @@
 /**
  * NyrimaMark — brand icon wrapper with size variants.
  *
- * Uses the extension-bundled app-icon.png so it renders consistently across
- * chrome-extension:// pages and (fallback) dev-server contexts.
+ * Resolves the brand icon through the web asset helper (served from /public),
+ * replacing the former `chrome.runtime.getURL` extension lookup.
  */
 
 import { type ImgHTMLAttributes } from "react";
+import { assetUrl } from "@/platform/asset-url";
 
-const iconUrl =
-  typeof chrome !== "undefined" && chrome.runtime?.getURL
-    ? chrome.runtime.getURL("icons/app-icon.png")
-    : "/icons/app-icon.png";
+const iconUrl = assetUrl("icons/app-icon.png");
 
 export type MarkSize = "header" | "hero" | "splash";
 

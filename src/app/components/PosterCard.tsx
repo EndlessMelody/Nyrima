@@ -15,7 +15,7 @@
  * filename + folder name via the shared title parser.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import cn from "classnames";
 import type { DriveFile } from "@shared/types";
@@ -49,7 +49,7 @@ interface Props {
   watched?: boolean;
 }
 
-export function PosterCard({
+export const PosterCard = memo(function PosterCard({
   file,
   folderId,
   folderName,
@@ -100,6 +100,25 @@ export function PosterCard({
   }, [folderName, file.name, cleaned.title]);
 
   const progressPct = playbackProgressPct(playbackPosition);
+
+  // Remaining-time readout for the backdrop tiles (Continue Watching). Reads
+  // straight off the stored playback position; only shown while the tile is
+  // genuinely mid-watch so it reinforces the "resume" affordance.
+  const remainingLabel = useMemo(() => {
+    if (variant !== "backdrop" || !playbackPosition) return null;
+    const { positionSeconds, durationSeconds } = playbackPosition;
+    if (!durationSeconds || durationSeconds <= 0) return null;
+    const remaining = Math.max(0, durationSeconds - positionSeconds);
+    if (remaining < 1) return null;
+    const mins = Math.round(remaining / 60);
+    if (mins >= 60) {
+      const h = Math.floor(mins / 60);
+      const m = mins % 60;
+      return m > 0 ? `${h}h ${m}m left` : `${h}h left`;
+    }
+    if (mins >= 1) return `${mins}m left`;
+    return `${Math.round(remaining)}s left`;
+  }, [variant, playbackPosition]);
 
   const handleClick = () => {
     if (folderId) {
@@ -219,6 +238,12 @@ export function PosterCard({
           </div>
         </div>
 
+        {remainingLabel &&
+          progressPct > 0 &&
+          progressPct < WATCHED_THRESHOLD_PCT && (
+            <span className="ny-poster-card__remaining">{remainingLabel}</span>
+          )}
+
         {progressPct > 0 && progressPct < WATCHED_THRESHOLD_PCT && (
           <div className="ny-poster-card__progress">
             <div
@@ -276,7 +301,7 @@ export function PosterCard({
       )}
     </div>
   );
-}
+});
 
 function PlayIcon() {
   return (

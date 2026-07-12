@@ -9,7 +9,7 @@
  *   - Compact folders row (subfolders)
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useLibraryStore } from "../stores/library-store";
 import { useRecentStore } from "../stores/recent-store";
@@ -382,21 +382,22 @@ export function LibraryPage() {
           return;
         }
         if (!inField) {
-          navigate("/");
+          navigate("/app");
         }
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [navigate, query]);
+  const withTransition = (content: ReactNode) => content;
 
   if (invalidFolderId) {
-    return (
+    return withTransition(
       <div className="ny-library">
         <LibraryHeader
           title="Invalid library link"
           shortFolderId="INVALID"
-          onBack={() => navigate("/")}
+          onBack={() => navigate("/app")}
         />
         <div className="dc-error">
           <div className="dc-error__head">
@@ -417,30 +418,30 @@ export function LibraryPage() {
             </div>
           </div>
         </div>
-      </div>
+      </div>,
     );
   }
 
   if (loading) {
-    return (
+    return withTransition(
       <div className="ny-library">
         <LibraryHeader
           title="Loading library…"
           shortFolderId={shortFolderId}
-          onBack={() => navigate("/")}
+          onBack={() => navigate("/app")}
         />
         <PosterSkeleton count={5} />
-      </div>
+      </div>,
     );
   }
 
   if (error) {
-    return (
+    return withTransition(
       <div className="ny-library">
         <LibraryHeader
           title="Access denied"
           shortFolderId={shortFolderId}
-          onBack={() => navigate("/")}
+          onBack={() => navigate("/app")}
         />
         <AccessErrorCard
           reason={errorReason}
@@ -457,16 +458,16 @@ export function LibraryPage() {
             void loadFolder(folderId);
           }}
         />
-      </div>
+      </div>,
     );
   }
 
-  return (
+  return withTransition(
     <div className="ny-library">
       <LibraryHeader
         title={libraryTitle}
         shortFolderId={shortFolderId}
-        onBack={() => navigate("/")}
+        onBack={() => navigate("/app")}
       />
 
       {subfolders.length > 0 && (
@@ -478,7 +479,7 @@ export function LibraryPage() {
         <section className="ny-library__folders" aria-label="Subfolders">
           <header className="ny-library__folders-head">
             <span className="ny-library__folders-kana">
-              子フォルダ · SUBFOLDERS
+              Subfolders
             </span>
             <span className="ny-library__folders-count">
               {subfolders.length}{" "}
@@ -644,7 +645,7 @@ export function LibraryPage() {
         onClose={() => setSetupOpen(false)}
         onSaved={() => setSetupOpen(false)}
       />
-    </div>
+    </div>,
   );
 }
 

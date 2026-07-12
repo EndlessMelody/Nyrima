@@ -1,15 +1,26 @@
 # Nyrima Architecture
 
-This document describes the current deployable Chrome extension. It is the
-technical companion to [`how-nyrima-works.md`](./how-nyrima-works.md).
-Engineering status and future work remain in [`../PHASES.md`](../PHASES.md).
+This document describes the current Nyrima **web app**. It is the technical
+companion to [`how-nyrima-works.md`](./how-nyrima-works.md). Engineering
+status and future work remain in [`../PHASES.md`](../PHASES.md).
+
+> Nyrima started as a Chrome Manifest V3 extension. That implementation is
+> retired and preserved in [`../legacy/extension/`](../legacy/extension/) —
+> see [`../legacy/extension/README.md`](../legacy/extension/README.md) for
+> what moved where. The "Legacy Extension Surfaces" section below documents
+> how OAuth and Drive media auth worked there, since the web Drive-auth
+> adapter (`src/platform/drive-auth-web.ts`) is still hardening against that
+> reference.
 
 ## System Intent
 
 Nyrima is designed around four current constraints:
 
-1. **No Nyrima backend.** The extension page talks to Google Drive APIs and
-   local browser storage. Media is not uploaded to a Nyrima server.
+1. **No Nyrima media backend.** The web app talks to Google Drive APIs, local
+   disk (File System Access API), and browser storage. Media is not uploaded
+   to a Nyrima server. A small Supabase backend exists for accounts and the
+   social layer only (friend connections, folder comments) — never media or
+   per-user library data.
 2. **Drive stays authoritative.** A user can only list, stream, copy, publish,
    or permission Drive data that Google Drive allows for that user and access
    mode.
@@ -23,87 +34,68 @@ Nyrima is designed around four current constraints:
 ## Runtime Topology
 
 ```text
-                    drive.google.com
+                    Public marketing site (/)
+                  login | terms | faq | guide
                           |
-                    content script
-                          |
-             chrome.runtime messages / deep-links
+                   Google OAuth (PKCE) / guest session
                           v
-popup ---------- background service worker ---------- Google OAuth consent
-                          |
-              OAuth token mediation and DNR rule
-                          |
-                          v
-                 React extension app page
+              RequireAuth -> AppShell (/app)
         lobby | library | player | social | settings
               |                 |
               |                 +-- local MSE/JASSUB playback work
+              |                 +-- local file playback (File System Access)
               |
-              +-- Google Drive API/media hosts
-              +-- chrome.storage.local / session
+              +-- Google Drive REST API / media hosts
+              +-- src/platform/chrome-shim.ts (localStorage + IndexedDB)
               +-- IndexedDB Drive caches
+              +-- Supabase (accounts + social-only data)
               +-- optional GitHub raw share directory fetch
 ```
 
-## Extension Surfaces
+## App Surfaces
 
-### Manifest
+[`src/App.tsx`](../src/App.tsx) is the route tree:
 
-[`../src/manifest.config.ts`](../src/manifest.config.ts) builds the Manifest
-V3 declaration. It defines the app action, service worker, Drive content
-script, extension permissions, host permissions, and extension-page CSP.
+- `/`, `/login`, `/terms`, `/privacy`, `/faq`, `/contact`, `/guide` — public
+  marketing site (no auth), see [`src/landing/`](../src/landing/).
+- `/auth/callback`, `/auth/google/callback` — Supabase account OAuth return
+  and Google Drive OAuth return.
+- `/app` — lobby/dashboard, gated by `RequireAuth` + `AppShell`.
+- `/library*`, `/play/:folderId/:fileId`, `/read/:folderId/:fileId`,
+  `/music/player`, `/social*`, `/settings`, `/account` — the authenticated
+  app, mirroring the prior extension page's routes (library browsing,
+  playback, EPUB reading, music, Drive-native sharing).
 
-There is intentionally no manifest `oauth2` block in the current build. OAuth
-uses a user-provided Chrome Extension client ID at runtime.
+The app owns UI state, Drive listing calls, player orchestration, poster
+resolution, subtitle setup, settings, and social stores — unchanged from the
+extension era, just running as a normal web page instead of an extension
+page.
 
-### Background service worker
+## Legacy Extension Surfaces (retired)
 
-[`../src/background/service-worker.ts`](../src/background/service-worker.ts)
-owns:
+These surfaces are no longer part of the build. They're preserved under
+[`../legacy/extension/`](../legacy/extension/) because they document how Drive
+OAuth, token refresh, and the `Authorization: Bearer` media-request injection
+worked, which the web Drive-auth adapter still needs to replicate (PKCE,
+silent refresh, login hints).
 
-- Context-menu setup for Drive folder links/pages.
-- Opening or focusing the main app page for a Drive folder.
-- Recent-folder message handling.
-- OAuth startup through `chrome.identity.launchWebAuthFlow`.
-- Short-lived OAuth token caching in memory and `chrome.storage.session`.
-- The last interactive-consent timestamp in `chrome.storage.local`.
-- A Chrome alarm that attempts silent token refresh inside the current
-  interactive-consent window.
-- A dynamic declarativeNetRequest rule that stamps an `Authorization: Bearer`
-  header on extension-initiated Drive media requests when OAuth playback needs
-  direct `<video>` Range requests.
-
-The service worker enforces the current 24-hour interactive-consent ceiling.
-Past that wall-clock window, the user must consent again even if Google still
-has a browser session.
-
-### Drive content script
-
-[`../src/content/drive-inject.tsx`](../src/content/drive-inject.tsx) runs on
-`https://drive.google.com/*`. It mounts one Shadow-DOM-backed floating action
-that can open the current Drive folder in Nyrima. It watches Drive SPA
-navigation and detects stale extension contexts after extension reload.
-
-It does not read Drive cookies. It extracts a folder ID from Drive URLs and
-sends extension runtime messages.
-
-### Main app page
-
-[`../src/app/`](../src/app/) is a React extension page with hash routing:
-
-- `/` for lobby/root onboarding.
-- `/library/:folderId` for library browsing.
-- `/play/:folderId/:fileId` for playback.
-- `/social`, social tabs, and social shelves for Drive-native sharing.
-
-The app page owns UI state, Drive listing calls, player orchestration, poster
-resolution, subtitle setup, settings, and social stores. Heavy media work
-stays here instead of in the MV3 service worker.
-
-### Toolbar popup
-
-[`../src/popup/`](../src/popup/) is a small entry surface that opens the app
-or recent folder locations in tabs.
+- **Manifest** — [`../legacy/extension/manifest.config.ts`](../legacy/extension/manifest.config.ts)
+  built the Manifest V3 declaration (app action, service worker, Drive content
+  script, permissions, extension-page CSP). There was intentionally no
+  manifest `oauth2` block; OAuth used a user-provided Chrome Extension client
+  ID at runtime.
+- **Background service worker** — [`../legacy/extension/background/service-worker.ts`](../legacy/extension/background/service-worker.ts)
+  owned context-menu setup, OAuth via `chrome.identity.launchWebAuthFlow`,
+  short-lived token caching in `chrome.storage.session`, the 72-hour
+  interactive-consent ceiling, a silent-refresh alarm, and a
+  declarativeNetRequest rule stamping `Authorization: Bearer` on Drive media
+  requests for direct `<video>` Range playback.
+- **Drive content script** — [`../legacy/extension/content/drive-inject.tsx`](../legacy/extension/content/drive-inject.tsx)
+  ran on `https://drive.google.com/*`, mounting a floating action to open the
+  current Drive folder in Nyrima.
+- **Toolbar popup** — [`../legacy/extension/popup/`](../legacy/extension/popup/)
+  was a small entry surface that opened the app or recent folder locations in
+  tabs.
 
 ## Drive Access And Auth
 
@@ -118,10 +110,11 @@ append the key to Drive API/media requests.
 
 An API key is not a user grant. It does not make private Drive data readable.
 
-### BYOK OAuth path
+### OAuth (PKCE) path
 
-`dc.oauthClientId` stores a user-provided Google OAuth Chrome Extension client
-ID locally. The service worker requests the current scope set:
+[`src/platform/drive-auth-web.ts`](../src/platform/drive-auth-web.ts) drives a
+browser-based authorization-code-with-PKCE flow against
+`/auth/google/callback`, requesting the current scope set:
 
 ```text
 https://www.googleapis.com/auth/drive.readonly
@@ -164,10 +157,11 @@ entries are migrated away from the removed metadata path.
 
 ### Direct path
 
-When Chrome can play the selected file directly, Nyrima builds a Drive media
-URL and lets the browser media stack fetch it. For OAuth direct media requests,
-the background service worker's DNR rule adds the bearer header to matching
-extension-initiated Drive media requests.
+When the browser can play the selected file directly, Nyrima builds a Drive
+media URL and lets the browser media stack fetch it. For OAuth direct media
+requests, `authedFetch` attaches the `Authorization: Bearer` header itself
+(the prior extension build used a declarativeNetRequest rule for this; the web
+app does it in-app).
 
 ### Range and MSE path
 
@@ -227,9 +221,15 @@ source-owner restrictions remain enforced by Drive.
 
 ## Storage And Data Placement
 
-### Persistent local extension storage
+### Persistent local storage
 
-`chrome.storage.local` is the primary persistent store for the app.
+`chrome.storage.local` calls are the primary persistent store for the app,
+now backed by `localStorage` via
+[`src/platform/storage-adapter.ts`](../src/platform/storage-adapter.ts) (see
+[`src/platform/chrome-shim.ts`](../src/platform/chrome-shim.ts)), with
+cross-tab propagation through the native `storage` event. Stores and services
+were written against `chrome.storage.local` during the extension era and were
+not rewritten — the adapter keeps every existing call working.
 
 | Key | Current purpose |
 | --- | --- |
@@ -255,9 +255,9 @@ to the current `Shared/` folder.
 
 ### Session token cache
 
-`chrome.storage.session` holds the short-lived OAuth access token entry so an
-MV3 service-worker idle unload does not force immediate re-authentication. The
-entry is removed on sign-out and expires on its token window.
+`chrome.storage.session` calls hold the short-lived OAuth access token entry,
+backed by `sessionStorage` via the same storage adapter (the "session" area).
+The entry is removed on sign-out and expires on its token window.
 
 ### IndexedDB caches
 
@@ -278,12 +278,13 @@ behavior.
 
 ## Remote Endpoints
 
-The current manifest and code allow:
+The app's CSP and code allow:
 
 - `www.googleapis.com`, `content.googleapis.com`, Google Drive media
   redirects/thumbnail hosts, and Google OAuth endpoints used by Drive/OAuth
   flows.
-- `drive.google.com` for content-script presence and Drive links.
+- `*.supabase.co` for account auth and the social-only backend (friends,
+  folder comments).
 - `raw.githubusercontent.com` for the optional sharing bootstrap directory.
 
 The GitHub raw directory fetch uses `credentials: "omit"` and receives no
@@ -293,26 +294,16 @@ Google OAuth token.
 
 | Boundary | Architectural treatment |
 | --- | --- |
-| Drive web page -> extension | Content script sends folder/deep-link messages; it is not the app authority for tokens. |
-| App page -> service worker | Runtime messages request OAuth token work and tab/deep-link behavior. |
-| Extension -> Google Drive | Drive API enforces scopes, permissions, quotas, copy restrictions, and media availability. |
+| App -> Google Drive | Drive API enforces scopes, permissions, quotas, copy restrictions, and media availability. |
+| App -> Supabase | Social-only data (friends, folder comments, account identity); no media or per-user library data ever leaves the browser. |
 | Followed public `Shared/index.json` -> UI | Public manifests are untrusted and sanitized before social-store use. |
 | Public directory JSON -> UI | Directory entries are sanitized and cached with a TTL. |
 | Same user on multiple devices | Drive JSON/JSONL writes can race because there is no backend arbiter. |
 
-## Manifest Permission Rationale
-
-The architecture uses these permission families:
-
-- `identity` for OAuth web auth.
-- `storage` for extension configuration and state.
-- `contextMenus` and `tabs` for Drive/app entry flows.
-- `alarms` for best-effort OAuth refresh cadence.
-- `declarativeNetRequestWithHostAccess` for OAuth media Authorization header
-  injection on allowed Drive media hosts.
-
 See [`permissions-and-data-use.md`](./permissions-and-data-use.md) for the
-full user-facing audit table.
+full user-facing data-use audit, and
+[`supabase-and-cache-architecture.md`](./supabase-and-cache-architecture.md)
+for the Supabase/cache split.
 
 ## Current Limits
 
@@ -332,10 +323,12 @@ full user-facing audit table.
 
 | Area | Files |
 | --- | --- |
-| Manifest and extension contexts | `src/manifest.config.ts`, `src/background/service-worker.ts`, `src/content/`, `src/popup/` |
-| React app | `src/app/App.tsx`, `src/app/pages/`, `src/app/components/` |
-| Drive auth and API | `src/app/services/auth.ts`, `src/app/services/drive-api.ts`, `src/app/services/drive/` |
-| Local state | `src/app/services/storage.ts`, `src/app/stores/`, `src/app/services/drive/idb.ts` |
-| Playback | `src/app/pages/PlayerPage.tsx`, `src/app/components/DrivePlayer.tsx`, `src/app/services/mkv-remux/` |
+| Legacy extension contexts (retired) | `legacy/extension/manifest.config.ts`, `legacy/extension/background/service-worker.ts`, `legacy/extension/content/`, `legacy/extension/popup/` |
+| Route tree, auth, marketing site | `src/App.tsx`, `src/auth/`, `src/landing/`, `src/pages/`, `src/platform/` |
+| App pages/components | `src/app/pages/`, `src/app/components/` |
+| Drive auth and API | `src/app/services/auth.ts`, `src/app/services/drive-api.ts`, `src/app/services/drive/`, `src/platform/drive-auth-web.ts` |
+| Local state | `src/app/services/storage.ts`, `src/app/stores/`, `src/app/services/drive/idb.ts`, `src/platform/storage-adapter.ts` |
+| Playback | `src/app/pages/PlayerPage.tsx`, `src/app/components/DrivePlayer.tsx`, `src/app/services/mkv-remux/`, `src/app/services/local-library/` |
 | Subtitles | `src/app/services/subtitles.ts`, `src/app/services/mkv-subtitles.ts`, subtitle overlay components |
 | Sharing | `src/app/services/sharing/`, `src/app/stores/sharing-store.ts`, `src/app/stores/social-store.ts` |
+| Server/Supabase | `src/server/db/`, `supabase/` |

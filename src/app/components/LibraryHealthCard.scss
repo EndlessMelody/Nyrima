@@ -17,9 +17,7 @@
     var(--surface-background) 0%,
     var(--surface-background-weak) 100%
   );
-  box-shadow:
-    0 0 0 1px var(--hairline-pink),
-    0 12px 40px -20px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 12px 40px -20px rgba(0, 0, 0, 0.45);
 }
 
 .ny-health__head {

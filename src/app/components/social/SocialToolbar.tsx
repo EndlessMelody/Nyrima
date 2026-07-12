@@ -26,7 +26,7 @@ export function SocialToolbar() {
   return (
     <section className="ny-social-toolbar" aria-label="Social hub header">
       <span className="ny-social-toolbar__kana">
-        ソーシャル · NYRIMA SOCIAL
+        Nyrima Social
       </span>
       <h1 className="ny-social-toolbar__title">Social</h1>
       <p className="ny-social-toolbar__sub">

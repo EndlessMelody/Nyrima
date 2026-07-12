@@ -26,6 +26,7 @@ import { useEffect, useMemo, useState } from "react";
 import cn from "classnames";
 import { useSocialStore } from "../../stores/social-store";
 import { EmptyState, formatAgo } from "./InboxList";
+import { isSupabaseConfigured } from "@/lib/supabase";
 import type { ShareComment } from "@shared/types";
 
 type Strand = "received" | "sent";
@@ -151,7 +152,7 @@ export function ActivityFeed() {
       )}
 
       {strand === "received" ? (
-        followedUsers.length === 0 ? (
+        !isSupabaseConfigured() && followedUsers.length === 0 ? (
           <EmptyState
             title="Follow people to receive comments."
             sub="Only mutual follows can surface here for now. P4.4's bootstrap directory will widen the net."
@@ -166,7 +167,9 @@ export function ActivityFeed() {
             sub={
               !myIndex || myIndex.entries.length === 0
                 ? "Publish a share first — comments need something to land on."
-                : "When someone you follow comments on one of your shares, it'll show up here."
+                : isSupabaseConfigured()
+                  ? "When anyone comments on one of your shares, it'll show up here."
+                  : "When someone you follow comments on one of your shares, it'll show up here."
             }
           />
         ) : (

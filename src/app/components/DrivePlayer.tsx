@@ -147,9 +147,27 @@ interface Props {
    *  takes a CORS-friendly poster URL — typically the cached MAL artwork.
    *  Silently no-ops if the URL fails to load or the canvas read is blocked. */
   ambientSourceUrl?: string;
+  /**
+   * Controlled active subtitle id (`null` = Off). Provide together with
+   * `onPickSubtitle` to let an external panel (the watch-room Subtitle
+   * selector) drive the same track the in-video picker uses. When omitted,
+   * DrivePlayer manages subtitle selection internally exactly as before.
+   */
+  activeSubtitleId?: string | null;
+  onPickSubtitle?: (id: string | null) => void;
+  /**
+   * Controlled subtitle delay (seconds). Provide together with
+   * `onSubtitleDelayChange` to let the watch-room Timing tab adjust the same
+   * offset the `,`/`.` shortcuts and settings popover use. Omit for the
+   * original self-managed behavior.
+   */
+  subtitleDelay?: number;
+  onSubtitleDelayChange?: (delay: number) => void;
 }
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+/** Fixed jump for the player-bar quick-skip button (typical OP/ED length). */
+const QUICK_SKIP_SECONDS = 90;
 const SCALE_STEP = 0.1;
 const SCALE_MIN = 0.5;
 const SCALE_MAX = 2.0;
@@ -221,6 +239,10 @@ export function DrivePlayer({
   theatreMode,
   onToggleTheatre,
   ambientSourceUrl,
+  activeSubtitleId,
+  onPickSubtitle,
+  subtitleDelay,
+  onSubtitleDelayChange,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewVideoRef = useRef<HTMLVideoElement>(null);
@@ -435,8 +457,44 @@ export function DrivePlayer({
   const onNextRef = useRef<Props["onNext"]>(undefined);
 
   // Subtitle state -----------------------------------------------------------
-  const [activeSubId, setActiveSubId] = useState<string | null>(null);
-  const [subDelay, setSubDelay] = useState(0);
+  // `activeSubId` / `subDelay` are controllable from the parent so external
+  // panels (the watch-room Subtitle selector + Timing tab) can drive the same
+  // track/offset the in-video picker uses. When the parent omits the matching
+  // callback, DrivePlayer falls back to its own internal state — preserving the
+  // original standalone behavior. The setters keep a stable identity (the
+  // controlled value is read through a ref) so the once-bound keyboard handlers
+  // never capture a stale offset.
+  const subControlled = onPickSubtitle !== undefined;
+  const [activeSubIdInternal, setActiveSubIdInternal] = useState<string | null>(
+    null,
+  );
+  const activeSubId = subControlled
+    ? activeSubtitleId ?? null
+    : activeSubIdInternal;
+  const setActiveSubId = useCallback(
+    (id: string | null) => {
+      if (subControlled) onPickSubtitle?.(id);
+      else setActiveSubIdInternal(id);
+    },
+    [subControlled, onPickSubtitle],
+  );
+
+  const subDelayControlled = onSubtitleDelayChange !== undefined;
+  const [subDelayInternal, setSubDelayInternal] = useState(0);
+  const subDelay = subDelayControlled ? subtitleDelay ?? 0 : subDelayInternal;
+  const subDelayRef = useRef(subDelay);
+  subDelayRef.current = subDelay;
+  const setSubDelay = useCallback(
+    (next: number | ((d: number) => number)) => {
+      const value =
+        typeof next === "function"
+          ? (next as (d: number) => number)(subDelayRef.current)
+          : next;
+      if (subDelayControlled) onSubtitleDelayChange?.(value);
+      else setSubDelayInternal(value);
+    },
+    [subDelayControlled, onSubtitleDelayChange],
+  );
   // JASSUB readiness. Until `jassubReady` flips true, we keep the plain-text
   // CSS overlay live so the user always sees *some* subtitles — even if
   // libass is still booting its worker or failed to load (CSP/WASM/etc).
@@ -1577,7 +1635,7 @@ export function DrivePlayer({
       <div className="dc-vlc__top">
         <div className="dc-vlc__top-left">
           <span className="dc-vlc__top-kana">
-            {playing ? "再生中 · NOW PLAYING" : "一時停止 · PAUSED"}
+            {playing ? "Now Playing" : "Paused"}
           </span>
           {title && <span className="dc-vlc__top-title">{title}</span>}
         </div>
@@ -1652,7 +1710,7 @@ export function DrivePlayer({
       {buffering && (
         <div className="dc-vlc__buffering" aria-live="polite">
           <div className="spinner" />
-          <div className="label">読み込み中 · Buffering</div>
+          <div className="label">Buffering</div>
         </div>
       )}
 
@@ -1820,6 +1878,18 @@ export function DrivePlayer({
           </button>
 
           <div className="dc-vlc__spacer" />
+
+          {/* Quick-skip OP/ED — jump ahead by a fixed 90s (typical intro/outro
+              length). Lives left of PiP. */}
+          <button
+            type="button"
+            className="dc-vlc__btn dc-vlc__btn--text"
+            onClick={() => skipBy(QUICK_SKIP_SECONDS)}
+            title={`Skip ${QUICK_SKIP_SECONDS}s (opening / ending)`}
+            aria-label={`Skip ahead ${QUICK_SKIP_SECONDS} seconds`}
+          >
+            +{QUICK_SKIP_SECONDS}s
+          </button>
 
           {/* PiP */}
           {"pictureInPictureEnabled" in document && (
@@ -2055,7 +2125,7 @@ function PreRollCard({
       }}
     >
       <div className="dc-vlc__preroll-frame">
-        <span className="dc-vlc__preroll-kana">再生中 · NOW PLAYING</span>
+        <span className="dc-vlc__preroll-kana">Now Playing</span>
         {show && <span className="dc-vlc__preroll-show">{show}</span>}
         <div className="dc-vlc__preroll-meta">
           {episode && (
@@ -2125,7 +2195,7 @@ function ResumePill({
     >
       {status === "pending" && (
         <>
-          <span className="dc-vlc__resume-kana">続きから · RESUME</span>
+          <span className="dc-vlc__resume-kana">Resume</span>
           <span className="dc-vlc__resume-time">{timecode}</span>
           <div className="dc-vlc__resume-actions">
             <button
@@ -2189,7 +2259,7 @@ function NextUpCard({
       </div>
       <div className="dc-vlc__nextup-body">
         <span className="dc-vlc__nextup-kana">
-          次のエピソード · UP NEXT IN {remainingSec}S
+          Up Next in {remainingSec}s
         </span>
         <span className="dc-vlc__nextup-title" title={label}>
           {label}
@@ -2242,7 +2312,7 @@ function ShortcutsOverlay({
 
   const groups: Array<{ title: string; rows: Array<[string, string]> }> = [
     {
-      title: "再生 · Playback",
+      title: "Playback",
       rows: [
         ["Space  K", "Play / pause"],
         ["←  →", `Skip ±${skipSeconds}s`],
@@ -2253,7 +2323,7 @@ function ShortcutsOverlay({
       ],
     },
     {
-      title: "音量 · Audio & View",
+      title: "Audio & View",
       rows: [
         ["↑  ↓", "Volume ±5 %"],
         ["M", "Mute"],
@@ -2262,7 +2332,7 @@ function ShortcutsOverlay({
       ],
     },
     {
-      title: "字幕 · Subtitles",
+      title: "Subtitles",
       rows: [
         ["C", "Cycle subtitle track"],
         [",  .", "Sub delay −0.5s / +0.5s"],
@@ -2270,7 +2340,7 @@ function ShortcutsOverlay({
       ],
     },
     {
-      title: "プレイリスト · Playlist",
+      title: "Playlist",
       rows: [
         ["N", "Next episode"],
         ["P", "Previous episode"],
@@ -2292,7 +2362,7 @@ function ShortcutsOverlay({
       >
         <div className="dc-vlc__shortcuts-head">
           <span className="dc-vlc__shortcuts-kana">
-            ショートカット · KEYBOARD
+            Keyboard
           </span>
           <button
             type="button"

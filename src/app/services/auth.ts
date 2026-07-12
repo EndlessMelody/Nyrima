@@ -23,25 +23,28 @@ import { getOAuthClientId } from "./oauth-key";
 import { classifyDriveError, DriveAccessError } from "./errors";
 import { driveQueue } from "./drive/request-queue";
 import { trackRequest } from "./drive/dev-mode";
+import { debugLog } from "./debug-log";
 import type { RequestOptions } from "./drive/types";
+import { OAUTH_INTERACTIVE_TTL_MS } from "@shared/oauth-session";
 
 let cachedToken: { value: string; fetchedAt: number } | null = null;
+// Coalesces concurrent non-interactive token fetches into one round-trip.
+let inflightToken: Promise<string | null> | null = null;
 const TOKEN_TTL_MS = 50 * 60 * 1000; // chrome.identity tokens last ~60min
 
 // Mirrors the SW-side INTERACTIVE_AT_KEY. Read-only on this side: the SW writes
 // it on every successful interactive consent, the frontend reads it to decide
 // whether to show "Connect Drive" vs "Session expired — sign in again".
 const INTERACTIVE_AT_KEY = "dc.oauthInteractiveAt";
-const INTERACTIVE_TTL_MS = 24 * 60 * 60 * 1000;
 
-/** Sentinel the SW throws past the 24h interactive ceiling. */
+/** Sentinel the SW throws past the interactive ceiling. */
 const NEEDS_RECONSENT = "needs-reconsent";
 
 /**
  * Try to fetch an OAuth token. Returns null when OAuth isn't configured in
  * the manifest (or the user hasn't consented yet and we don't want to prompt).
  *
- * Past the 24h interactive ceiling, the SW throws NEEDS_RECONSENT; we drop
+ * Past the interactive ceiling, the SW throws NEEDS_RECONSENT; we drop
  * our cached token and return null. Callers that care about the difference
  * between "never signed in" and "session expired" can read getOAuthSessionState.
  */
@@ -51,6 +54,22 @@ export async function tryGetAccessToken(
   if (cachedToken && Date.now() - cachedToken.fetchedAt < TOKEN_TTL_MS) {
     return cachedToken.value;
   }
+  // Interactive requests ("Connect Drive") must always run on their own so the
+  // SW is free to surface a consent prompt — never fold them into a shared
+  // background fetch.
+  if (interactive) return requestToken(true);
+  // Non-interactive hot path: a burst of Drive calls hitting an expired cache
+  // should trigger exactly ONE AUTH_GET_TOKEN round-trip. The first caller
+  // creates the in-flight promise; the rest await it.
+  if (!inflightToken) {
+    inflightToken = requestToken(false).finally(() => {
+      inflightToken = null;
+    });
+  }
+  return inflightToken;
+}
+
+async function requestToken(interactive: boolean): Promise<string | null> {
   try {
     const response = (await chrome.runtime.sendMessage({
       type: "AUTH_GET_TOKEN",
@@ -63,7 +82,11 @@ export async function tryGetAccessToken(
     const token = response.data.token;
     cachedToken = { value: token, fetchedAt: Date.now() };
     return token;
-  } catch {
+  } catch (e) {
+    // IPC to the service worker failed (e.g. SW asleep / context torn down).
+    // Stay silent for the caller (return null → fall back to API key) but make
+    // the failure visible in dev so it's not a black hole.
+    debugLog("[auth] AUTH_GET_TOKEN message failed", e);
     return null;
   }
 }
@@ -71,8 +94,8 @@ export async function tryGetAccessToken(
 export type OAuthSessionState =
   | "not-configured" // no OAuth Client ID paired
   | "signed-out" // OAuth configured but no interactive consent yet
-  | "active" // within the 24h interactive window
-  | "expired"; // past the 24h ceiling, needs re-consent
+  | "active" // within the interactive window
+  | "expired"; // past the app ceiling, needs re-consent
 
 /**
  * Returns the high-level OAuth state used by the login screen so it can
@@ -93,13 +116,14 @@ export async function getOAuthSessionState(): Promise<{
     const obj = await chrome.storage.local.get(INTERACTIVE_AT_KEY);
     const v = obj[INTERACTIVE_AT_KEY];
     if (typeof v === "number") interactiveAt = v;
-  } catch {
+  } catch (e) {
+    debugLog("[auth] reading oauthInteractiveAt failed", e);
     /* default to signed-out */
   }
   if (interactiveAt == null) {
     return { state: "signed-out", interactiveAt: null, expiresAt: null };
   }
-  const expiresAt = interactiveAt + INTERACTIVE_TTL_MS;
+  const expiresAt = interactiveAt + OAUTH_INTERACTIVE_TTL_MS;
   if (Date.now() >= expiresAt) {
     return { state: "expired", interactiveAt, expiresAt };
   }
@@ -177,13 +201,15 @@ export async function authedFetchRaw(
     const res = await fetchWithBearer(url, init, token);
     if (res.ok || res.status === 206) return res;
 
-    // 401 → token may be stale. Force-refresh once and retry before falling
-    // back to API key, so the user doesn't get bumped to a throttled key for
-    // a benign token expiry.
+    // 401 → token may be stale. Re-read the (web-redirect-managed) token cache
+    // once before falling back to the API key, so a benign expiry doesn't bump
+    // the user to a throttled key. We never prompt here: interactive re-consent
+    // is an explicit user action via the /auth/google/callback redirect flow,
+    // not a surprise popup mid-request.
     if (res.status === 401) {
       cachedToken = null;
-      const fresh = await tryGetAccessToken(true);
-      if (fresh) {
+      const fresh = await tryGetAccessToken(false);
+      if (fresh && fresh !== token) {
         const res2 = await fetchWithBearer(url, init, fresh);
         if (res2.ok || res2.status === 206) return res2;
         // Fall through to the API-key path if OAuth still doesn't work.

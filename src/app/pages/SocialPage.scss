@@ -939,11 +939,7 @@
   font-size: 0.625rem;
   font-weight: 700;
   letter-spacing: 0.12em;
-  background: linear-gradient(
-    180deg,
-    var(--brand-solid-medium),
-    var(--accent-solid-medium)
-  );
+  background: var(--brand-solid-medium);
   color: var(--page-background);
 }
 
@@ -1560,11 +1556,7 @@
   font-size: 0.625rem;
   font-weight: 700;
   letter-spacing: 0.12em;
-  background: linear-gradient(
-    180deg,
-    var(--brand-solid-medium),
-    var(--accent-solid-medium)
-  );
+  background: var(--brand-solid-medium);
   color: var(--page-background);
   flex-shrink: 0;
 }

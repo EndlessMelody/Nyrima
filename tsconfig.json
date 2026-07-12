@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "DOM.AsyncIterable"],
     "module": "ESNext",
     "skipLibCheck": true,
     "moduleResolution": "bundler",
@@ -18,9 +18,9 @@
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["chrome", "vite/client"],
+    "types": ["chrome", "vite/client", "wicg-file-system-access"],
     "baseUrl": ".",
-    "ignoreDeprecations": "6.0",
+    "ignoreDeprecations": "5.0",
     "paths": {
       "@/*": ["src/*"],
       "@app/*": ["src/app/*"],
@@ -28,6 +28,6 @@
     }
   },
   "include": ["src"],
-  "exclude": ["src/manifest.config.ts"],
+  "exclude": ["legacy", "dist", "node_modules"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

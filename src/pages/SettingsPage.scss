@@ -1,0 +1,330 @@
+/**
+ * SettingsPage layout. Uses the app's existing surface tokens / .dc-tracker /
+ * .ny-btn vocabulary so it reads as part of the authenticated app.
+ */
+
+.ny-settings {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 8px 0 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.ny-settings__head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ny-settings__title {
+  margin: 0;
+  font-family: var(--dc-font-display);
+  font-size: clamp(24px, 4vw, 32px);
+  font-weight: 700;
+}
+
+.ny-settings__sub {
+  margin: 0;
+  font-size: 14px;
+  opacity: 0.7;
+}
+
+.ny-settings__section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ny-settings__section-title {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.ny-settings__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 16px 18px;
+  border: 1px solid var(--neutral-alpha-weak, rgba(255, 255, 255, 0.1));
+  border-radius: 14px;
+  background: var(--surface-background, rgba(255, 255, 255, 0.03));
+}
+
+.ny-settings__row-label {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.6;
+  margin-bottom: 4px;
+}
+
+.ny-settings__row-value {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.ny-settings__muted {
+  font-weight: 400;
+  opacity: 0.6;
+}
+
+.ny-settings__row-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.ny-settings__pills {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ny-settings__pill {
+  appearance: none;
+  cursor: pointer;
+  padding: 8px 18px;
+  border-radius: 999px;
+  border: 1px solid var(--neutral-alpha-weak, rgba(255, 255, 255, 0.14));
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 140ms ease, border-color 140ms ease;
+
+  &.is-active {
+    border-color: transparent;
+    background: var(--brand-background-strong, rgba(255, 200, 80, 0.2));
+  }
+}
+
+.ny-settings__panel {
+  border: 1px solid var(--neutral-alpha-weak, rgba(255, 255, 255, 0.1));
+  border-radius: 16px;
+  padding: 6px;
+  background: var(--surface-background, rgba(255, 255, 255, 0.02));
+  overflow: hidden;
+}
+
+.ny-banner-setting {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px;
+  border: 1px solid var(--neutral-alpha-weak, rgba(255, 255, 255, 0.1));
+  border-radius: 16px;
+  background:
+    linear-gradient(135deg, rgba(255, 79, 216, 0.06), transparent 48%),
+    var(--surface-background, rgba(255, 255, 255, 0.03));
+}
+
+.ny-banner-setting__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.ny-banner-setting__actions,
+.ny-banner-crop__controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+
+  svg {
+    width: 15px;
+    height: 15px;
+  }
+}
+
+.ny-banner-setting__file {
+  display: none;
+}
+
+.ny-banner-setting__preview {
+  position: relative;
+  min-height: 120px;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+  border: 1px solid var(--neutral-border-medium);
+  border-radius: 14px;
+  background: var(--surface-background-strong);
+
+  img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0.7;
+  }
+
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, rgba(7, 9, 15, 0.88), transparent 68%);
+  }
+
+  div {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 16px;
+  }
+
+  span {
+    color: var(--neutral-on-background-weak);
+    font-family: var(--dc-font-mono);
+    font-size: 0.72rem;
+  }
+
+  strong {
+    color: var(--neutral-on-background-strong);
+    font-size: 0.95rem;
+  }
+}
+
+.ny-banner-crop {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ny-banner-crop__frame {
+  position: relative;
+  aspect-ratio: 5.2 / 1;
+  min-height: 130px;
+  overflow: hidden;
+  border: 1px solid var(--brand-border-medium);
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(255, 79, 216, 0.08), transparent 60%),
+    #07090f;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+
+  &:active {
+    cursor: grabbing;
+  }
+
+  img {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 100%;
+    height: 100%;
+    min-width: 100%;
+    min-height: 100%;
+    object-fit: cover;
+    transform-origin: center;
+    pointer-events: none;
+  }
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: inherit;
+    box-shadow: inset 0 0 0 999px rgba(7, 9, 15, 0.04);
+    pointer-events: none;
+  }
+}
+
+.ny-banner-crop__hint {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.82);
+  background: rgba(7, 9, 15, 0.58);
+  backdrop-filter: blur(12px);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.ny-banner-crop__file,
+.ny-banner-crop__ratio {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 0 10px;
+  border: 1px solid var(--neutral-border-medium);
+  border-radius: 10px;
+  color: var(--neutral-on-background-medium);
+  background: color-mix(in srgb, var(--surface-background) 72%, transparent);
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.ny-banner-crop__file {
+  max-width: 260px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ny-banner-crop__ratio {
+  font-family: var(--dc-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.ny-banner-crop__zoom {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--neutral-border-medium);
+  border-radius: 10px;
+  color: var(--neutral-on-background-medium);
+  background: color-mix(in srgb, var(--surface-background) 72%, transparent);
+
+  input {
+    width: 132px;
+    accent-color: var(--brand-solid-strong);
+  }
+}
+
+.ny-banner-setting__error {
+  margin: 0;
+  color: var(--warning-solid-strong);
+  font-size: 0.84rem;
+}
+
+@media (max-width: 640px) {
+  .ny-banner-setting__actions,
+  .ny-banner-crop__controls {
+    width: 100%;
+  }
+
+  .ny-banner-crop__zoom {
+    flex: 1;
+
+    input {
+      width: 100%;
+    }
+  }
+}

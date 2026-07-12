@@ -1,14 +1,19 @@
 /**
- * Typography tokens — "Obsidian Atelier" luxury minimal-tech system.
+ * Typography tokens — "Neon, One Lamp" type system.
  *
- * Geist Sans is the spine of the system. It carries display headlines, body
- * copy, and form labels with a tight, modern sans personality that reads as
- * both premium and technical. Geist Mono handles every numeric, code, file
- * metadata, and small uppercase tracker label so the interface always has a
- * visible "instrument cluster" feel. Zen Kaku Gothic is preserved only as a
- * dedicated CJK fallback so kana annotations still render with proper
- * kerning instead of falling back to the OS default which would clash
- * visually with Geist's letterforms.
+ * Six voices, each with one job:
+ *   - Display (Bricolage Grotesque): page titles, hero headlines, section
+ *     heads. A characterful ink-trap grotesque — the personality of the
+ *     system. Weights 500–700, tight tracking.
+ *   - Body (Geist Sans): all UI text, buttons, nav, descriptions. Clean and
+ *     unobtrusive so the display voice can stand out.
+ *   - Mono (Geist Mono): DEMOTED to data only — timecodes, file sizes,
+ *     codec/resolution badges, kbd hints, IDs/logs. Not for section labels,
+ *     buttons, nav, or titles. `.dc-tracker` is the one sanctioned
+ *     mono-uppercase pattern; use it sparingly.
+ *   - Wordmark (M PLUS Rounded 1c): the "Nyrima" lockup only.
+ *   - Kana (Zen Kaku Gothic): small Japanese accents.
+ *   - Subtitle (Chinacat/Asap/Cascadia presets): player content, untouched.
  *
  * The @fontsource CSS files (which declare @font-face → woff2 url() refs)
  * are imported from `main.tsx` as side effects, not from here, so Vite can
@@ -49,10 +54,14 @@
 }
 
 :root {
-  /* Display + body: Geist Sans, tabular numerals on by default */
+  /* Display: Bricolage Grotesque — the system's headline voice. Falls back
+     through Geist Sans so display elements never wait on a second font
+     swap before showing readable text. */
   --dc-font-display:
-    "Geist Sans", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
-    "Helvetica Neue", system-ui, sans-serif;
+    "Bricolage Grotesque Variable", "Geist Sans", "Inter", -apple-system,
+    BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
+
+  /* Body: Geist Sans, tabular numerals on by default */
   --dc-font-body:
     "Geist Sans", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
     "Helvetica Neue", system-ui, sans-serif;

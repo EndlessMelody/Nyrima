@@ -1,0 +1,123 @@
+.ny-post-card {
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  content-visibility: auto;
+  contain-intrinsic-size: 280px 320px;
+
+  &:focus-visible {
+    outline: none;
+  }
+
+  &:focus-visible .ny-post-card__frame {
+    outline: 2px solid var(--brand-border-strong);
+    outline-offset: 2px;
+  }
+}
+
+.ny-post-card__frame {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--ny-radius-md, 10px);
+  overflow: hidden;
+  background: var(--surface-background-strong, var(--neutral-alpha-weak));
+  border: var(--dc-hairline);
+  transition:
+    transform var(--ny-dur-base, 220ms) var(--ny-ease-spring, ease),
+    border-color var(--ny-dur-base, 220ms) ease,
+    box-shadow var(--ny-dur-base, 220ms) ease;
+}
+
+.ny-post-card:hover .ny-post-card__frame,
+.ny-post-card:focus-visible .ny-post-card__frame {
+  transform: translateY(-3px);
+  box-shadow: var(--ny-shadow-md);
+}
+
+.ny-post-card__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity var(--ny-dur-slow, 320ms) ease;
+}
+
+.ny-post-card__img.is-loaded {
+  opacity: 1;
+}
+
+.ny-post-card__skeleton {
+  position: absolute;
+  inset: 0;
+}
+
+.ny-post-card__fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.35;
+}
+
+.ny-post-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ny-post-card__title {
+  font-family: var(--dc-font-display);
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--neutral-on-background-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.ny-post-card__excerpt {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--neutral-on-background-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.ny-post-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.02em;
+  color: var(--neutral-on-background-weak);
+  text-transform: uppercase;
+}
+
+.ny-post-card__dot {
+  opacity: 0.5;
+}
+
+.ny-post-card__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ny-post-card__tag {
+  font-family: var(--dc-font-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--neutral-alpha-weak);
+  color: var(--neutral-on-background-medium);
+}

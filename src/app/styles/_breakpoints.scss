@@ -1,0 +1,44 @@
+// Named responsive breakpoints for Nyrima.
+//
+// The app is desktop-first with mobile compaction. These names describe the
+// ladder already in use across the codebase — most notably the `.ny-poster-grid`
+// steps (1200 / 960 / 640) in `anime-theme.scss` and the `.dc-page` mobile
+// cutoff (720) in `global.scss`. `respond-to()` emits a `max-width` query, so
+// `@include respond-to('mobile') { ... }` reads as "at mobile width and below".
+//
+// Usage (component SCSS files compile standalone, so opt in per-file):
+//
+//   @use "../styles/breakpoints" as bp;        // from src/app/components/*
+//   @use "../../styles/breakpoints" as bp;     // from a nested folder
+//
+//   .thing {
+//     gap: var(--ny-space-4);
+//     @include bp.respond-to('mobile') { gap: var(--ny-space-2); }
+//   }
+//
+// Prefer these names over bare pixel values in newly-touched SCSS. This is an
+// opt-in convenience, not a forced repo-wide migration.
+
+@use "sass:map";
+
+$breakpoints: (
+  "mobile": 640px,
+  // small phones / single-column territory
+  "tablet": 960px,
+  // tablet / 3-column media grids
+  "laptop": 1200px,
+  // small laptops / 4-column media grids
+  "desktop": 1280px,
+  // `.dc-page` max-width / sidebar reflow point
+);
+
+@mixin respond-to($name) {
+  @if map.has-key($breakpoints, $name) {
+    @media (max-width: map.get($breakpoints, $name)) {
+      @content;
+    }
+  } @else {
+    @error "respond-to(): unknown breakpoint `#{$name}`. " +
+      "Available: #{map.keys($breakpoints)}.";
+  }
+}

@@ -132,6 +132,45 @@
   background: var(--neutral-alpha-weak);
 }
 
+/* ── Guest session row ─────────────────────────────────────────── */
+.dc-uc__guest {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid
+    color-mix(in srgb, var(--brand-on-background-strong, #f7c948) 26%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--brand-on-background-strong, #f7c948) 8%,
+    transparent
+  );
+}
+
+.dc-uc__guest-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.dc-uc__guest-tag {
+  font-family: var(--dc-font-mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--brand-on-background-strong, #f7c948);
+}
+
+.dc-uc__guest-sub {
+  font-size: 0.6875rem;
+  line-height: 1.35;
+  color: var(--neutral-on-background-weak);
+}
+
 /* ── Nav Header (Sub-pages) ────────────────────────────────────── */
 .dc-uc__nav-header {
   padding: 8px 12px;

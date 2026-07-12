@@ -45,7 +45,7 @@ export function ContinueWatchingRow({
   if (items.length === 0) return null;
 
   return (
-    <section className="ny-continue">
+    <section className="ny-continue ny-reveal">
       <h3 className="ny-continue__heading">Continue Watching</h3>
       <div className="ny-continue__scroll">
         {items.map(({ file, pos }) => {

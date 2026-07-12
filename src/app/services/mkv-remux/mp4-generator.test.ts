@@ -404,6 +404,47 @@ describe("buildDfla — STREAMINFO extraction", () => {
   });
 });
 
+describe("buildFlac — AudioSampleEntry bit depth", () => {
+  // A 34-byte STREAMINFO with bits_per_sample baked into the packed field.
+  // bits_per_sample is stored as (value - 1) in 5 bits straddling byte 12
+  // bit0 and byte 13's top 4 bits.
+  function makeStreamInfo(bitsPerSample: number): Uint8Array {
+    const si = new Uint8Array(34);
+    const v = bitsPerSample - 1;
+    si[12] = (si[12] & 0xfe) | ((v >> 4) & 0x01);
+    si[13] = (si[13] & 0x0f) | ((v & 0x0f) << 4);
+    return si;
+  }
+  function makeFlac(codecPrivate: Uint8Array): AudioTrackInfo {
+    return {
+      trackNumber: 2,
+      codec: "flac",
+      codecPrivate,
+      sampleRate: 48000,
+      channels: 2,
+      defaultDurationNs: 96_000_000,
+      language: "jpn",
+      name: "Japanese 2.0",
+    };
+  }
+  // samplesize lives at AudioSampleEntry prefix offset 18; the prefix begins
+  // 8 bytes (box header) into the fLaC box.
+  function readSampleSize(data: Uint8Array): number {
+    const flacStart = findBox(data, "fLaC");
+    return (data[flacStart + 26] << 8) | data[flacStart + 27];
+  }
+
+  it("advertises 24-bit sample size for 24-bit FLAC STREAMINFO", () => {
+    const { data } = generateInitSegment(VIDEO_AVC, makeFlac(makeStreamInfo(24)));
+    expect(readSampleSize(data)).toBe(24);
+  });
+
+  it("advertises 16-bit sample size for 16-bit FLAC STREAMINFO", () => {
+    const { data } = generateInitSegment(VIDEO_AVC, makeFlac(makeStreamInfo(16)));
+    expect(readSampleSize(data)).toBe(16);
+  });
+});
+
 describe("parseSimpleBlock — lacing", () => {
   // We poke at parseSimpleBlock indirectly through ebml.ts. To keep this
   // module-local we use a vitest dynamic import.

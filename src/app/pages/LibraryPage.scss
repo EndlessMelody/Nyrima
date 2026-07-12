@@ -261,7 +261,7 @@
 }
 
 .ny-video-row__status {
-  color: var(--accent-on-background-strong);
+  color: var(--neutral-on-background-strong);
 }
 
 .ny-video-row__progress {
@@ -274,11 +274,7 @@
   > div {
     height: 100%;
     border-radius: inherit;
-    background: linear-gradient(
-      90deg,
-      var(--brand-solid-medium),
-      var(--accent-solid-medium)
-    );
+    background: var(--brand-solid-medium);
   }
 }
 
@@ -586,7 +582,7 @@
 }
 
 .dc-error__steps a {
-  color: var(--brand-on-background-strong);
+  color: var(--accent-on-background-strong);
   text-decoration: underline;
   text-underline-offset: 2px;
 }

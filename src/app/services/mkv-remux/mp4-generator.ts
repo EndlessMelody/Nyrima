@@ -417,12 +417,15 @@ function buildAudioStbl(audio: AudioTrackInfo): Uint8Array {
   );
 }
 
-function buildAudioSampleEntryPrefix(audio: AudioTrackInfo): Uint8Array {
+function buildAudioSampleEntryPrefix(
+  audio: AudioTrackInfo,
+  sampleSizeBits = 16,
+): Uint8Array {
   const prefix = new Uint8Array(28);
   const dv = new DataView(prefix.buffer);
   dv.setUint16(6, 1);
   dv.setUint16(16, audio.channels);
-  dv.setUint16(18, 16);
+  dv.setUint16(18, sampleSizeBits);
   // sample rate as 16.16 fixed point (safe for rates ≤ 65535)
   const sr = Math.min(audio.sampleRate, 65535);
   dv.setUint32(24, sr << 16);
@@ -454,9 +457,52 @@ function buildEsds(audio: AudioTrackInfo): Uint8Array {
 }
 
 function buildFlac(audio: AudioTrackInfo): Uint8Array {
-  const prefix = buildAudioSampleEntryPrefix(audio);
+  const prefix = buildAudioSampleEntryPrefix(
+    audio,
+    flacBitsPerSample(audio.codecPrivate),
+  );
   const dfLa = buildDfla(audio.codecPrivate);
   return box("fLaC", prefix, dfLa);
+}
+
+/**
+ * Bits-per-sample from a FLAC STREAMINFO block, so the AudioSampleEntry
+ * advertises the true bit depth (Blu-ray FLAC is frequently 24-bit; a
+ * hardcoded 16 makes the init segment inconsistent with the dfLa STREAMINFO,
+ * which some browsers reject). Returns 16 when STREAMINFO can't be located.
+ *
+ * `codecPrivate` is the MKV A_FLAC CodecPrivate: optional "fLaC" magic, then
+ * one or more metadata blocks. In the 34-byte STREAMINFO payload the packed
+ * 5-bit bits_per_sample field straddles bytes 12-13.
+ */
+function flacBitsPerSample(codecPrivate: Uint8Array): number {
+  let meta = codecPrivate;
+  if (
+    meta.length > 4 &&
+    meta[0] === 0x66 && meta[1] === 0x4c &&
+    meta[2] === 0x61 && meta[3] === 0x43
+  ) {
+    meta = meta.subarray(4);
+  }
+  let streamInfo: Uint8Array | null = null;
+  if (meta.length === 34) {
+    streamInfo = meta;
+  } else {
+    let offset = 0;
+    while (offset + 4 <= meta.length) {
+      const blockType = meta[offset] & 0x7f;
+      const blockLen =
+        (meta[offset + 1] << 16) | (meta[offset + 2] << 8) | meta[offset + 3];
+      if (offset + 4 + blockLen > meta.length) break;
+      if (blockType === 0) {
+        streamInfo = meta.subarray(offset + 4, offset + 4 + blockLen);
+        break;
+      }
+      offset += 4 + blockLen;
+    }
+  }
+  if (!streamInfo || streamInfo.length < 18) return 16;
+  return (((streamInfo[12] & 0x01) << 4) | (streamInfo[13] >> 4)) + 1;
 }
 
 /**

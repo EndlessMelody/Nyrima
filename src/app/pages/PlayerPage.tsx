@@ -15,8 +15,17 @@
  * Out of scope (Phase 2): MKV remux via ffmpeg.wasm / libmpv WASM.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
+import cn from "classnames";
 import {
   matchSubtitlesForVideo,
   buildMediaUrl,
@@ -30,9 +39,9 @@ import {
   listFolder as cachedListFolder,
   getSubtitleText,
 } from "../services/drive/metadata-service";
-import { authedFetch, tryGetAccessToken } from "../services/auth";
+import { authedFetch } from "../services/auth";
 import { getOAuthClientId } from "../services/oauth-key";
-import { getUserProfile } from "../services/user-profile";
+import { startDriveConnect } from "../services/drive-connect";
 import { DriveAccessError, type DriveAccessReason } from "../services/errors";
 import {
   savePlaybackPosition,
@@ -45,10 +54,26 @@ import { DriveStatusBanner } from "../components/DriveStatusBanner";
 import {
   extractMkvSubtitles,
   type MkvAudioTrack,
+  type MkvExtractOptions,
 } from "../services/mkv-subtitles";
 import { stripAssFontReferences } from "../services/subtitles";
-import { MkvMseController } from "../services/mkv-remux/mse-controller";
+import {
+  MkvMseController,
+  type MseAudioInitError,
+} from "../services/mkv-remux/mse-controller";
 import { parseMkvMediaInfo } from "../services/mkv-remux/demuxer";
+import {
+  parseHvccInfo,
+  describeHevcProfile,
+  type HvccInfo,
+} from "../services/wasm-decode/hvcc";
+import {
+  isMediaSessionSupported,
+  setMediaSessionActionHandlers,
+  setMediaSessionMetadata,
+  setMediaSessionPlaybackState,
+  setMediaSessionPositionState,
+} from "../services/media-session";
 import {
   buildVideoMimeType,
   buildAudioMimeType,
@@ -79,8 +104,32 @@ import {
   type PlaybackMode,
   type PlaybackStrategy,
 } from "../services/playback-strategy";
-import { PlayerLayout } from "../components/PlayerLayout";
-import { PlaylistSidebar } from "../components/PlaylistSidebar";
+import {
+  WatchRoomHeader,
+  MetadataStrip,
+  EpisodeQueuePanel,
+  WatchSideRail,
+  CaptureCard,
+  PlaybackCard,
+  SubtitlesAudioPanel,
+  WatchTuningPanel,
+  buildVideoFilter,
+  presetForTuning,
+  NEUTRAL_TUNING,
+  TUNING_PRESETS,
+  WATCH_GAMMA_FILTER_ID,
+  WATCH_SHARPEN_FILTER_ID,
+  WATCH_WARMTH_FILTER_ID,
+  type WatchTuning,
+  type TuningPreset,
+} from "../components/watch-room";
+import {
+  getSceneBookmarks,
+  addSceneBookmark,
+  removeSceneBookmark,
+  type SceneBookmark,
+} from "../services/scene-bookmarks";
+import { useSettingsStore } from "../stores/settings-store";
 import { resolveFolderPoster } from "../services/folder-poster";
 import { debugLog } from "../services/debug-log";
 import { NyrimaMark } from "../components/NyrimaMark";
@@ -90,6 +139,17 @@ import {
 } from "@shared/constants";
 import { driveFileUrl } from "@shared/drive-urls";
 import { isDriveId } from "@shared/drive-id";
+import { isLocalId } from "@shared/local-id";
+import { localLibrary } from "../services/local-library/local-source";
+import {
+  loadLocalVideoContext,
+  readLocalMkvHeader,
+  readLocalSubtitleText,
+} from "../services/local-library/local-video";
+import {
+  LocalFileByteSource,
+  type MediaByteSource,
+} from "../services/media-source/byte-source";
 import type { DriveFile } from "@shared/types";
 import "./PlayerPage.scss";
 
@@ -113,8 +173,9 @@ export function PlayerPage() {
   const params = useParams();
   const rawFolderId = params.folderId ?? "";
   const rawFileId = params.fileId ?? "";
-  const folderId = isDriveId(rawFolderId) ? rawFolderId : "";
-  const fileId = isDriveId(rawFileId) ? rawFileId : "";
+  const folderId =
+    isDriveId(rawFolderId) || isLocalId(rawFolderId) ? rawFolderId : "";
+  const fileId = isDriveId(rawFileId) || isLocalId(rawFileId) ? rawFileId : "";
   const invalidRouteIds =
     !rawFolderId || !rawFileId || !folderId || !fileId;
   const navigate = useNavigate();
@@ -165,6 +226,15 @@ export function PlayerPage() {
     null,
   );
   const [unsupported, setUnsupported] = useState(false);
+  /**
+   * Set when the file's HEVC stream uses the "Format Range Extensions"
+   * profile (4:2:2/4:4:4 chroma and/or >10-bit) — no consumer GPU or OS
+   * codec pack can decode these, so MSE/native playback would silently
+   * render a black picture. Detected from the hvcC CodecPrivate before any
+   * playback attempt starts; see `services/wasm-decode/hvcc.ts`.
+   */
+  const [hevcSoftwareDecodeInfo, setHevcSoftwareDecodeInfo] =
+    useState<HvccInfo | null>(null);
   const [isMkvMse, setIsMkvMse] = useState(false);
   const [isMkvNative, setIsMkvNative] = useState(false);
   const [setupOpen, setSetupOpen] = useState(false);
@@ -187,6 +257,23 @@ export function PlayerPage() {
     "idle" | "saved" | "blocked" | "error"
   >("idle");
   const mseControllerRef = useRef<MkvMseController | null>(null);
+  /** Audio track numbers whose MSE init segment the browser rejected despite a
+   *  green `isTypeSupported` probe. Once a track lands here, playback restarts
+   *  it on the external WebCodecs audio path; the set prevents the fallback
+   *  from looping if the external path also fails. */
+  const forcedExternalAudioTracksRef = useRef<Set<number>>(new Set());
+  /** Holds the latest `startMseController` so the controller's own `onError`
+   *  handler can restart playback without `startMseController` having to depend
+   *  on itself. Assigned just below its definition. */
+  const startMseControllerRef = useRef<
+    | ((
+        videoEl: HTMLVideoElement,
+        audioTrackNumber: number | null,
+        resumeAtSeconds: number,
+        knownFileSize?: number,
+      ) => void)
+    | null
+  >(null);
   const mkvHeaderRef = useRef<{ buf: Uint8Array; fileSize: number } | null>(
     null,
   );
@@ -237,6 +324,7 @@ export function PlayerPage() {
       setError(null);
       setErrorReason(null);
       setUnsupported(false);
+      setHevcSoftwareDecodeInfo(null);
       setFile(null);
       setStreamUrl(null);
       setSubtitleTracks([]);
@@ -260,6 +348,7 @@ export function PlayerPage() {
     setError(null);
     setErrorReason(null);
     setUnsupported(false);
+    setHevcSoftwareDecodeInfo(null);
     setIsMkvMse(false);
     setIsMkvNative(false);
     setBufferingBlob(false);
@@ -303,24 +392,42 @@ export function PlayerPage() {
         // in parallel saves a round-trip per request from TTFP. Metadata +
         // folder listing go through the cache-first service so repeated
         // navigation inside the same library hits IndexedDB, not Drive.
+        const isLocalTrack = isLocalId(fileId);
         markPlayback("drive:metadata:start");
-        const [video, siblingsResult, saved, folder] = await Promise.all([
-          getFileMetadata(fileId, { signal: loadAbort.signal, priority: "high" }),
-          cachedListFolder(folderId, { signal: loadAbort.signal, priority: "high" })
-            .then((r) => r.files)
-            .catch((err) => {
-              if (!loadAbort.signal.aborted) {
-                // eslint-disable-next-line no-console
-                console.warn("listFolder failed:", err);
-              }
-              return [] as DriveFile[];
-            }),
-          getPlaybackPosition(fileId).catch(() => undefined),
-          getFileMetadata(folderId, {
-            signal: loadAbort.signal,
-            priority: "normal",
-          }).catch(() => null),
-        ]);
+        let video: DriveFile;
+        let siblings: DriveFile[];
+        let saved: Awaited<ReturnType<typeof getPlaybackPosition>>;
+        let folder: DriveFile | null;
+        if (isLocalTrack) {
+          const ctx = await loadLocalVideoContext(fileId);
+          video = ctx.video;
+          folder = ctx.folder;
+          siblings = ctx.siblings;
+          saved = await getPlaybackPosition(fileId).catch(() => undefined);
+          if (ctx.showFolderName) setShowFolderName(ctx.showFolderName);
+        } else {
+          const [v, siblingsResult, s, f] = await Promise.all([
+            getFileMetadata(fileId, { signal: loadAbort.signal, priority: "high" }),
+            cachedListFolder(folderId, { signal: loadAbort.signal, priority: "high" })
+              .then((r) => r.files)
+              .catch((err) => {
+                if (!loadAbort.signal.aborted) {
+                  // eslint-disable-next-line no-console
+                  console.warn("listFolder failed:", err);
+                }
+                return [] as DriveFile[];
+              }),
+            getPlaybackPosition(fileId).catch(() => undefined),
+            getFileMetadata(folderId, {
+              signal: loadAbort.signal,
+              priority: "normal",
+            }).catch(() => null),
+          ]);
+          video = v;
+          siblings = siblingsResult;
+          saved = s;
+          folder = f;
+        }
         markPlayback("drive:metadata:end");
         if (cancelled) return;
         setFile(video);
@@ -359,7 +466,6 @@ export function PlayerPage() {
           }
         }
 
-        const siblings = siblingsResult;
         setFolderVideos(siblings.filter(isVideoFile));
 
         const ext = getExtension(video.name);
@@ -416,54 +522,70 @@ export function PlayerPage() {
           let extracted: Awaited<ReturnType<typeof extractMkvSubtitles>> | null =
             null;
           let probedAudioTracks: MkvAudioTrack[] = [];
-          try {
-            extracted = await extractMkvSubtitles(fileId, {
-              signal: ac.signal,
-              onHeader: ({ buf, fileSize: mkvFileSize }) => {
-                if (!cancelled) {
-                  mkvHeaderRef.current = { buf, fileSize: mkvFileSize };
-                }
-              },
-              onProgress: (mkvSubs) => {
-                if (cancelled) return;
-                const mkvTracks: SubtitleTrack[] = mkvSubs.map((s) => {
-                  // Keep embedded ASS on the CSS cue overlay until extraction
-                  // finalizes. A still-growing ASS script forces JASSUB to
-                  // reparse/reload the track repeatedly, which makes active
-                  // lines blink during playback. Once complete, libass gets a
-                  // stable script and owns the full fansub typesetting.
-                  const useJassub =
-                    !!s.assSource &&
-                    s.assSourceComplete === true &&
-                    !s.imageBased;
-                  // PGS tracks no longer block the picker — surface them as
-                  // selectable once finalize() has produced compositions.
-                  // While extraction is in progress, the track shows as
-                  // image-based with zero cues, same as before.
-                  const pgsReady =
-                    !!s.pgsCompositions &&
-                    s.pgsCompositions.length > 0 &&
-                    s.pgsCompositionsComplete === true;
-                  return {
-                    id: s.id,
-                    lang: s.lang,
-                    label: s.label,
-                    cues: s.cues.slice(),
-                    imageBased: s.imageBased && !pgsReady,
-                    source: "embedded",
-                    format: subtitleFormatFromMkvCodec(s.codecId, s.imageBased),
-                    codecId: s.codecId,
-                    assSource: useJassub ? s.assSource : undefined,
-                    assRenderer: useJassub ? "jassub" : undefined,
-                    pgsCompositions: pgsReady ? s.pgsCompositions : undefined,
-                  };
-                });
-                setSubtitleTracks((prev) => [
-                  ...prev.filter((t) => !t.id.startsWith("mkv-")),
-                  ...mkvTracks,
-                ]);
-              },
+          const onHeader: MkvExtractOptions["onHeader"] = ({ buf, fileSize: mkvFileSize }) => {
+            if (!cancelled) {
+              mkvHeaderRef.current = { buf, fileSize: mkvFileSize };
+            }
+          };
+          const onProgress: MkvExtractOptions["onProgress"] = (mkvSubs) => {
+            if (cancelled) return;
+            const mkvTracks: SubtitleTrack[] = mkvSubs.map((s) => {
+              // Keep embedded ASS on the CSS cue overlay until extraction
+              // finalizes. A still-growing ASS script forces JASSUB to
+              // reparse/reload the track repeatedly, which makes active
+              // lines blink during playback. Once complete, libass gets a
+              // stable script and owns the full fansub typesetting.
+              const useJassub =
+                !!s.assSource &&
+                s.assSourceComplete === true &&
+                !s.imageBased;
+              // PGS tracks no longer block the picker — surface them as
+              // selectable once finalize() has produced compositions.
+              // While extraction is in progress, the track shows as
+              // image-based with zero cues, same as before.
+              const pgsReady =
+                !!s.pgsCompositions &&
+                s.pgsCompositions.length > 0 &&
+                s.pgsCompositionsComplete === true;
+              return {
+                id: s.id,
+                lang: s.lang,
+                label: s.label,
+                cues: s.cues.slice(),
+                imageBased: s.imageBased && !pgsReady,
+                source: "embedded",
+                format: subtitleFormatFromMkvCodec(s.codecId, s.imageBased),
+                codecId: s.codecId,
+                assSource: useJassub ? s.assSource : undefined,
+                assRenderer: useJassub ? "jassub" : undefined,
+                pgsCompositions: pgsReady ? s.pgsCompositions : undefined,
+              };
             });
+            setSubtitleTracks((prev) => [
+              ...prev.filter((t) => !t.id.startsWith("mkv-")),
+              ...mkvTracks,
+            ]);
+          };
+          try {
+            extracted = isLocalTrack
+              ? await extractMkvSubtitles(fileId, {
+                  prefetchedBuf: await readLocalMkvHeader(
+                    await localLibrary.resolveFile(fileId),
+                  ),
+                  onHeader,
+                  onProgress,
+                })
+              : await extractMkvSubtitles(fileId, {
+                  signal: ac.signal,
+                  // Authoritative file size from Drive metadata. Without it
+                  // the extractor can't learn the real size on the web build
+                  // (the Content-Range header isn't CORS-readable), so
+                  // cluster-based subtitle/audio extraction silently no-ops.
+                  // See mkv-subtitles.ts.
+                  knownFileSize: video.size ? Number(video.size) : undefined,
+                  onHeader,
+                  onProgress,
+                });
             if (!cancelled) {
               // Probe each audio track's codec combo against MSE *before*
               // surfacing it in the picker. The check matters for files
@@ -521,6 +643,58 @@ export function PlayerPage() {
           }
           if (cancelled) return;
 
+          // HEVC Range Extensions (4:2:2/4:4:4 chroma and/or >10-bit) check.
+          // No consumer GPU/OS decoder supports REXT — native and MSE
+          // playback would both silently render a black picture with sound.
+          // Detect it from the header we just parsed and bail out to a
+          // truthful error card before starting any playback attempt.
+          const headerBuf = mkvHeaderRef.current?.buf;
+          if (headerBuf) {
+            try {
+              const info = parseMkvMediaInfo(headerBuf);
+              if (info.video.codec === "hevc") {
+                const hvcc = parseHvccInfo(info.video.codecPrivate);
+                if (hvcc?.requiresSoftwareDecode) {
+                  setHevcSoftwareDecodeInfo(hvcc);
+                  return;
+                }
+              }
+            } catch (e) {
+              // Header may be incomplete for unusually large EBML headers —
+              // not fatal, playback just proceeds without the REXT check.
+              // eslint-disable-next-line no-console
+              console.warn("[playback] hvcC parse failed:", e);
+            }
+          }
+
+          let effectiveMode = decision.mode;
+
+          // Native <video> can demux MKV but only decodes the mainstream audio
+          // codecs (AAC/MP3/Opus/Vorbis/FLAC). The muxer-default track on a
+          // Blu-ray rip is routinely AC-3/E-AC-3/DTS/TrueHD — codecs Chrome
+          // dropped or never shipped — so native playback yields a picture with
+          // NO sound. Route those files to MSE, where the external WebCodecs/
+          // WASM audio renderer (or fMP4 repack) provides audio. We only do
+          // this when the default track actually has a working MSE/external
+          // path; otherwise there's no better option than native (silent), so
+          // we leave it alone rather than start a doomed MSE attempt.
+          const defaultAudio = probedAudioTracks[0];
+          if (
+            effectiveMode !== "mse-remux" &&
+            defaultAudio &&
+            !isNativelyDecodableMkvAudio(defaultAudio.codecId) &&
+            (defaultAudio.mseAudioSupported === true ||
+              defaultAudio.externalAudioSupported === true)
+          ) {
+            debugLog(
+              `[playback] default audio ${defaultAudio.codecId} isn't natively ` +
+              `decodable by <video>; forcing MSE so the external/WASM audio ` +
+              `path provides sound (track=${defaultAudio.label})`,
+            );
+            effectiveMode = "mse-remux";
+            setPlaybackMode("mse-remux");
+          }
+
           // If the URL pinned a specific audio track via `?audio=N` and the
           // muxer's default isn't that track, force MSE mode for this load.
           // Native MKV in Chrome always picks the first audio track and
@@ -537,7 +711,6 @@ export function PlayerPage() {
           // pre-flight check, the user would see two scary console errors,
           // and we'd have to recover via navigate(replace). The probe above
           // catches these cases up front so the bad path never starts.
-          let effectiveMode = decision.mode;
           if (
             effectiveMode !== "mse-remux" &&
             requestedAudioTrackNumber != null
@@ -621,15 +794,57 @@ export function PlayerPage() {
             }
           } else {
             // Native attempt — needs an API-key-stamped URL because we can't
-            // pass an Authorization header to <video src=…>. Without a key,
-            // direct streaming is impossible (OAuth-only mode); fall straight
-            // to MSE in that case.
-            const directUrl = await buildPublicStreamUrl(fileId);
+            // pass an Authorization header to <video src=…>. When only OAuth is
+            // available (or nothing is configured) buildPublicStreamUrl returns
+            // null — native streaming is impossible, so fall straight to MSE,
+            // which fetches Range bytes via authedFetch (Bearer-authenticated).
+            // Local files always have a same-origin object URL, so this branch
+            // never falls through to the OAuth/no-key MSE fallback below.
+            const directUrl = isLocalTrack
+              ? localLibrary.getStreamUrl(fileId, await localLibrary.resolveFile(fileId))
+              : await buildPublicStreamUrl(fileId);
             if (cancelled) return;
             if (!directUrl) {
-              debugLog("[playback] no API key; MKV → MSE (OAuth mode)");
+              debugLog("[playback] no native URL (OAuth/no-key); MKV → MSE");
               setPlaybackMode("mse-remux");
               setIsMkvMse(true);
+              // This OAuth-only path lands in MSE mode exactly like the
+              // forced-MSE branch above, so it must ALSO start the dedicated
+              // subtitle stream. Without it the feeder only ever sees the 4 MB
+              // header region (often zero dialogue), and the MSE controller's
+              // onRawChunk piggyback stalls behind buffer-ahead backpressure —
+              // so embedded ASS cues never arrive and the auto-selected track
+              // renders empty. (Native playback used to cover this case; OAuth
+              // mode has no native URL, hence this fallback.)
+              const header = mkvHeaderRef.current;
+              const feeder = mkvSubFeederRef.current;
+              debugLog(
+                `[subs] oauth-mse setup: header=${header ? `${header.buf.length}/${header.fileSize}` : "null"} ` +
+                `feeder=${feeder ? "ready" : "null"}`,
+              );
+              if (header && feeder && header.buf.length < header.fileSize) {
+                if (feeder.headerParsedTo < header.buf.length) {
+                  const trailing = header.buf.subarray(feeder.headerParsedTo);
+                  debugLog(
+                    `[subs] priming feeder with header tail ` +
+                    `[${feeder.headerParsedTo}, ${header.buf.length}) = ${trailing.length} bytes`,
+                  );
+                  feeder.feedChunk(trailing);
+                }
+                const subAbort = new AbortController();
+                mkvSubStreamAbortRef.current = subAbort;
+                mkvSubBackgroundActiveRef.current = true;
+                debugLog(
+                  `[subs] starting MSE background stream offset=${header.buf.length} eof=${header.fileSize}`,
+                );
+                void streamMkvSubsInBackground(
+                  fileId,
+                  header.buf.length,
+                  feeder.feedChunk,
+                  feeder.finalize,
+                  subAbort.signal,
+                );
+              }
             } else {
               setIsMkvNative(true);
               setStreamUrl(directUrl);
@@ -697,6 +912,10 @@ export function PlayerPage() {
               }
             }
           }
+        } else if (isLocalTrack) {
+          const f = await localLibrary.resolveFile(fileId);
+          if (cancelled) return;
+          setStreamUrl(localLibrary.getStreamUrl(fileId, f));
         } else {
           // Non-MKV: direct streaming (preferred) with blob fallback.
           const directUrl = await buildPublicStreamUrl(fileId);
@@ -728,10 +947,12 @@ export function PlayerPage() {
         const tracksResults = await Promise.all(
           matchedSubs.map(async (s) => {
             try {
-              const entry = await getSubtitleText(s, {
-                signal: loadAbort.signal,
-                priority: "high",
-              });
+              const entry = isLocalTrack
+                ? await readLocalSubtitleText(s)
+                : await getSubtitleText(s, {
+                    signal: loadAbort.signal,
+                    priority: "high",
+                  });
               const ext = getExtension(s.name);
               const isAss = ext === "ass" || ext === "ssa";
               return {
@@ -826,6 +1047,7 @@ export function PlayerPage() {
       videoEl: HTMLVideoElement,
       audioTrackNumber: number | null,
       resumeAtSeconds: number,
+      knownFileSize?: number,
     ) => {
       const ctrl = new MkvMseController();
       mseControllerRef.current = ctrl;
@@ -838,6 +1060,49 @@ export function PlayerPage() {
       ctrl.onError = (err) => {
         // eslint-disable-next-line no-console
         console.error("MKV MSE error:", err);
+
+        // MSE audio init failure: the browser said it could decode this codec
+        // (`MediaSource.isTypeSupported` returned true) but then rejected the
+        // actual fMP4 init segment on the first append. FLAC-in-MP4 is the
+        // known offender, but the same over-promise can hit any codec. When an
+        // external WebCodecs/WASM decoder supports the track, transparently
+        // restart with audio decoded outside MSE (video stays on MSE) instead
+        // of stranding the user on an error screen. Guarded per-track so a
+        // second failure on the external path doesn't loop.
+        const audioInitFailed =
+          (err as MseAudioInitError)?.mseAudioFailure?.stage === "init";
+        if (audioInitFailed) {
+          const activeTrack =
+            (audioTrackNumber != null
+              ? mkvAudioTracks.find((t) => t.number === audioTrackNumber)
+              : undefined) ?? mkvAudioTracks[0];
+          const activeNumber = activeTrack?.number;
+          if (
+            activeNumber != null &&
+            activeTrack?.externalAudioSupported === true &&
+            !forcedExternalAudioTracksRef.current.has(activeNumber)
+          ) {
+            forcedExternalAudioTracksRef.current.add(activeNumber);
+            // eslint-disable-next-line no-console
+            console.warn(
+              `[playback] MSE rejected the audio init segment for ` +
+              `track=${activeNumber}; retrying with external WebCodecs audio. ` +
+              `Reason: ${err.message}`,
+            );
+            const resumeAt = videoEl.currentTime || resumeAtSeconds || 0;
+            if (mseControllerRef.current === ctrl) {
+              mseControllerRef.current = null;
+            }
+            ctrl.destroy();
+            startMseControllerRef.current?.(
+              videoEl,
+              activeNumber,
+              resumeAt,
+              knownFileSize,
+            );
+            return;
+          }
+        }
         // Dub-switch reload that landed on an MSE codec combination the
         // browser refuses (the common case: HEVC video + AC-3 audio, which
         // Chrome plays each-of-individually for native MKV but refuses to
@@ -902,10 +1167,17 @@ export function PlayerPage() {
         : undefined;
       const forceExperimentalExternalAc3 =
         !!selectedTrack && isExperimentalAc3Track(selectedTrack);
+      // A prior MSE init failure for this track flips it to the external audio
+      // path even though `isTypeSupported`/`mseAudioSupported` claimed MSE was
+      // fine (see the `audioInitFailed` recovery in `ctrl.onError`).
+      const forcedExternal =
+        audioTrackNumber != null &&
+        forcedExternalAudioTracksRef.current.has(audioTrackNumber);
       const externalAudio =
-        (selectedTrack?.externalAudioSupported === true ||
+        forcedExternal ||
+        ((selectedTrack?.externalAudioSupported === true ||
           forceExperimentalExternalAc3) &&
-        selectedTrack.mseAudioSupported !== true
+          selectedTrack.mseAudioSupported !== true)
           ? "webcodecs"
           : undefined;
       if (selectedTrack) {
@@ -922,14 +1194,34 @@ export function PlayerPage() {
           `${forceExperimentalExternalAc3 ? " experimental=ac3" : ""}`,
         );
       }
-      void ctrl.start(
-        fileId,
-        videoEl,
-        mkvHeaderRef.current ?? undefined,
-        audioTrackNumber != null || externalAudio
-          ? { audioTrackNumber: audioTrackNumber ?? undefined, externalAudio }
-          : undefined,
-      );
+      const startOpts: {
+        audioTrackNumber?: number;
+        externalAudio?: "webcodecs";
+        knownFileSize?: number;
+        byteSource?: MediaByteSource;
+      } = {};
+      if (audioTrackNumber != null) startOpts.audioTrackNumber = audioTrackNumber;
+      if (externalAudio) startOpts.externalAudio = externalAudio;
+      if (knownFileSize != null && knownFileSize > 0) {
+        startOpts.knownFileSize = knownFileSize;
+      }
+      if (isLocalId(fileId)) {
+        // Local files need their `File` resolved before the controller can
+        // read bytes from it; the cache populated during the load effect
+        // makes this resolve immediately in practice.
+        void localLibrary.resolveFile(fileId).then((f) => {
+          if (mseControllerRef.current !== ctrl) return;
+          startOpts.byteSource = new LocalFileByteSource(f);
+          void ctrl.start(fileId, videoEl, mkvHeaderRef.current ?? undefined, startOpts);
+        });
+      } else {
+        void ctrl.start(
+          fileId,
+          videoEl,
+          mkvHeaderRef.current ?? undefined,
+          Object.keys(startOpts).length > 0 ? startOpts : undefined,
+        );
+      }
     },
     [
       fileId,
@@ -941,6 +1233,9 @@ export function PlayerPage() {
       searchParams,
     ],
   );
+  // Keep the restart handle current so `ctrl.onError` can relaunch playback on
+  // the external audio path without `startMseController` depending on itself.
+  startMseControllerRef.current = startMseController;
 
   // MSE: when the player exposes its <video> ref, attach the controller.
   //
@@ -954,7 +1249,12 @@ export function PlayerPage() {
       if (!videoEl || !isMkvMse || !file) return;
       if (mseControllerRef.current) return;
       const resumeAt = videoEl.currentTime || 0;
-      startMseController(videoEl, selectedMkvAudioTrackNumber, resumeAt);
+      startMseController(
+        videoEl,
+        selectedMkvAudioTrackNumber,
+        resumeAt,
+        file.size ? Number(file.size) : undefined,
+      );
     },
     [isMkvMse, file, selectedMkvAudioTrackNumber, startMseController],
   );
@@ -1198,6 +1498,18 @@ export function PlayerPage() {
 
       // MSE owns its own error handling.
       if (isMkvMse) return;
+
+      // Local files have no Drive blob-recovery path — `buildMediaUrl` would
+      // throw for a local id. The browser already tried decoding the file
+      // directly from disk, so a media error here means the codec/container
+      // genuinely isn't supported.
+      if (isLocalId(fileId)) {
+        setError(
+          "Your browser can't play this file — the codec or container isn't supported.",
+        );
+        setErrorReason("unknown");
+        return;
+      }
       // Avoid re-entering the blob fallback if we're already serving a blob:
       // URL — that means a previous fallback succeeded and this is a fresh,
       // unrelated decode error.
@@ -1256,7 +1568,10 @@ export function PlayerPage() {
   );
 
   const loading =
-    !error && !unsupported && (!file || (!streamUrl && !isMkvMse));
+    !error &&
+    !unsupported &&
+    !hevcSoftwareDecodeInfo &&
+    (!file || (!streamUrl && !isMkvMse));
 
   // Pretty metadata derived from the file.
   const meta = useMemo(() => {
@@ -1352,19 +1667,297 @@ export function PlayerPage() {
     if (prevVideo) navigate(`/play/${folderId}/${prevVideo.id}`);
   }, [prevVideo, folderId, navigate]);
 
+  // ---------------------------------------------------------------------------
+  // Watch-room chrome state — search, lifted subtitle control, picture tuning,
+  // A-B loop, and scene bookmarks. Everything here drives the real player; none
+  // of it is cosmetic.
+  // ---------------------------------------------------------------------------
+  const [query, setQuery] = useState("");
+  const [queueOpen, setQueueOpen] = useState(true);
+  // Subtitle track + delay live here so the external panels and the in-video
+  // picker share a single source of truth (DrivePlayer takes them as controlled
+  // props with internal fallback).
+  const [activeSubId, setActiveSubId] = useState<string | null>(null);
+  const [subDelay, setSubDelay] = useState(0);
+  // Live <video> element (also mirrored into videoElRef for the screenshot
+  // path). Kept as state so effects can attach listeners when it appears.
+  const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
+  const [speed, setSpeed] = useState(1);
+  const [tuning, setTuning] = useState<WatchTuning>(() => loadWatchTuning());
+  const [abLoop, setAbLoop] = useState<{ a: number | null; b: number | null }>({
+    a: null,
+    b: null,
+  });
+  const [bookmarks, setBookmarks] = useState<SceneBookmark[]>([]);
+  const [bookmarkSaved, setBookmarkSaved] = useState(false);
+  const subsPanelRef = useRef<HTMLDivElement>(null);
+  const tuningPanelRef = useRef<HTMLDivElement>(null);
+  // The three deep-row panels (Playback / Watch Tuning / Tracks & Timing) are
+  // balanced to a single shared height. The Watch Tuning column — whose height
+  // is dictated by its fixed slider grid — is the reference: we measure its
+  // rendered height and publish it as `--anime-control-panel-height` on the
+  // deep row, which the Playback (min-height) and Tracks (fixed height +
+  // internal scroll) cells consume so all three align without forcing the row
+  // to the viewport. Pure CSS can't single one grid item out as the height
+  // source while letting a long track list scroll instead of inflating the
+  // row, so a tiny ResizeObserver does the measurement; the cells fall back to
+  // natural height if it never runs.
+  const deepRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const reference = tuningPanelRef.current;
+    const deep = deepRef.current;
+    if (!reference || !deep) return;
+    const apply = () => {
+      deep.style.setProperty(
+        "--anime-control-panel-height",
+        `${Math.round(reference.getBoundingClientRect().height)}px`,
+      );
+    };
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(reference);
+    return () => ro.disconnect();
+    // Re-run across the loading/error/unsupported early-returns: the deep row
+    // (and tuningPanelRef) only mounts in the main render, so the observer
+    // must (re)attach whenever the player transitions into that state.
+  }, [loading, error, unsupported]);
+
+  const autoplayNext = useSettingsStore((s) => s.settings.autoplayNext);
+  const patchSettings = useSettingsStore((s) => s.patch);
+
+  const handleVideoElement = useCallback((el: HTMLVideoElement | null) => {
+    videoElRef.current = el;
+    setVideoEl(el);
+  }, []);
+  const handlePickSubtitle = useCallback(
+    (id: string | null) => setActiveSubId(id),
+    [],
+  );
+  const handleSubDelayChange = useCallback((d: number) => setSubDelay(d), []);
+
+  // Reset per-file UI state + load this file's scene bookmarks.
+  useEffect(() => {
+    setActiveSubId(null);
+    setSubDelay(0);
+    setAbLoop({ a: null, b: null });
+    setBookmarks(fileId ? getSceneBookmarks(fileId) : []);
+  }, [fileId]);
+
+  // Mirror the live playbackRate into local state for the speed pills.
+  useEffect(() => {
+    if (!videoEl) return;
+    setSpeed(videoEl.playbackRate || 1);
+    const onRate = () => setSpeed(videoEl.playbackRate || 1);
+    videoEl.addEventListener("ratechange", onRate);
+    return () => videoEl.removeEventListener("ratechange", onRate);
+  }, [videoEl]);
+
+  // Apply watch tuning as a real CSS/SVG filter on the <video>.
+  useEffect(() => {
+    if (!videoEl) return;
+    videoEl.style.filter = buildVideoFilter(tuning);
+    return () => {
+      videoEl.style.filter = "";
+    };
+  }, [videoEl, tuning]);
+
+  // Persist tuning so it survives episode changes (same route, src swap).
+  useEffect(() => {
+    saveWatchTuning(tuning);
+  }, [tuning]);
+
+  // A-B loop — seek back to A once playback passes B.
+  useEffect(() => {
+    const { a, b } = abLoop;
+    if (!videoEl || a === null || b === null || b <= a) return;
+    const onTime = () => {
+      if (videoEl.currentTime >= b) {
+        try {
+          videoEl.currentTime = a;
+        } catch {
+          // best-effort — buffer may not cover A yet
+        }
+      }
+    };
+    videoEl.addEventListener("timeupdate", onTime);
+    return () => videoEl.removeEventListener("timeupdate", onTime);
+  }, [videoEl, abLoop]);
+
+  const handleChangeSpeed = useCallback((s: number) => {
+    const v = videoElRef.current;
+    if (v) v.playbackRate = s;
+    setSpeed(s);
+  }, []);
+  const handleToggleAutoNext = useCallback(() => {
+    void patchSettings({ autoplayNext: !autoplayNext });
+  }, [patchSettings, autoplayNext]);
+  const handleBookmark = useCallback(() => {
+    const v = videoElRef.current;
+    if (!v || !fileId) return;
+    setBookmarks(addSceneBookmark(fileId, v.currentTime));
+    setBookmarkSaved(true);
+    window.setTimeout(() => setBookmarkSaved(false), 1500);
+  }, [fileId]);
+  const handleJumpBookmark = useCallback((timeSec: number) => {
+    const v = videoElRef.current;
+    if (!v) return;
+    try {
+      v.currentTime = timeSec;
+    } catch {
+      // best-effort
+    }
+  }, []);
+  const handleRemoveBookmark = useCallback(
+    (id: string) => {
+      if (!fileId) return;
+      setBookmarks(removeSceneBookmark(fileId, id));
+    },
+    [fileId],
+  );
+  const handleSetLoopA = useCallback(() => {
+    const v = videoElRef.current;
+    if (!v) return;
+    const a = v.currentTime;
+    setAbLoop((prev) => ({
+      a,
+      b: prev.b !== null && prev.b <= a ? null : prev.b,
+    }));
+  }, []);
+  const handleSetLoopB = useCallback(() => {
+    const v = videoElRef.current;
+    if (!v) return;
+    setAbLoop((prev) => ({ ...prev, b: v.currentTime }));
+  }, []);
+  const handleClearLoop = useCallback(() => setAbLoop({ a: null, b: null }), []);
+  const handleSelectPreset = useCallback((preset: TuningPreset) => {
+    if (preset === "Custom") return;
+    setTuning(TUNING_PRESETS[preset]);
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // MediaSession (OS media keys / lock-screen now-playing). Title/episode info
+  // is computed here — ahead of the loading/error early-returns below — purely
+  // because it feeds hooks, which must run unconditionally on every render.
+  // ---------------------------------------------------------------------------
+  const sessionTitleInfo = useMemo(() => {
+    if (!file) return null;
+    const parsedTitle = parseTitle({
+      filename: file.name,
+      parentFolder: folderName,
+      showFolder: showFolderName || undefined,
+    });
+    const cleanedTitle = normalizeMovieTitle(file.name);
+    return {
+      title: parsedTitle.fullTitle || cleanedTitle.title || file.name,
+      artist: parsedTitle.showTitle || undefined,
+      album: parsedTitle.seasonLabel || undefined,
+    };
+  }, [file, folderName, showFolderName]);
+
+  // Now-playing metadata + transport controls. Re-registers whenever the
+  // episode or its neighbours change so previous/next track the watch-room
+  // queue (handlePrev/handleNext already navigate to the sibling episode).
+  useEffect(() => {
+    if (!videoEl || !isMediaSessionSupported()) return;
+    setMediaSessionMetadata({
+      title: sessionTitleInfo?.title || file?.name || "Nyrima",
+      artist: sessionTitleInfo?.artist,
+      album: sessionTitleInfo?.album,
+      artwork: currentPosterUrl ? [{ src: currentPosterUrl }] : undefined,
+    });
+    setMediaSessionPlaybackState(videoEl.paused ? "paused" : "playing");
+    const onPlay = () => setMediaSessionPlaybackState("playing");
+    const onPause = () => setMediaSessionPlaybackState("paused");
+    videoEl.addEventListener("play", onPlay);
+    videoEl.addEventListener("pause", onPause);
+
+    const unregister = setMediaSessionActionHandlers({
+      play: () => void videoEl.play().catch(() => {}),
+      pause: () => videoEl.pause(),
+      previoustrack: prevVideo ? handlePrev : undefined,
+      nexttrack: nextVideo ? handleNext : undefined,
+      seekbackward: (details) => {
+        videoEl.currentTime = Math.max(
+          0,
+          videoEl.currentTime - (details.seekOffset ?? 10),
+        );
+      },
+      seekforward: (details) => {
+        const dur = Number.isFinite(videoEl.duration) ? videoEl.duration : Infinity;
+        videoEl.currentTime = Math.min(
+          dur,
+          videoEl.currentTime + (details.seekOffset ?? 10),
+        );
+      },
+      seekto: (details) => {
+        if (details.seekTime == null) return;
+        try {
+          videoEl.currentTime = details.seekTime;
+        } catch {
+          // seek target may be outside the buffered range — best-effort
+        }
+      },
+    });
+
+    return () => {
+      videoEl.removeEventListener("play", onPlay);
+      videoEl.removeEventListener("pause", onPause);
+      unregister();
+      setMediaSessionMetadata(null);
+      setMediaSessionPlaybackState("none");
+      setMediaSessionPositionState(null);
+    };
+  }, [
+    videoEl,
+    sessionTitleInfo,
+    currentPosterUrl,
+    file?.name,
+    prevVideo,
+    nextVideo,
+    handlePrev,
+    handleNext,
+  ]);
+
+  // Position state for the OS scrubber.
+  useEffect(() => {
+    if (!videoEl || !isMediaSessionSupported()) return;
+    const report = () => {
+      const duration = Number.isFinite(videoEl.duration) ? videoEl.duration : 0;
+      setMediaSessionPositionState(
+        duration > 0
+          ? {
+              duration,
+              position: videoEl.currentTime,
+              playbackRate: videoEl.playbackRate || 1,
+            }
+          : null,
+      );
+    };
+    report();
+    videoEl.addEventListener("timeupdate", report);
+    videoEl.addEventListener("durationchange", report);
+    videoEl.addEventListener("ratechange", report);
+    return () => {
+      videoEl.removeEventListener("timeupdate", report);
+      videoEl.removeEventListener("durationchange", report);
+      videoEl.removeEventListener("ratechange", report);
+    };
+  }, [videoEl]);
+  const withTransition = (content: ReactNode) => content;
+
   // Early-out screens -------------------------------------------------------
   if (invalidRouteIds) {
-    return (
+    return withTransition(
       <PlayerErrorCard
         title="Invalid video link"
         body="This Nyrima URL has a malformed Drive folder or file ID. Open the video from a valid Drive folder link."
-        onBack={() => navigate("/")}
-      />
+        onBack={() => navigate("/app")}
+      />,
     );
   }
 
   if (loading) {
-    return (
+    return withTransition(
       <div className="ny-player-loading">
         <div className="ny-player-loading__head">
           <span className="dc-tracker">LOADING</span>
@@ -1384,22 +1977,39 @@ export function PlayerPage() {
               : "Reaching Drive…"}
           </span>
         </div>
-      </div>
+      </div>,
     );
   }
 
   if (unsupported) {
-    return (
+    return withTransition(
       <PlayerErrorCard
         title="Container not yet supported"
         body={`${file?.name ?? "This file"} uses a container the browser can't play natively. The MKV/HEVC WASM decoder ships in Phase 2 of Nyrima. For now, MP4 and WebM files play with full quality.`}
         onBack={() => navigate(-1)}
-      />
+      />,
+    );
+  }
+
+  if (hevcSoftwareDecodeInfo) {
+    return withTransition(
+      <PlayerErrorCard
+        title="This video needs a software decoder"
+        kana={describeHevcProfile(hevcSoftwareDecodeInfo)}
+        body={`${file?.name ?? "This file"} is encoded as HEVC ${describeHevcProfile(
+          hevcSoftwareDecodeInfo,
+        )}. No consumer GPU or Windows codec pack can decode this profile — ` +
+          `Main/Main10 4:2:0 is the limit for hardware decoders, so the ` +
+          `browser would show a black picture with sound instead of a real ` +
+          `error. A built-in software (WASM) decoder for this profile is ` +
+          `planned but not available yet.`}
+        onBack={() => navigate(-1)}
+      />,
     );
   }
 
   if (error) {
-    return (
+    return withTransition(
       <>
         <PlayerErrorCard
           title={
@@ -1422,17 +2032,13 @@ export function PlayerPage() {
           }
           onConnectDrive={
             errorReason === "needs-oauth"
-              ? async () => {
-                  try {
-                    const token = await tryGetAccessToken(true);
-                    if (token) {
-                      // Warm the profile cache so the UserChip updates too.
-                      await getUserProfile().catch(() => undefined);
-                      navigate(0);
-                    }
-                  } catch {
-                    // User cancelled or flow failed — leave them on the error page.
-                  }
+              ? () => {
+                  // Full-page web OAuth redirect; returns to this player URL,
+                  // where playback retries with the freshly stored token.
+                  void startDriveConnect({
+                    returnTo:
+                      window.location.pathname + window.location.search,
+                  });
                 }
               : undefined
           }
@@ -1456,7 +2062,7 @@ export function PlayerPage() {
             navigate(0);
           }}
         />
-      </>
+      </>,
     );
   }
 
@@ -1503,12 +2109,12 @@ export function PlayerPage() {
   }
 
   function handleCopyLink() {
-    if (!file) return;
+    if (!file || isLocalId(file.id)) return;
     void navigator.clipboard.writeText(driveFileUrl(file.id));
   }
 
   function handleOpenInDrive() {
-    if (!file) return;
+    if (!file || isLocalId(file.id)) return;
     window.open(driveFileUrl(file.id), "_blank");
   }
 
@@ -1587,150 +2193,328 @@ export function PlayerPage() {
     }
   }
 
-  return (
-    <div className={`ny-player-page${theater ? " is-theater" : ""}`}>
-      <PlayerLayout
-        player={
-          <div className="ny-player-main">
-            {(streamUrl || isMkvMse) && (
-              <DrivePlayer
-                src={streamUrl ?? ""}
-                subtitleTracks={subtitleTracks}
-                title={displayTitle || file?.name}
-                initialSeek={initialSeek}
-                silentResume={isDubSwitchReload}
-                onMediaError={handleMediaError}
-                onTimeUpdate={handleTimeUpdate}
-                onCanPlay={handleCanPlay}
-                onVideoRef={
-                  isMkvMse && !isMkvNative ? handleVideoRef : undefined
-                }
-                onVideoElement={(el) => {
-                  videoElRef.current = el;
-                }}
-                nextVideo={nextAdapter}
-                prevVideo={prevAdapter}
-                onNext={handleNext}
-                onPrev={handlePrev}
-                mkvAudioTracks={mkvAudioTracks}
-                selectedMkvAudioTrackNumber={selectedMkvAudioTrackNumber}
-                onPickAudioTrackNumber={handlePickAudioTrackNumber}
-                theatreMode={theater}
-                onToggleTheatre={() => setTheater((t) => !t)}
-                ambientSourceUrl={currentPosterUrl}
-              />
-            )}
+  const isSeries = !!parsed?.episodeNumber;
+  const episodeLabel = parsed?.episodeNumber
+    ? `Episode ${parsed.episodeNumber}`
+    : undefined;
+  const watched = progressPct >= WATCHED_THRESHOLD_PCT;
+  const tuningPreset: TuningPreset = presetForTuning(tuning);
 
-            {file && (
-              <div className="ny-player-info">
-                <DriveStatusBanner />
-                <div className="ny-player-info__head">
-                  <div>
-                    <h2 className="ny-player-info__title">{displayTitle}</h2>
-                    <p className="ny-player-info__filename">{file.name}</p>
-                  </div>
-                  <button
-                    type="button"
-                    className="ny-btn ny-btn--ghost"
-                    onClick={() => navigate(-1)}
-                  >
-                    Back
-                  </button>
-                </div>
+  const selectedAudio =
+    mkvAudioTracks.find((t) => t.number === selectedMkvAudioTrackNumber) ??
+    mkvAudioTracks[0] ??
+    null;
+  const activeSub = subtitleTracks.find((t) => t.id === activeSubId) ?? null;
 
-                {meta && (
-                  <div className="ny-player-info__meta">
-                    <span className="ny-player-info__pill">{meta.ext}</span>
-                    {meta.resolution && (
-                      <span className="ny-player-info__pill">
-                        {meta.resolution}
-                      </span>
-                    )}
-                    {meta.duration && (
-                      <span className="ny-player-info__pill">
-                        {meta.duration}
-                      </span>
-                    )}
-                    {meta.size && (
-                      <span className="ny-player-info__pill">{meta.size}</span>
-                    )}
-                    {cleaned?.quality && (
-                      <span className="ny-player-info__pill">
-                        {cleaned.quality}
-                      </span>
-                    )}
-                  </div>
-                )}
+  // Compact "Signal" readout for the left rail's tech HUD. Values are kept
+  // short and glanceable; the deep panels below carry the full detail.
+  const videoHeight = file?.videoMediaMetadata?.height
+    ? Number(file.videoMediaMetadata.height)
+    : null;
+  const railSpecs = [
+    { label: "Source", value: isLocalId(fileId) ? "Local" : "Drive" },
+    {
+      label: "Res",
+      value:
+        formatResolutionTier(videoHeight) ??
+        cleaned?.quality?.toUpperCase() ??
+        "—",
+      muted: !videoHeight && !cleaned?.quality,
+    },
+    { label: "Type", value: meta?.ext ?? "—", muted: !meta?.ext },
+    {
+      label: "Duration",
+      value: meta?.duration ?? "—",
+      muted: !meta?.duration,
+    },
+    {
+      label: "Audio",
+      value: selectedAudio
+        ? [
+            selectedAudio.codecId.replace(/^A_/, ""),
+            selectedAudio.channels ? `${selectedAudio.channels}ch` : null,
+          ]
+            .filter(Boolean)
+            .join(" ")
+        : "—",
+      muted: !selectedAudio,
+    },
+    {
+      label: "Subs",
+      value:
+        subtitleTracks.length === 0
+          ? "None"
+          : activeSub
+            ? (activeSub.format ?? "Sub").toUpperCase()
+            : `${subtitleTracks.length} avail`,
+      muted: subtitleTracks.length === 0,
+    },
+    { label: "Size", value: meta?.size ?? "—", muted: !meta?.size },
+  ];
 
-                {progressPct > 0 &&
-                  progressPct < WATCHED_THRESHOLD_PCT && (
-                    <div className="ny-player-info__progress">
-                      <div
-                        className="ny-player-info__progress-bar"
-                        style={{ width: `${progressPct}%` }}
-                      />
-                    </div>
-                  )}
+  return withTransition(
+    <div className={cn("watch-room", { "is-focus": theater })}>
+      <div className="watch-room__ambient" aria-hidden="true" />
+      <WatchGammaFilter gamma={tuning.gamma} />
+      <WatchSharpenFilter amount={tuning.sharpness} />
+      <WatchWarmthFilter amount={tuning.warmth} />
 
-                <div className="ny-player-info__actions">
-                  <button
-                    type="button"
-                    className="ny-btn ny-btn--ghost"
-                    onClick={handleOpenInDrive}
-                  >
-                    Open in Drive
-                  </button>
-                  <button
-                    type="button"
-                    className="ny-btn ny-btn--ghost"
-                    onClick={handleCopyLink}
-                  >
-                    Copy link
-                  </button>
-                  <button
-                    type="button"
-                    className="ny-btn ny-btn--ghost"
-                    onClick={handleScreenshot}
-                    disabled={screenshotStatus !== "idle"}
-                    title={
-                      screenshotStatus === "blocked"
-                        ? "Browser blocked the capture (cross-origin video). Screenshots only work in MSE or blob playback modes."
-                        : "Save the current frame as a PNG"
-                    }
-                  >
-                    {screenshotStatus === "saved"
-                      ? "Saved ✓"
-                      : screenshotStatus === "blocked"
-                        ? "Blocked"
-                        : screenshotStatus === "error"
-                          ? "Couldn't capture"
-                          : "Screenshot"}
-                  </button>
-                  <button
-                    type="button"
-                    className="ny-btn ny-btn--ghost"
-                    onClick={handleMarkWatched}
-                  >
-                    Mark as watched
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
+      <WatchRoomHeader
+        isSeries={isSeries}
+        sourceLabel="Hi-res watching room"
+        query={query}
+        onQueryChange={setQuery}
+        onBack={() => navigate(-1)}
+        onToggleQueue={() => setQueueOpen((o) => !o)}
+        queueOpen={queueOpen}
+        onScrollToSubs={() =>
+          subsPanelRef.current?.scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+          })
         }
-        sidebar={
-          <PlaylistSidebar
+        onScrollToTuning={() =>
+          tuningPanelRef.current?.scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+          })
+        }
+        onToggleFocus={() => setTheater((t) => !t)}
+        focusActive={theater}
+        onOpenInDrive={handleOpenInDrive}
+        onCopyLink={handleCopyLink}
+        onMarkWatched={handleMarkWatched}
+      />
+
+      <main className="watch-room__main">
+        <div className="watch-room__brand">
+          <WatchSideRail
+            episodeNumber={parsed?.episodeNumber ?? null}
+            progressPct={progressPct}
+            specs={railSpecs}
+          />
+        </div>
+
+        <div className="watch-room__video">
+          {(streamUrl || isMkvMse) && (
+            <DrivePlayer
+              src={streamUrl ?? ""}
+              subtitleTracks={subtitleTracks}
+              title={displayTitle || file?.name}
+              initialSeek={initialSeek}
+              silentResume={isDubSwitchReload}
+              onMediaError={handleMediaError}
+              onTimeUpdate={handleTimeUpdate}
+              onCanPlay={handleCanPlay}
+              onVideoRef={
+                isMkvMse && !isMkvNative ? handleVideoRef : undefined
+              }
+              onVideoElement={handleVideoElement}
+              nextVideo={nextAdapter}
+              prevVideo={prevAdapter}
+              onNext={handleNext}
+              onPrev={handlePrev}
+              mkvAudioTracks={mkvAudioTracks}
+              selectedMkvAudioTrackNumber={selectedMkvAudioTrackNumber}
+              onPickAudioTrackNumber={handlePickAudioTrackNumber}
+              theatreMode={theater}
+              onToggleTheatre={() => setTheater((t) => !t)}
+              ambientSourceUrl={currentPosterUrl}
+              activeSubtitleId={activeSubId}
+              onPickSubtitle={handlePickSubtitle}
+              subtitleDelay={subDelay}
+              onSubtitleDelayChange={handleSubDelayChange}
+            />
+          )}
+          <DriveStatusBanner />
+        </div>
+
+        <div className={cn("watch-room__rail", { "is-hidden": !queueOpen })}>
+          <EpisodeQueuePanel
             videos={folderVideos}
             currentFileId={fileId}
             folderId={folderId}
             folderName={folderName}
             showFolderName={showFolderName || undefined}
             positions={positions}
+            query={query}
+            autoNext={autoplayNext}
+            onToggleAutoNext={handleToggleAutoNext}
           />
-        }
-      />
-    </div>
+        </div>
+
+        <div className="watch-room__title">
+          {file && (
+            <MetadataStrip
+              title={displayTitle}
+              episodeLabel={episodeLabel}
+              fileName={file.name}
+              isSeries={isSeries}
+              progressPct={progressPct}
+              watched={watched}
+            />
+          )}
+        </div>
+
+        <div className="watch-room__capture">
+          <CaptureCard
+            onScreenshot={handleScreenshot}
+            screenshotStatus={screenshotStatus}
+            onBookmark={handleBookmark}
+            bookmarkSaved={bookmarkSaved}
+          />
+        </div>
+
+        <div ref={deepRef} className="watch-room__deep">
+          <div className="watch-room__deep-cell watch-room__deep-cell--fill">
+            <PlaybackCard
+              speed={speed}
+              onChangeSpeed={handleChangeSpeed}
+              abLoop={abLoop}
+              onSetLoopA={handleSetLoopA}
+              onSetLoopB={handleSetLoopB}
+              onClearLoop={handleClearLoop}
+              subDelay={subDelay}
+              onSetSubDelay={handleSubDelayChange}
+            />
+          </div>
+          <div ref={tuningPanelRef} className="watch-room__deep-cell">
+            <WatchTuningPanel
+              tuning={tuning}
+              preset={tuningPreset}
+              onChange={setTuning}
+              onSelectPreset={handleSelectPreset}
+              onReset={() => setTuning(NEUTRAL_TUNING)}
+            />
+          </div>
+          <div ref={subsPanelRef} className="watch-room__deep-cell watch-room__deep-cell--scroll">
+            <SubtitlesAudioPanel
+              subtitleTracks={subtitleTracks}
+              activeSubId={activeSubId}
+              onPickSubtitle={handlePickSubtitle}
+              audioTracks={mkvAudioTracks}
+              selectedAudioNumber={selectedMkvAudioTrackNumber}
+              onPickAudio={handlePickAudioTrackNumber}
+              bookmarks={bookmarks}
+              onJumpBookmark={handleJumpBookmark}
+              onRemoveBookmark={handleRemoveBookmark}
+            />
+          </div>
+        </div>
+      </main>
+    </div>,
   );
+}
+
+/** Hidden SVG gamma filter referenced by the watch-tuning `url(#…)` filter. */
+function WatchGammaFilter({ gamma }: { gamma: number }) {
+  return (
+    <svg
+      className="watch-room__svg-defs"
+      width="0"
+      height="0"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <defs>
+        <filter id={WATCH_GAMMA_FILTER_ID} colorInterpolationFilters="sRGB">
+          <feComponentTransfer>
+            <feFuncR type="gamma" exponent={gamma} amplitude={1} offset={0} />
+            <feFuncG type="gamma" exponent={gamma} amplitude={1} offset={0} />
+            <feFuncB type="gamma" exponent={gamma} amplitude={1} offset={0} />
+          </feComponentTransfer>
+        </filter>
+      </defs>
+    </svg>
+  );
+}
+
+/**
+ * Unsharp-mask via a normalized 3×3 convolution kernel. `amount` is 0..100; we
+ * scale it to a gentle 0..0.9 edge weight so the kernel stays brightness-
+ * preserving (center = 1 + 4a, edges = −a, sum = 1). Rendered once; referenced
+ * by `buildVideoFilter` through `url(#…)`.
+ */
+function WatchSharpenFilter({ amount }: { amount: number }) {
+  const a = Math.max(0, Math.min(100, amount)) / 100 * 0.9;
+  const center = (1 + 4 * a).toFixed(3);
+  const edge = (-a).toFixed(3);
+  const kernel = `0 ${edge} 0 ${edge} ${center} ${edge} 0 ${edge} 0`;
+  return (
+    <svg
+      className="watch-room__svg-defs"
+      width="0"
+      height="0"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <defs>
+        <filter id={WATCH_SHARPEN_FILTER_ID} colorInterpolationFilters="sRGB">
+          <feConvolveMatrix
+            order="3"
+            preserveAlpha="true"
+            kernelMatrix={kernel}
+          />
+        </filter>
+      </defs>
+    </svg>
+  );
+}
+
+/**
+ * Color-temperature shift via feColorMatrix. `amount` is −100 (cool) .. +100
+ * (warm); we lift red and cut blue (or the reverse) by up to ±20%.
+ */
+function WatchWarmthFilter({ amount }: { amount: number }) {
+  const a = Math.max(-100, Math.min(100, amount)) / 100;
+  const r = (1 + 0.2 * a).toFixed(3);
+  const b = (1 - 0.2 * a).toFixed(3);
+  const matrix = [
+    `${r} 0 0 0 0`,
+    `0 1 0 0 0`,
+    `0 0 ${b} 0 0`,
+    `0 0 0 1 0`,
+  ].join(" ");
+  return (
+    <svg
+      className="watch-room__svg-defs"
+      width="0"
+      height="0"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <defs>
+        <filter id={WATCH_WARMTH_FILTER_ID} colorInterpolationFilters="sRGB">
+          <feColorMatrix type="matrix" values={matrix} />
+        </filter>
+      </defs>
+    </svg>
+  );
+}
+
+const WATCH_TUNING_STORAGE_KEY = "nyrima:watch-tuning";
+
+function loadWatchTuning(): WatchTuning {
+  try {
+    const raw = localStorage.getItem(WATCH_TUNING_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed.brightness === "number") {
+        return { ...NEUTRAL_TUNING, ...parsed };
+      }
+    }
+  } catch {
+    // ignore corrupt/blocked storage — fall through to neutral
+  }
+  return NEUTRAL_TUNING;
+}
+
+function saveWatchTuning(tuning: WatchTuning): void {
+  try {
+    localStorage.setItem(WATCH_TUNING_STORAGE_KEY, JSON.stringify(tuning));
+  } catch {
+    // best-effort persistence
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1826,6 +2610,17 @@ function subtitleFormatFromMkvCodec(
   return "text";
 }
 
+/** Map a pixel height to a short resolution-tier badge (e.g. 1080 → "1080P"). */
+function formatResolutionTier(height: number | null): string | null {
+  if (!height || height <= 0) return null;
+  if (height >= 2000) return "4K";
+  if (height >= 1400) return "1440P";
+  if (height >= 1000) return "1080P";
+  if (height >= 700) return "720P";
+  if (height >= 460) return "480P";
+  return `${height}P`;
+}
+
 function subtitleFormatFromExtension(ext: string): SubtitleTrack["format"] {
   if (ext === "ass" || ext === "ssa" || ext === "srt" || ext === "vtt") {
     return ext;
@@ -1887,6 +2682,28 @@ function isExperimentalAc3Track(track: MkvAudioTrack): boolean {
     track.remuxable &&
     track.browserSupported === false &&
     track.codecId.toUpperCase().replace(/\s/g, "") === "A_AC3"
+  );
+}
+
+/**
+ * True when Chrome's native `<video>` MKV path can decode this audio codec, so
+ * native playback will actually produce sound. Anything outside this set
+ * (AC-3, E-AC-3, DTS family, TrueHD, raw PCM, …) plays as a silent picture and
+ * must be routed through MSE + the external WebCodecs/WASM audio renderer.
+ *
+ * Matched by Matroska CodecID prefix:
+ *   - A_AAC, A_AAC/MPEG4/LC, …  → AAC
+ *   - A_MPEG/L3, A_MPEG/L2      → MP3 / MP2
+ *   - A_OPUS, A_VORBIS, A_FLAC  → Opus / Vorbis / FLAC
+ */
+function isNativelyDecodableMkvAudio(codecId: string): boolean {
+  const norm = codecId.toUpperCase().replace(/\s/g, "");
+  return (
+    norm.startsWith("A_AAC") ||
+    norm.startsWith("A_MPEG") ||
+    norm.startsWith("A_OPUS") ||
+    norm.startsWith("A_VORBIS") ||
+    norm.startsWith("A_FLAC")
   );
 }
 
@@ -1977,6 +2794,42 @@ async function probeMkvAudioTrackSupport(
  *   - the OAuth path means the bandwidth is billed against the user's own
  *     account, not the throttled public-key quota
  */
+/**
+ * Opens a reader over the MKV bytes from `startOffset` to EOF, branching on
+ * whether `fileId` is a local file (`File.slice().stream()`, no network) or
+ * a Drive file (low-priority Range stream via `authedFetch`).
+ */
+async function openMkvByteReader(
+  fileId: string,
+  startOffset: number,
+  signal: AbortSignal,
+): Promise<ReadableStreamDefaultReader<Uint8Array>> {
+  if (isLocalId(fileId)) {
+    const file = await localLibrary.resolveFile(fileId);
+    return file.slice(startOffset).stream().getReader();
+  }
+  const res = await authedFetch(
+    buildMediaUrl(fileId),
+    {
+      headers: { Range: `bytes=${startOffset}-` },
+      signal,
+    },
+    { kind: "subtitle", priority: "low", signal },
+  );
+  debugLog(
+    `[subs] stream response: status=${res.status} contentRange=${res.headers.get("content-range")}`,
+  );
+  const reader = res.body?.getReader();
+  if (reader) return reader;
+  const ab = await res.arrayBuffer();
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new Uint8Array(ab));
+      controller.close();
+    },
+  }).getReader();
+}
+
 async function streamMkvSubsInBackground(
   fileId: string,
   startOffset: number,
@@ -1985,25 +2838,7 @@ async function streamMkvSubsInBackground(
   signal: AbortSignal,
 ): Promise<void> {
   try {
-    const res = await authedFetch(
-      buildMediaUrl(fileId),
-      {
-        headers: { Range: `bytes=${startOffset}-` },
-        signal,
-      },
-      { kind: "subtitle", priority: "low", signal },
-    );
-    debugLog(
-      `[subs] stream response: status=${res.status} contentRange=${res.headers.get("content-range")}`,
-    );
-    const reader = res.body?.getReader();
-    if (!reader) {
-      const ab = await res.arrayBuffer();
-      if (signal.aborted) return;
-      feedChunk(new Uint8Array(ab));
-      finalize();
-      return;
-    }
+    const reader = await openMkvByteReader(fileId, startOffset, signal);
     let totalBytes = 0;
     while (!signal.aborted) {
       const { done, value } = await reader.read();

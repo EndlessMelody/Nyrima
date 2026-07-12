@@ -415,7 +415,7 @@ function KindChip({ kind }: { kind: ResultItem["kind"] }) {
 function PopoverHint() {
   return (
     <div className="dc-topbar-search__hint">
-      <span className="dc-topbar-search__hint-kana">ナイリマ · NYRIMA</span>
+      <span className="dc-topbar-search__hint-kana">Nyrima</span>
       <p className="dc-topbar-search__hint-title">
         Search your libraries, the people you follow, and shares.
       </p>
@@ -443,11 +443,11 @@ function PopoverEmpty({ query }: { query: string }) {
 
 function SearchIcon() {
   // Sakura-blossom-cradled magnifier: the lens carries a 5-petal blossom
-  // motif in its centre (brand→accent gradient, soft, just enough to read
-  // as Nyrima rather than a generic glyph). The handle + ring use the same
-  // gradient so the whole icon reads as one painted unit instead of
-  // stroke-on-stroke. Each rendered instance gets a fresh gradient id so
-  // multiple icons on the same page don't fight over a single <defs>.
+  // motif in its centre (solid brand pink — the lamp). The handle + ring
+  // use the same brand color so the whole icon reads as one painted unit
+  // instead of stroke-on-stroke. Each rendered instance gets a fresh
+  // gradient id for the bloom so multiple icons on the same page don't
+  // fight over a single <defs>.
   const gid = useGradientId("topbar-search");
   return (
     <svg
@@ -457,10 +457,6 @@ function SearchIcon() {
       aria-hidden="true"
     >
       <defs>
-        <linearGradient id={gid} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="var(--brand-on-background-strong)" />
-          <stop offset="100%" stopColor="var(--accent-on-background-strong)" />
-        </linearGradient>
         <radialGradient id={`${gid}-bloom`} cx="50%" cy="50%" r="50%">
           <stop offset="0%" stopColor="#ffd6e3" stopOpacity="0.95" />
           <stop offset="60%" stopColor="#ffa8c4" stopOpacity="0.55" />
@@ -471,12 +467,12 @@ function SearchIcon() {
         cx="8.5"
         cy="8.5"
         r="6"
-        stroke={`url(#${gid})`}
+        stroke="var(--brand-on-background-strong)"
         strokeWidth="1.4"
       />
       <path
         d="m13.4 13.4 4.1 4.1"
-        stroke={`url(#${gid})`}
+        stroke="var(--brand-on-background-strong)"
         strokeWidth="1.6"
         strokeLinecap="round"
       />

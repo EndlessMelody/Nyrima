@@ -9,7 +9,13 @@ body,
   margin: 0;
   padding: 0;
   height: 100%;
-  color: var(--neutral-on-background-strong, #f5e9d6);
+}
+
+/* Color + body font live on `body` (not `#root`) so they cascade by
+ * inheritance in the app, but DON'T win — via #root's ID specificity — over
+ * the landing's own `html.ny-landing-active body` palette on the public route. */
+body {
+  color: var(--neutral-on-background-strong, #eef0f6);
   font-family: var(--dc-font-body);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -64,4 +70,36 @@ button {
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 24px;
+}
+
+/* Default cross-fade for route changes via `document.startViewTransition()`
+ * (see `useViewTransitionLocation` in App.tsx). Browsers without support, and
+ * users with `prefers-reduced-motion: reduce`, simply never enter a named
+ * view transition, so this block is inert for them. */
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 180ms;
+    animation-timing-function: ease-out;
+  }
+
+  ::view-transition-old(root) {
+    animation-name: ny-route-fade-out;
+  }
+
+  ::view-transition-new(root) {
+    animation-name: ny-route-fade-in;
+  }
+}
+
+@keyframes ny-route-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes ny-route-fade-in {
+  from {
+    opacity: 0;
+  }
 }

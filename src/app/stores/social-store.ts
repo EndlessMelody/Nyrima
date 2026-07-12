@@ -53,6 +53,13 @@ import {
   type DriveImportResult,
 } from "../services/sharing";
 import { getCachedShareFolders } from "../services/sharing/share-folder";
+import { isSupabaseConfigured } from "@/lib/supabase";
+import {
+  listFolderComments,
+  listMyFolderComments,
+  postFolderComment,
+  type FolderComment,
+} from "../services/social/social-api";
 import { useSharingStore } from "./sharing-store";
 
 /** A row rendered in the Inbox tab — one inlined ShareEntry from a
@@ -498,6 +505,27 @@ export const useSocialStore = create<SocialState>((set, get) => ({
     if (!profile) {
       throw new Error("Pick a share handle before commenting.");
     }
+
+    // Supabase path: write to the social DB (folder_comments) through RLS. The
+    // commenter's social profile is lazily seeded from their local share
+    // profile on the first post. The Drive comments.jsonl path below remains
+    // the fallback when Supabase isn't configured.
+    if (isSupabaseConfigured()) {
+      const created = await postFolderComment({
+        folderId: sharedFolderId,
+        shareId,
+        body: trimmed,
+        profile: {
+          handle: profile.handle,
+          displayName: profile.name,
+          avatarUrl: profile.avatarUrl,
+        },
+      });
+      const comment = folderCommentToShareComment(created);
+      set({ myComments: [comment, ...get().myComments] });
+      return comment;
+    }
+
     const folders =
       (await getCachedShareFolders()) ?? (await sharing.ensureFolders());
     const author = profileToAuthor(profile);
@@ -520,6 +548,26 @@ export const useSocialStore = create<SocialState>((set, get) => ({
 
   loadMyComments: async (opts) => {
     if (get().commentsLoading) return;
+
+    // Supabase path: the user's own comments are rows where author = auth.uid().
+    if (isSupabaseConfigured()) {
+      set({ commentsLoading: true, commentsError: null });
+      try {
+        const list = (await listMyFolderComments()).map(
+          folderCommentToShareComment,
+        );
+        set({ myComments: list, commentsLoading: false, commentsError: null });
+        void opts;
+      } catch (e) {
+        set({
+          commentsLoading: false,
+          commentsError:
+            e instanceof Error ? e.message : "Couldn't read your comments.",
+        });
+      }
+      return;
+    }
+
     const sharing = useSharingStore.getState();
     set({ commentsLoading: true, commentsError: null });
     try {
@@ -546,6 +594,42 @@ export const useSocialStore = create<SocialState>((set, get) => ({
 
   loadReceivedComments: async () => {
     if (get().commentsLoading) return;
+
+    // Supabase path: every comment on MY shares is a `folder_comments` row whose
+    // folder_id is my own Shared/ folder id. RLS lets any signed-in user read,
+    // so this surfaces ALL commenters — not just mutual follows. Resolve the
+    // folder id (a Drive id, still the comment key) before flipping the loading
+    // flag so a paired loadMyComments() on the same tick isn't blocked.
+    if (isSupabaseConfigured()) {
+      const sharing = useSharingStore.getState();
+      try {
+        const folders =
+          (await getCachedShareFolders()) ?? (await sharing.ensureFolders());
+        set({ commentsLoading: true, commentsError: null });
+        const buckets: Record<string, ShareComment[]> = {};
+        for (const fc of await listFolderComments(folders.root)) {
+          const c = folderCommentToShareComment(fc);
+          (buckets[c.shareId] ??= []).push(c);
+        }
+        for (const list of Object.values(buckets)) {
+          list.sort((a, b) => (a.at < b.at ? 1 : -1));
+        }
+        set({
+          receivedComments: buckets,
+          commentsLoading: false,
+          commentsError: null,
+          lastCommentsSyncedAt: Date.now(),
+        });
+      } catch (e) {
+        set({
+          commentsLoading: false,
+          commentsError:
+            e instanceof Error ? e.message : "Couldn't load comments.",
+        });
+      }
+      return;
+    }
+
     if (!get().followsLoaded) await get().loadFollows();
     const follows = get().followedUsers;
     if (follows.length === 0) {
@@ -609,6 +693,28 @@ export const useSocialStore = create<SocialState>((set, get) => ({
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Adapt a Supabase `folder_comments` row to the `ShareComment` shape the
+ * Activity UI already renders, so switching the comment backend needs no
+ * component changes: `folder_id`→`sharedFolderId`, `body`→`text`, and the
+ * embedded `profiles` row→`author`.
+ */
+function folderCommentToShareComment(comment: FolderComment): ShareComment {
+  return {
+    v: 1,
+    id: comment.id,
+    sharedFolderId: comment.folderId,
+    shareId: comment.shareId ?? "",
+    at: new Date(comment.createdAt).toISOString(),
+    author: {
+      handle: comment.author?.handle ?? "",
+      name: comment.author?.displayName,
+      avatarUrl: comment.author?.avatarUrl,
+    },
+    text: comment.body,
+  };
+}
 
 async function persistFollows(followedUsers: FollowedUser[]): Promise<void> {
   await chrome.storage.local.set({

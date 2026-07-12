@@ -26,6 +26,7 @@ interface AudioDecoderSupportLike {
   supported?: boolean;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type -- opaque WebCodecs marker type
 interface EncodedAudioChunkLike {
   // Opaque WebCodecs object.
 }

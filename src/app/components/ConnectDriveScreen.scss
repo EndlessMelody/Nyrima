@@ -1,0 +1,376 @@
+/**
+ * LoginScreen — unified onboarding surface. Visual language matches
+ * WelcomeBlock (gradient surface, hairline border, kana eyebrow) and the
+ * stacked cards adopt the same step-numbered chrome as
+ * .ny-welcome__steps so the screen feels like a continuation rather than
+ * a separate sign-in page.
+ */
+
+.ny-login {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 32px 32px 36px;
+  border: 1px solid var(--brand-border-medium);
+  border-radius: var(--ny-radius-lg);
+  background:
+    radial-gradient(
+      900px 380px at 100% 0%,
+      var(--brand-alpha-weak) 0%,
+      transparent 60%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--brand-alpha-weak) 70%, var(--surface-background))
+        0%,
+      var(--surface-background) 100%
+    );
+  position: relative;
+  overflow: hidden;
+}
+
+.ny-login::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    var(--hairline-pink) 0%,
+    transparent 40%
+  );
+  mask:
+    linear-gradient(#000, #000) content-box,
+    linear-gradient(#000, #000);
+  mask-composite: exclude;
+  -webkit-mask-composite: xor;
+  padding: 1px;
+  opacity: 0.5;
+}
+
+/* ───────────────────────── Hero ───────────────────────────────────────── */
+
+.ny-login__hero {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 28px;
+  align-items: center;
+}
+
+@media (max-width: 720px) {
+  .ny-login__hero {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .ny-login {
+    padding: 24px 20px 28px;
+  }
+}
+
+.ny-login__mark {
+  border-radius: 22px !important;
+  box-shadow:
+    0 0 0 1px var(--brand-border-medium),
+    0 18px 48px -18px rgba(0, 0, 0, 0.45);
+}
+
+.ny-login__hero-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ny-login__eyebrow {
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--brand-on-background-medium);
+}
+
+.ny-login__title {
+  font-family: var(--dc-font-display);
+  font-size: clamp(1.75rem, 3.6vw, 2.5rem);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  font-weight: 500;
+  color: var(--neutral-on-background-strong);
+  margin: 0;
+}
+
+.ny-login__lede {
+  font-family: var(--dc-font-body);
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  color: var(--neutral-on-background-medium);
+  max-width: 60ch;
+  margin: 0;
+}
+
+/* ───────────────────────── Card ───────────────────────────────────────── */
+
+.ny-login__card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 20px 22px;
+  border: 1px solid var(--brand-border-medium);
+  border-radius: var(--ny-radius-md);
+  background: var(--surface-background);
+  transition:
+    border-color 200ms ease,
+    box-shadow 200ms ease,
+    opacity 200ms ease;
+}
+
+.ny-login__card--active {
+  border-color: var(--brand-on-background-medium);
+  box-shadow:
+    0 0 0 1px var(--brand-alpha-weak),
+    0 14px 32px -16px rgba(0, 0, 0, 0.45);
+}
+
+.ny-login__card--done {
+  opacity: 0.82;
+}
+
+.ny-login__card--pending {
+  opacity: 0.6;
+  pointer-events: none;
+  /* Keep the credentials in view but mute fields the user can't touch
+     yet — buttons inside still render disabled via their own attr. */
+}
+
+.ny-login__card-head {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 14px;
+  align-items: start;
+}
+
+.ny-login__step-dot {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--dc-font-mono);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  border-radius: 50%;
+  border: 1px solid var(--brand-border-medium);
+  background: var(--surface-background-weak);
+  color: var(--neutral-on-background-medium);
+  transition:
+    color 200ms ease,
+    border-color 200ms ease,
+    background 200ms ease;
+}
+
+.ny-login__step-dot--active {
+  background: var(--brand-alpha-weak);
+  border-color: var(--brand-on-background-strong);
+  color: var(--brand-on-background-strong);
+}
+
+.ny-login__step-dot--done {
+  background: var(--brand-on-background-strong);
+  border-color: var(--brand-on-background-strong);
+  color: var(--page-background);
+  font-size: 0.9375rem;
+}
+
+.ny-login__card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ny-login__card-title {
+  font-family: var(--dc-font-display);
+  font-size: 1.0625rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--neutral-on-background-strong);
+  margin: 0;
+}
+
+.ny-login__card-hint {
+  font-family: var(--dc-font-body);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: var(--neutral-on-background-medium);
+  margin: 0;
+}
+
+.ny-login__card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ───────────────────────── Form fields ────────────────────────────────── */
+
+.ny-login__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ny-login__field-label {
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--neutral-on-background-medium);
+}
+
+.ny-login__field-req {
+  color: var(--brand-on-background-strong);
+}
+
+.ny-login__field-help {
+  font-family: var(--dc-font-body);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--neutral-on-background-weak);
+}
+
+.ny-login__field-help a {
+  color: var(--brand-on-background-strong);
+  text-decoration: underline;
+}
+
+.ny-login__field-help em {
+  font-style: normal;
+  color: var(--neutral-on-background-strong);
+}
+
+.ny-login__input {
+  padding: 10px 12px;
+  border: 1px solid var(--brand-border-medium);
+  border-radius: 8px;
+  background: var(--surface-background-weak);
+  color: var(--neutral-on-background-strong);
+  font-family: var(--dc-font-mono);
+  font-size: 0.875rem;
+  width: 100%;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background 160ms ease;
+}
+
+.ny-login__input:focus {
+  outline: none;
+  border-color: var(--brand-on-background-strong);
+  box-shadow: 0 0 0 3px var(--brand-alpha-weak);
+  background: var(--surface-background);
+}
+
+.ny-login__input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ───────────────────────── Status / messages ──────────────────────────── */
+
+.ny-login__msg {
+  font-family: var(--dc-font-body);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--surface-background-weak);
+  color: var(--neutral-on-background-medium);
+  border-left: 2px solid var(--brand-border-medium);
+}
+
+.ny-login__msg.is-error {
+  color: var(--danger-on-background-strong, #ff7d8e);
+  border-left-color: var(--danger-on-background-strong, #ff7d8e);
+}
+
+.ny-login__msg.is-warn {
+  color: var(--brand-on-background-strong);
+  border-left-color: var(--brand-on-background-strong);
+}
+
+.ny-login__msg.is-ok {
+  color: var(--brand-on-background-strong);
+  border-left-color: var(--brand-on-background-strong);
+}
+
+.ny-login__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+/* ───────────────────────── Signed-in identity ─────────────────────────── */
+
+.ny-login__signed {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid var(--brand-border-medium);
+  border-radius: 10px;
+  background: var(--surface-background-weak);
+}
+
+.ny-login__avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--surface-background);
+  border: 1px solid var(--brand-border-medium);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--dc-font-display);
+  font-size: 1.125rem;
+  color: var(--brand-on-background-strong);
+}
+
+.ny-login__avatar--mono {
+  background: var(--brand-alpha-weak);
+}
+
+.ny-login__signed-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ny-login__signed-name {
+  font-family: var(--dc-font-display);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--neutral-on-background-strong);
+}
+
+.ny-login__signed-email {
+  font-family: var(--dc-font-mono);
+  font-size: 0.75rem;
+  color: var(--neutral-on-background-medium);
+}
+
+.ny-login__signed-sub {
+  font-family: var(--dc-font-body);
+  font-size: 0.75rem;
+  color: var(--neutral-on-background-weak);
+  margin-top: 2px;
+}

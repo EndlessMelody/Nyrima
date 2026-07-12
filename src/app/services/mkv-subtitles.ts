@@ -137,6 +137,19 @@ export interface MkvExtractOptions {
    */
   prefetchedBuf?: { buf: Uint8Array; fileSize: number };
   /**
+   * Authoritative total file size (bytes) from Drive metadata (`file.size`).
+   *
+   * REQUIRED on the web build for cluster extraction to work at all. A
+   * cross-origin `fetch()` cannot read the `Content-Range` response header
+   * (Google's media endpoint doesn't CORS-expose it), so `fetchRange`'s
+   * size probe collapses to the 4 MB header-chunk length. With the file size
+   * wrong, the streamer concludes the whole file fits in the header and never
+   * walks the clusters where subtitle cues live. Passing the real size here
+   * sidesteps the header entirely. The Chrome extension never hit this — its
+   * host-permitted fetches could read every response header.
+   */
+  knownFileSize?: number;
+  /**
    * Fired once, as soon as the header bytes are available. Useful for
    * handing the buffer to a parallel consumer (e.g. the MSE controller)
    * so it doesn't re-fetch the same bytes.
@@ -193,7 +206,14 @@ export async function extractMkvSubtitles(
   } else {
     const { blob, total } = await fetchRange(fileId, 0, HEADER_FETCH_SIZE - 1);
     headerBuf = new Uint8Array(await blob.arrayBuffer());
-    fileSize = total;
+    // Prefer the authoritative size from Drive metadata. `total` is derived
+    // from the Content-Range header, which a cross-origin fetch can't read on
+    // the web build, so it silently collapses to the chunk length (4 MB) and
+    // disables cluster streaming. See `knownFileSize` doc above.
+    fileSize =
+      Number.isFinite(opts.knownFileSize) && (opts.knownFileSize as number) > 0
+        ? (opts.knownFileSize as number)
+        : total;
   }
   if (signal?.aborted) {
     return emptyExtractResult(headerBuf, fileSize);

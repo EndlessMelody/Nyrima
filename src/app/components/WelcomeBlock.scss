@@ -11,11 +11,6 @@
       var(--brand-alpha-weak) 0%,
       transparent 60%
     ),
-    radial-gradient(
-      720px 320px at 0% 100%,
-      var(--accent-alpha-weak) 0%,
-      transparent 60%
-    ),
     linear-gradient(
       180deg,
       color-mix(in srgb, var(--brand-alpha-weak) 70%, var(--surface-background))
@@ -32,14 +27,11 @@
   inset: 0;
   pointer-events: none;
   border-radius: inherit;
-  background:
-    linear-gradient(
-      90deg,
-      var(--hairline-pink) 0%,
-      transparent 30%,
-      transparent 70%,
-      var(--hairline-blue) 100%
-    );
+  background: linear-gradient(
+    90deg,
+    var(--hairline-pink) 0%,
+    transparent 40%
+  );
   mask:
     linear-gradient(#000, #000) content-box,
     linear-gradient(#000, #000);
@@ -119,20 +111,124 @@
   margin-top: 6px;
 }
 
-.ny-welcome__status {
+/* ───────────────────────── Setup progress stepper ──────────────────────── */
+
+.ny-welcome__progress {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ny-space-3);
+  list-style: none;
+  padding: 0;
+  margin: var(--ny-space-2) 0 0;
+}
+
+.ny-welcome__progress-step {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  margin-left: 4px;
-  padding: 6px 10px;
+  gap: 10px;
+  padding: 7px 14px 7px 7px;
   border: var(--dc-hairline);
   border-radius: 999px;
   background: var(--surface-background-weak);
+  transition:
+    border-color var(--ny-dur-base) ease,
+    background var(--ny-dur-base) ease;
+}
+
+.ny-welcome__progress-marker {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
   font-family: var(--dc-font-mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border: 1px solid var(--neutral-border-strong);
+  color: var(--neutral-on-background-weak);
+  background: var(--surface-background);
+
+  svg {
+    width: 14px;
+    height: 14px;
+  }
+}
+
+.ny-welcome__progress-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.2;
+  min-width: 0;
+}
+
+.ny-welcome__progress-label {
+  font-family: var(--dc-font-display);
+  font-size: 0.8125rem;
+  font-weight: 500;
   color: var(--neutral-on-background-medium);
+}
+
+.ny-welcome__progress-detail {
+  font-family: var(--dc-font-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--neutral-on-background-weak);
+  max-width: 24ch;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Done — brand-solid check marker. */
+.ny-welcome__progress-step.is-done {
+  border-color: var(--brand-border-medium);
+
+  .ny-welcome__progress-marker {
+    background: var(--brand-solid-strong);
+    border-color: transparent;
+    color: var(--brand-on-solid-strong);
+  }
+
+  .ny-welcome__progress-label {
+    color: var(--neutral-on-background-strong);
+  }
+}
+
+/* Active — the next gate to clear. Brand outline marker with a breathing ring
+   (motion only when allowed) so the eye lands on the actionable step. */
+.ny-welcome__progress-step.is-active {
+  border-color: var(--brand-border-strong);
+  background: var(--brand-alpha-weak);
+
+  .ny-welcome__progress-marker {
+    border-color: var(--brand-border-strong);
+    color: var(--brand-on-background-strong);
+    box-shadow: 0 0 0 0 var(--brand-alpha-weak);
+  }
+
+  .ny-welcome__progress-label {
+    color: var(--neutral-on-background-strong);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ny-welcome__progress-step.is-active .ny-welcome__progress-marker {
+    animation: ny-welcome-pulse var(--ny-dur-ambient) ease-in-out infinite
+      alternate;
+  }
+}
+
+@keyframes ny-welcome-pulse {
+  from {
+    box-shadow: 0 0 0 0 var(--brand-alpha-weak);
+  }
+  to {
+    box-shadow: 0 0 0 5px var(--brand-alpha-weak);
+  }
 }
 
 /* ───────────────────────── Feature grid ────────────────────────────────── */
@@ -173,7 +269,7 @@
 }
 
 .ny-welcome__feature:hover {
-  border-color: var(--brand-border-medium);
+  border-color: var(--neutral-border-strong);
   transform: translateY(-2px);
   box-shadow: var(--ny-shadow-card-hover);
 }

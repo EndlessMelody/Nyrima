@@ -1,11 +1,60 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
-import { crx } from "@crxjs/vite-plugin";
 import { fileURLToPath, URL } from "node:url";
-import manifest from "./src/manifest.config";
 
+/**
+ * Injects a Content-Security-Policy <meta> tag into the production
+ * index.html. Skipped under `vite dev` — a static CSP meta tag blocks
+ * Vite's HMR websocket and eval-based dev module updates.
+ */
+function cspPlugin(): Plugin {
+  const csp = [
+    "default-src 'self'",
+    // JASSUB (libass-wasm) instantiates its module via WebAssembly from the
+    // main thread before handing off to its worker.
+    "script-src 'self' 'wasm-unsafe-eval'",
+    // Once UI components and inline `style={{...}}` props rely on inline
+    // styles; the Google Fonts stylesheet is a <link> in index.html.
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com",
+    // Drive thumbnails/avatars are served from *.googleusercontent.com;
+    // local posters and Drive downloads use blob:/data:.
+    "img-src 'self' data: blob: https://*.googleusercontent.com https://drive.google.com",
+    // <video>/<audio> always play from blob: object URLs (Drive downloads,
+    // MSE MediaSource, local File handles) — never a remote URL directly.
+    "media-src 'self' blob:",
+    // Drive REST API + Supabase (social: friends/folder comments only).
+    "connect-src 'self' https://www.googleapis.com https://*.supabase.co",
+    // JASSUB loads its worker as a blob: URL wrapping the bundled script.
+    "worker-src 'self' blob:",
+    // Landing page YouTube embed (DownloadPage).
+    "frame-src https://www.youtube.com",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join("; ");
+
+  return {
+    name: "nyrima-csp",
+    transformIndexHtml: {
+      order: "post",
+      handler(html, ctx) {
+        if (ctx.server) return html;
+        return html.replace(
+          "<head>",
+          `<head>\n    <meta http-equiv="Content-Security-Policy" content="${csp}" />`,
+        );
+      },
+    },
+  };
+}
+
+// Nyrima is a normal web app. The former Chrome-extension build
+// (@crxjs/vite-plugin + src/manifest.config.ts) is retired — that code now
+// lives under legacy/extension and is not part of any build. See
+// src/platform/* for the web shim that replaces the extension runtime APIs.
 export default defineConfig({
-  plugins: [react(), crx({ manifest })],
+  plugins: [react(), cspPlugin()],
   resolve: {
     alias: [
       // @once-ui-system/core ships with a broken nested dist/package.json that
@@ -14,8 +63,6 @@ export default defineConfig({
       // bare specifier directly to the built ESM entry; subpaths
       // (/components, /css/*, etc.) keep going through normal exports.
       {
-        // Point at dist/components/index.js (not dist/index.js) so we never
-        // pull in dist/modules/* which depends on charts/prismjs/etc.
         find: /^@once-ui-system\/core$/,
         replacement: fileURLToPath(
           new URL(
@@ -24,10 +71,9 @@ export default defineConfig({
           ),
         ),
       },
-      // Once UI lists these as OPTIONAL peer deps that back features we don't
-      // ship (CodeBlock → prismjs, charts → recharts, MediaUpload → compressorjs / sharp).
-      // The chart modules are lazy-loaded but Rollup still bundles the chunks,
-      // so the stubs must expose the named exports each impl file expects.
+      // Once UI lists these as OPTIONAL peer deps backing features we don't ship
+      // (CodeBlock → prismjs, charts → recharts, MediaUpload → compressorjs /
+      // sharp). The stubs expose the named exports each impl file expects.
       {
         find: /^recharts(\/.*)?$/,
         replacement: fileURLToPath(
@@ -53,12 +99,9 @@ export default defineConfig({
         ),
       },
       // Next.js runtime stubs. Once UI is authored for Next.js and several of
-      // its components (<Logo>, <Media>, <Schema>, navigation modules) import
-      // next/link, next/image, next/navigation, next/script, next/server.
-      // In a Vite extension build there is no Next runtime, so we degrade
-      // them to native HTML elements / no-op hooks. None of these modules
-      // are actually rendered by Drive Cinema; the stubs exist solely to
-      // satisfy the barrel re-exports.
+      // its components import next/link, next/image, next/navigation,
+      // next/script, next/server. In a Vite app there is no Next runtime, so we
+      // degrade them to native HTML elements / no-op hooks.
       {
         find: /^next\/link$/,
         replacement: fileURLToPath(
@@ -108,19 +151,27 @@ export default defineConfig({
     strictPort: true,
     hmr: { port: 5173 },
   },
+  // Without this, Vite's dependency scanner crawls every index.html under the
+  // project root — including legacy/extension/popup/index.html, which is
+  // frozen extension code excluded from all builds and references constants
+  // (e.g. APP_PAGE) that no longer exist. Pin the scan to the real app entry.
+  optimizeDeps: {
+    entries: ["index.html"],
+  },
   build: {
     target: "esnext",
     sourcemap: false,
     rollupOptions: {
-      input: {
-        // The extension's main app page is opened via chrome.runtime.getURL(),
-        // not action.default_popup, so @crxjs/vite-plugin doesn't auto-detect
-        // it as an HTML entry. Declare it explicitly so Vite rewrites the
-        // <script src="./main.tsx"> to the bundled chunk and emits the file at
-        // dist/src/app/index.html, preserving the APP_PAGE path.
-        appPage: fileURLToPath(
-          new URL("./src/app/index.html", import.meta.url),
-        ),
+      output: {
+        manualChunks(id) {
+          // Heavy, isolated landing-page vendors — split so they don't bloat
+          // the app's cold-start bundle.
+          if (id.includes("node_modules/three")) return "three-vendor";
+          if (id.includes("node_modules/@once-ui-system/core"))
+            return "once-ui-vendor";
+          if (id.includes("node_modules/lucide-react")) return "icons-vendor";
+          return undefined;
+        },
       },
     },
   },
@@ -131,11 +182,9 @@ export default defineConfig({
       },
     },
   },
-  // The JASSUB worker (Emscripten output bundled inside `jassub/dist/wasm/`)
-  // gets picked up by Vite's worker detection when we import its .js via
-  // `?url`. Vite defaults to `iife` for workers, which Rollup rejects under a
-  // code-splitting build. Force ES output so the worker can be emitted as a
-  // module-format chunk alongside the rest of the extension bundle.
+  // The JASSUB worker (Emscripten output) is picked up by Vite's worker
+  // detection. Force ES output so the worker emits as a module-format chunk
+  // alongside the rest of the bundle.
   worker: {
     format: "es",
   },

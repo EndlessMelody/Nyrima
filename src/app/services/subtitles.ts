@@ -24,9 +24,9 @@ export const EMPTY_CUES: readonly SubCue[] = Object.freeze([]);
 const LANG_LABELS: Record<string, string> = {
   en: "English",
   vi: "Tiếng Việt",
-  ja: "日本語",
+  ja: "Japanese",
   ko: "한국어",
-  zh: "中文",
+  zh: "Chinese",
   es: "Español",
   fr: "Français",
   de: "Deutsch",
@@ -322,16 +322,16 @@ export function alignmentToPlacement(
 }
 
 /**
- * Family name JASSUB registers the bundled fallback woff2 under. Kept in
- * sync with `BUNDLED_FONT_FAMILY` in JassubOverlay.tsx — rewriting every
+ * Family name JASSUB registers the bundled fallback font under. Kept in
+ * sync with `bundledAssFontUrl` in JassubOverlay.tsx — rewriting every
  * Style.Fontname column to this exact value short-circuits libass's font
  * lookup so it never fans out to the OS font catalogue or Google Fonts.
  */
-export const BUNDLED_ASS_FONT_FAMILY = "liberation sans";
+export const BUNDLED_ASS_FONT_FAMILY = "Asap";
 
 /**
  * Rewrite Fontname references in an ASS/SSA script header to the single
- * bundled fallback face JASSUB ships with.
+ * bundled fallback face JASSUB receives.
  *
  * Why: Nyrima intentionally does not load arbitrary fonts (no `queryFonts:
  * "local"`, no attachment mounting). When the script references a Fontname
@@ -564,11 +564,12 @@ export function parseSubtitles(content: string, ext: string): SubCue[] {
     case "ass":
     case "ssa":
       return parseAss(content);
-    default:
+    default: {
       // Try SRT first, then VTT
       const srt = parseSrt(content);
       if (srt.length > 0) return srt;
       return parseVtt(content);
+    }
   }
 }
 

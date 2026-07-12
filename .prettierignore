@@ -1,0 +1,8 @@
+dist
+legacy
+node_modules
+coverage
+src/stubs
+package-lock.json
+*.min.js
+public

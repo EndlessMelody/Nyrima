@@ -7,9 +7,6 @@ export const APP_NAME = "Nyrima";
 /** The required folder name in Google Drive. */
 export const REQUIRED_FOLDER_NAME = "Nyrima";
 
-/** Path to the main app page bundled by the extension. */
-export const APP_PAGE = "src/app/index.html";
-
 /** Storage keys used in chrome.storage.local. */
 export const STORAGE_KEYS = {
   /** The user's verified Nyrima root folder. Single source of truth for what
@@ -54,6 +51,25 @@ export const STORAGE_KEYS = {
    *  fetch timestamp. Refreshed on a 24h TTL so the Discover rail doesn't
    *  hammer GitHub every Social hub visit. */
   DIRECTORY_CACHE: "dc.directoryCache.v1",
+  // --- Light Novel / EPUB reader ---------------------------------------------
+  /** Global reader typography + theme preferences (one set, applied to every
+   *  book) — see ReaderPrefs. */
+  READER_PREFS: "dc.readerPrefs.v1",
+  /** Per-book reading progress (chapter + scroll position), keyed by Drive
+   *  file id. Restored on reopen so the reader resumes exactly where the user
+   *  left off. */
+  READER_PROGRESS: "dc.readerProgress.v1",
+  /** Per-book bookmarks, keyed by Drive file id. */
+  READER_BOOKMARKS: "dc.readerBookmarks.v1",
+  /** Per-book highlights + notes, keyed by Drive file id. */
+  READER_HIGHLIGHTS: "dc.readerHighlights.v1",
+  // --- Posts (block-based blog) ----------------------------------------------
+  /** Cached Drive folder id of the user's `Posts/` folder, mirroring
+   *  SHARED_FOLDER_ID's caching strategy. Invalidated on Nyrima root re-pair. */
+  POSTS_FOLDER_ID: "dc.postsFolderId",
+  /** Cached flattened feed rows from the last successful posts sync. Lets
+   *  the Posts feed render the previous state while Drive refreshes. */
+  POSTS_FEED_CACHE: "dc.postsFeedCache.v1",
 } as const;
 
 /** Max entries kept in the per-file playback-mode LRU. */
@@ -174,3 +190,51 @@ export const NYRIMA_DIRECTORY_ISSUE_URL =
  *  don't churn fast, and a stale cache is strictly better than spamming
  *  unauthenticated requests at GitHub. */
 export const DIRECTORY_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+// ---------------------------------------------------------------------------
+// Posts — block-based blog layer
+//
+// Drive-only, same trust model as the Phase 4 sharing layer: post bodies +
+// media live under a private `Posts/` folder (sibling of `Shared/`) in the
+// author's own Nyrima root. Publishing flips the individual post folder
+// public and drops a slim announcement into `Shared/posts.json` — a new
+// file, never inlined into the existing `Shared/index.json` (whose
+// sanitizer rejects any schema it doesn't recognise).
+// ---------------------------------------------------------------------------
+
+/** Subfolder inside the Nyrima root that holds all of the user's posts
+ *  (drafts + published), one child folder per post. Private until the
+ *  individual post folder is explicitly published. */
+export const POSTS_FOLDER_NAME = "Posts";
+
+/** Subfolder inside a post folder holding uploaded/copied media assets. */
+export const POST_ASSETS_FOLDER_NAME = "assets";
+
+/** Filename of the post document at the root of a post folder. */
+export const POST_JSON_FILENAME = "post.json";
+
+/** Filename of the announcements manifest at the root of `Shared/`. Sibling
+ *  of `index.json` / `comments.jsonl`, not merged into either. */
+export const POSTS_MANIFEST_FILENAME = "posts.json";
+
+/** MIME type used when uploading the post document JSON. */
+export const POST_JSON_MIME = "application/json";
+
+/** Soft cap on announcements inlined in `Shared/posts.json`. Beyond this,
+ *  the oldest announcement falls off — mirrors MAX_SHARE_INDEX_ENTRIES. */
+export const MAX_POSTS_MANIFEST_ENTRIES = 200;
+
+/** Hard cap on the number of blocks in a single post document. Keeps the
+ *  manifest + post.json bounded and gives the sanitizer a denial-of-service
+ *  backstop against a malformed/hostile followed-user post. */
+export const MAX_POST_BLOCKS = 500;
+
+/** Hard cap on block nesting depth (children-of-children-of-children…). */
+export const MAX_POST_BLOCK_DEPTH = 4;
+
+export const MAX_POST_TITLE_CHARS = 240;
+export const MAX_POST_EXCERPT_CHARS = 280;
+export const MAX_POST_TAG_CHARS = 32;
+export const MAX_POST_TAGS = 8;
+export const MAX_POST_TEXT_RUN_CHARS = 10_000;
+export const MAX_POST_CAPTION_CHARS = 600;

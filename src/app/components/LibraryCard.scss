@@ -41,15 +41,10 @@
     box-shadow:
       0 0 0 1px var(--brand-border-medium),
       0 18px 48px -18px rgba(0, 0, 0, 0.6),
-      0 0 28px -12px var(--accent-alpha-medium);
+      0 0 28px -12px var(--brand-alpha-medium);
 
     .ny-library-card__hover {
       opacity: 1;
-    }
-
-    .ny-library-card__actions {
-      opacity: 1;
-      pointer-events: auto;
     }
 
     .ny-library-card__poster-art {
@@ -85,8 +80,8 @@
     inset: 0;
     background: linear-gradient(
       180deg,
-      rgba(6, 8, 20, 0.05) 0%,
-      rgba(6, 8, 20, 0.55) 100%
+      rgba(7, 9, 15, 0.05) 0%,
+      rgba(7, 9, 15, 0.55) 100%
     );
     pointer-events: none;
     z-index: 1;
@@ -119,11 +114,6 @@
       var(--brand-alpha-medium) 0%,
       transparent 55%
     ),
-    radial-gradient(
-      circle at 75% 80%,
-      var(--accent-alpha-medium) 0%,
-      transparent 55%
-    ),
     linear-gradient(
       135deg,
       var(--surface-background-strong) 0%,
@@ -151,7 +141,7 @@
   letter-spacing: -0.04em;
   color: var(--neutral-on-background-strong);
   opacity: 0.92;
-  text-shadow: 0 4px 16px rgba(6, 8, 20, 0.45);
+  text-shadow: 0 4px 16px rgba(7, 9, 15, 0.45);
 }
 
 .ny-library-card__mark {
@@ -164,27 +154,72 @@
   border-radius: 6px !important;
 }
 
-// Pinned pip — neon pink dot top-right.
-.ny-library-card__pin-pip {
+.ny-library-card__poster-tools {
   position: absolute;
   top: 10px;
   right: 10px;
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--brand-solid-strong);
-  box-shadow: 0 0 12px var(--brand-alpha-strong);
-  z-index: 3;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
 }
 
-// Watched-ratio pill — top-right over the poster, just below the pin pip
-// when both are present. Switches to a solid accent when the user has
-// finished every episode in the library.
+.ny-library-card__pin-action {
+  appearance: none;
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(7, 9, 15, 0.72);
+  box-shadow: 0 10px 24px -14px rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(10px);
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+
+  svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  &:hover,
+  &:focus-visible {
+    color: var(--neutral-on-solid-strong);
+    background: var(--brand-background-strong);
+    border-color: var(--brand-border-strong);
+    box-shadow:
+      0 12px 26px -12px rgba(0, 0, 0, 0.8),
+      0 0 0 1px var(--brand-border-medium);
+    transform: translateY(-1px);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--brand-border-strong);
+    outline-offset: 2px;
+  }
+
+  &.is-active {
+    color: var(--neutral-on-solid-strong);
+    background: var(--brand-solid-strong);
+    border-color: transparent;
+    box-shadow:
+      0 10px 24px -10px var(--brand-alpha-strong),
+      0 0 0 1px rgba(255, 255, 255, 0.18) inset;
+  }
+}
+
+// Watched-ratio pill — stacked below the poster pin control. Switches to a
+// solid accent when the user has finished every episode in the library.
 .ny-library-card__progress-pill {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 3;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -196,19 +231,15 @@
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.92);
-  background: rgba(6, 8, 20, 0.7);
+  background: rgba(7, 9, 15, 0.7);
   border: 1px solid rgba(255, 255, 255, 0.14);
   backdrop-filter: blur(8px);
 
   &.is-complete {
     color: var(--neutral-on-solid-strong);
-    background: linear-gradient(
-      135deg,
-      var(--brand-solid-medium),
-      var(--accent-solid-medium)
-    );
+    background: var(--brand-solid-strong);
     border-color: transparent;
-    box-shadow: 0 4px 14px -4px var(--accent-alpha-strong);
+    box-shadow: 0 4px 14px -4px var(--brand-alpha-strong);
 
     &::before {
       content: "✓";
@@ -218,17 +249,10 @@
   }
 }
 
-// When both pin and progress pill are present, push the pin to the corner
-// of the chrome stack so they don't overlap.
-.ny-library-card__poster:has(.ny-library-card__progress-pill)
-  .ny-library-card__pin-pip {
-  top: 14px;
-  right: 70px;
-}
-
 // "N new" badge — bottom-right corner of the poster so it doesn't compete
 // with the progress pill (top-right) or the continue pill (top-left). Uses
-// the accent gradient so it reads as an unread / actionable signal.
+// the quiet info accent so it reads as an unread / actionable signal without
+// competing with the brand "lamp" usages elsewhere on the card.
 .ny-library-card__new-pill {
   position: absolute;
   bottom: 10px;
@@ -244,11 +268,7 @@
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--neutral-on-solid-strong);
-  background: linear-gradient(
-    135deg,
-    var(--accent-solid-strong),
-    var(--brand-solid-medium)
-  );
+  background: var(--accent-solid-strong);
   border: 1px solid transparent;
   box-shadow: 0 4px 14px -4px var(--accent-alpha-strong);
 }
@@ -269,11 +289,7 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--neutral-on-solid-strong);
-  background: linear-gradient(
-    135deg,
-    var(--brand-background-strong),
-    var(--accent-background-strong)
-  );
+  background: var(--brand-solid-strong);
   box-shadow:
     0 6px 18px -6px var(--brand-alpha-strong),
     0 0 0 1px rgba(255, 255, 255, 0.18) inset;
@@ -293,8 +309,8 @@
   justify-content: center;
   background: linear-gradient(
     180deg,
-    rgba(6, 8, 20, 0.0) 30%,
-    rgba(6, 8, 20, 0.55) 100%
+    rgba(7, 9, 15, 0.0) 30%,
+    rgba(7, 9, 15, 0.55) 100%
   );
   opacity: 0;
   transition: opacity 200ms ease;
@@ -304,8 +320,8 @@
 :root[data-theme="light"] .ny-library-card__hover {
   background: linear-gradient(
     180deg,
-    rgba(251, 248, 255, 0.0) 30%,
-    rgba(251, 248, 255, 0.65) 100%
+    rgba(248, 249, 252, 0.0) 30%,
+    rgba(248, 249, 252, 0.65) 100%
   );
 }
 
@@ -319,11 +335,7 @@
   font-size: 0.8125rem;
   font-weight: 500;
   color: var(--neutral-on-solid-strong);
-  background: linear-gradient(
-    135deg,
-    var(--brand-solid-strong),
-    var(--accent-solid-strong)
-  );
+  background: var(--brand-solid-strong);
   box-shadow:
     0 8px 22px -6px var(--brand-alpha-strong),
     0 0 0 1px rgba(255, 255, 255, 0.2) inset;
@@ -369,56 +381,32 @@
   display: inline-block;
 }
 
-// --- Hover actions (pin / remove) ------------------------------------------
-.ny-library-card__actions {
-  position: absolute;
-  bottom: 12px;
-  right: 12px;
-  display: inline-flex;
-  gap: 4px;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 160ms ease;
-  z-index: 4;
-}
+.ny-library-grid--list .ny-library-card {
+  display: grid;
+  grid-template-columns: 184px minmax(0, 1fr);
+  gap: 0;
+  min-height: 118px;
 
-.ny-library-card__action {
-  appearance: none;
-  border: 1px solid var(--neutral-border-medium);
-  background: var(--surface-background);
-  color: var(--neutral-on-background-medium);
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition:
-    background 140ms ease,
-    color 140ms ease,
-    border-color 140ms ease;
-
-  svg {
-    width: 12px;
-    height: 12px;
+  .ny-library-card__poster {
+    height: 100%;
+    min-height: 118px;
+    border-radius: var(--ny-radius-md) 0 0 var(--ny-radius-md);
+    aspect-ratio: auto;
   }
 
-  &:hover {
-    background: var(--brand-alpha-weak);
-    color: var(--brand-on-background-strong);
-    border-color: var(--brand-border-medium);
-  }
-
-  &.is-active {
-    color: var(--brand-on-background-strong);
-    background: var(--brand-alpha-weak);
-    border-color: var(--brand-border-medium);
+  .ny-library-card__body {
+    justify-content: center;
+    padding: 16px 18px;
   }
 }
 
-.ny-library-card__action--danger:hover {
-  background: transparent;
-  color: var(--danger-solid-strong);
-  border-color: var(--danger-solid-strong);
+@media (max-width: 720px) {
+  .ny-library-grid--list .ny-library-card {
+    grid-template-columns: 1fr;
+
+    .ny-library-card__poster {
+      border-radius: var(--ny-radius-md) var(--ny-radius-md) 0 0;
+      aspect-ratio: 16 / 9;
+    }
+  }
 }

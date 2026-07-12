@@ -1,0 +1,130 @@
+.ny-post-editor {
+  border: var(--dc-hairline);
+  border-radius: var(--ny-radius-md, 10px);
+  padding: var(--ny-space-4, 16px);
+  background: var(--page-background);
+  min-height: 320px;
+
+  .bn-editor {
+    padding: 0;
+  }
+}
+
+.ny-drive-image-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+
+  img {
+    display: block;
+    max-width: 100%;
+    border-radius: var(--ny-radius-sm, 6px);
+  }
+
+  &--inline img {
+    max-width: 320px;
+  }
+
+  &--wide img {
+    max-width: 100%;
+  }
+
+  &--full {
+    margin-left: calc(-1 * var(--ny-space-4, 16px));
+    margin-right: calc(-1 * var(--ny-space-4, 16px));
+
+    img {
+      max-width: none;
+      width: calc(100% + var(--ny-space-4, 16px) * 2);
+      border-radius: 0;
+    }
+  }
+
+  &--left {
+    align-items: flex-start;
+  }
+
+  &--center {
+    align-items: center;
+  }
+
+  &--right {
+    align-items: flex-end;
+  }
+}
+
+.ny-drive-image-block--empty {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 24px;
+  border: 1px dashed var(--neutral-alpha-weak);
+  border-radius: var(--ny-radius-sm, 6px);
+
+  button {
+    font-family: var(--dc-font-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 8px 14px;
+    border-radius: 6px;
+    border: var(--dc-hairline);
+    background: transparent;
+    color: var(--neutral-on-background-strong);
+    cursor: pointer;
+
+    &:hover {
+      background: var(--neutral-alpha-weak);
+    }
+  }
+}
+
+.ny-drive-image-block__toolbar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+
+  button,
+  select {
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: var(--dc-hairline);
+    background: transparent;
+    color: var(--neutral-on-background-medium);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: inherit;
+  }
+}
+
+.ny-drive-image-block__placeholder {
+  padding: 24px;
+  text-align: center;
+  color: var(--neutral-on-background-weak);
+  font-family: var(--dc-font-mono);
+  font-size: 0.75rem;
+
+  &--error {
+    color: var(--danger-on-background-strong, #ff8a8a);
+  }
+}
+
+.ny-drive-image-block__caption {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--neutral-on-background-weak);
+  font-family: var(--dc-font-body);
+  font-size: 0.8125rem;
+  text-align: center;
+
+  &:focus {
+    outline: none;
+    color: var(--neutral-on-background-strong);
+  }
+}

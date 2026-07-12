@@ -99,6 +99,7 @@ export async function importShareTargetToDrive(
 
 export function sanitizeImportFolderName(raw: string | undefined): string {
   const cleaned = (raw ?? "")
+    // eslint-disable-next-line no-control-regex -- intentionally strips C0 control chars from imported folder names
     .replace(/[\u0000-\u001f\\/:*?"<>|]+/g, " ")
     .replace(/\s+/g, " ")
     .trim()

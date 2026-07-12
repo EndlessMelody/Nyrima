@@ -20,6 +20,16 @@
   isolation: isolate;
 }
 
+.dc-shell--lobby {
+  min-height: 100dvh;
+}
+
+.dc-lobby-page {
+  position: relative;
+  min-height: 100dvh;
+  overflow: hidden;
+}
+
 .dc-shell__header {
   position: sticky;
   top: 0;
@@ -29,20 +39,13 @@
   margin: 0 auto;
   height: 64px;
 
-  /* Glass base: a layered translucent gradient + heavy backdrop blur. The
-   * gradient sits on top of the page-background tint so the bar reads as
-   * tinted glass rather than a flat fill. Two soft radial brushes
-   * (brand top-left, accent bottom-right) give a faint hue shift across
-   * the bar without competing with content for attention. */
+  /* Glass base: a translucent tint + heavy backdrop blur. One soft radial
+   * brush (the lamp, top-left) gives a faint hue shift across the bar
+   * without competing with content for attention. */
   background:
     radial-gradient(
       120% 220% at 0% 0%,
-      color-mix(in srgb, var(--brand-on-background-medium) 14%, transparent),
-      transparent 55%
-    ),
-    radial-gradient(
-      140% 220% at 100% 120%,
-      color-mix(in srgb, var(--accent-on-background-medium) 12%, transparent),
+      color-mix(in srgb, var(--brand-on-background-medium) 10%, transparent),
       transparent 55%
     ),
     color-mix(in srgb, var(--page-background) 70%, transparent);
@@ -163,66 +166,19 @@
   opacity: 0;
 }
 
-/* Anime-style brand wordmark — chunky rounded face with a slow-flowing
- * pink↔cyan gradient and a soft neon halo. The gradient is painted by
- * clipping a wider linear-gradient to the glyphs (`background-clip: text`),
- * sized at 200% so animating `background-position` cycles the band across
- * the letterforms without ever clipping at the edges. Two layered
- * `drop-shadow` filters apply a brand-pink + accent-cyan bloom; using
- * `filter` (not `text-shadow`) lets the halo respect the per-glyph alpha
- * from `background-clip`, so the glow follows the gradient's hue.
- * Reduced-motion users get the static rendering. */
+/* Brand wordmark — chunky rounded face, solid pink (the lamp). One color,
+ * no animation, no halo: the wordmark is the lamp's filament, not a sign. */
 .dc-shell__name {
   font-family: var(--dc-font-wordmark);
-  font-size: 1.0625rem; /* 17px — a hair larger to balance the new weight */
+  font-size: 1.0625rem; /* 17px — a hair larger to balance the weight */
   font-weight: 800;
   letter-spacing: -0.01em;
   white-space: nowrap;
-  background: linear-gradient(
-    100deg,
-    var(--brand-on-background-strong) 0%,
-    var(--accent-on-background-strong) 45%,
-    var(--brand-on-background-strong) 100%
-  );
-  background-size: 220% 100%;
-  background-position: 0% 50%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
-  filter:
-    drop-shadow(0 0 10px var(--brand-alpha-medium))
-    drop-shadow(0 0 4px var(--accent-alpha-medium));
-  animation: ny-wordmark-flow 7s ease-in-out infinite;
-  will-change: background-position;
+  color: var(--brand-on-background-strong);
 }
 
-/* Reset the accent span — the gradient already does the colour work, and
- * leaving the accent's own colour would re-paint "ma" with a solid fill,
- * breaking the flowing effect on the back half of the word. */
 .dc-shell__name-accent {
   color: inherit;
-  -webkit-text-fill-color: inherit;
-  background: inherit;
-}
-
-@keyframes ny-wordmark-flow {
-  0% {
-    background-position: 0% 50%;
-  }
-  50% {
-    background-position: 100% 50%;
-  }
-  100% {
-    background-position: 0% 50%;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .dc-shell__name {
-    animation: none;
-    background-position: 0% 50%;
-  }
 }
 
 .dc-shell__nav {
@@ -301,12 +257,8 @@
   height: 16px;
   padding: 0 4px;
   border-radius: 999px;
-  background: linear-gradient(
-    180deg,
-    var(--brand-solid-medium),
-    var(--accent-solid-medium)
-  );
-  color: var(--page-background);
+  background: var(--brand-solid-strong);
+  color: var(--brand-on-solid-strong);
   font-family: var(--dc-font-mono);
   font-size: 0.625rem;
   font-weight: 700;
@@ -315,7 +267,7 @@
   letter-spacing: 0.02em;
   box-shadow:
     0 0 0 1.5px var(--page-background),
-    0 0 10px color-mix(in srgb, var(--brand-solid-medium) 60%, transparent);
+    0 0 8px color-mix(in srgb, var(--brand-solid-strong) 60%, transparent);
 }
 
 .dc-shell__nav-btn svg {

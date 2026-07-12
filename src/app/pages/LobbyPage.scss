@@ -1,0 +1,3359 @@
+/**
+ * Lobby desktop dashboard shell.
+ *
+ * The shell owns the /app route only. Other app routes keep AppShell's
+ * historical topbar/footer chrome.
+ */
+
+.ny-landing {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  width: 100%;
+}
+
+.ny-lobby-shell {
+  --sidebar-expanded-width: 220px;
+  --sidebar-collapsed-width: 72px;
+  --player-dock-height: 76px;
+  // Shared height for the top band so the sidebar brand row (logo + collapse
+  // toggle) lines up exactly with the command bar / search on the same row.
+  --topbar-height: 62px;
+  --app-gap: 16px;
+  --panel-radius: 20px;
+  --sidebar-width: var(--sidebar-expanded-width);
+
+  min-height: 100vh;
+  height: 100dvh;
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) var(--player-dock-height);
+  grid-template-areas:
+    "sidebar main"
+    "player player";
+  gap: 0;
+  // Animate the rail width when the sidebar is minimized/expanded. The track
+  // width is driven by --sidebar-width (set inline on toggle), so easing the
+  // grid template glides the sidebar — and the main column that fills the
+  // remaining space — between the two widths instead of snapping.
+  transition: grid-template-columns 280ms cubic-bezier(0.22, 1, 0.36, 1);
+  overflow: hidden;
+  color: var(--neutral-on-background-strong);
+  // Single low-alpha brand "lamp" wash, top-left.
+  background-color: var(--page-background);
+  background-image: linear-gradient(135deg, var(--brand-alpha-weak), transparent 28%);
+  background-repeat: no-repeat;
+}
+
+.ny-sidebar {
+  grid-area: sidebar;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  // No top padding: the brand row owns the top band itself so its baseline
+  // lines up with the command bar across the divider.
+  padding: 0 10px 14px;
+  border-right: 1px solid var(--neutral-border-medium);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 30%),
+    color-mix(in srgb, var(--surface-background-strong) 76%, transparent);
+  backdrop-filter: blur(22px) saturate(145%);
+  -webkit-backdrop-filter: blur(22px) saturate(145%);
+  box-shadow:
+    inset -1px 0 0 var(--neutral-border-weak),
+    18px 0 44px -36px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  // Ease the inner padding alongside the rail-width change on collapse/expand.
+  transition: padding 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.ny-sidebar__brand-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--topbar-height);
+  flex: 0 0 auto;
+  // Span the full sidebar width (cancel the rail's 10px inset) so the bottom
+  // divider lines up with the command bar's bottom border into one top band.
+  margin: 0 -10px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--neutral-border-medium);
+}
+
+.ny-sidebar__brand {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  background: transparent;
+  color: var(--neutral-on-background-strong);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 12px;
+}
+
+.ny-sidebar__wordmark {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--dc-font-wordmark);
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  color: var(--brand-on-background-strong);
+  white-space: nowrap;
+  transition:
+    max-width 210ms ease,
+    opacity 170ms ease;
+}
+
+.ny-sidebar__toggle {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--neutral-border-medium);
+  border-radius: 10px;
+  color: var(--neutral-on-background-medium);
+  background: rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+  transition:
+    color 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease,
+    transform 160ms ease;
+
+  svg {
+    width: 17px;
+    height: 17px;
+  }
+
+  &:hover {
+    color: var(--neutral-on-background-strong);
+    border-color: var(--brand-border-medium);
+    background: var(--brand-alpha-weak);
+    transform: translateY(-1px);
+  }
+}
+
+.ny-sidebar__nav {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  // Tightened spacing + the removal of the footer card mean the full item
+  // list fits without scrolling at a normal desktop height. `auto` only
+  // kicks in (with a hidden scrollbar) on unusually short windows.
+  overflow-y: auto;
+  padding: 4px 0;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.ny-sidebar__section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ny-sidebar__section-label {
+  padding: 0 11px;
+  color: var(--neutral-on-background-weak);
+  font-family: var(--dc-font-mono);
+  font-size: 0.64rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  // Collapse drives height/padding to 0 (not max-width), so ease those too —
+  // otherwise the label height snaps shut while the icons are still gliding.
+  transition:
+    height 210ms cubic-bezier(0.22, 1, 0.36, 1),
+    padding 210ms cubic-bezier(0.22, 1, 0.36, 1),
+    margin 210ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 150ms ease;
+}
+
+.ny-sidebar__section-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ny-sidebar__item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-height: 42px;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  padding: 0 11px;
+  color: var(--neutral-on-background-medium);
+  background: transparent;
+  cursor: pointer;
+  overflow: hidden;
+  transition:
+    color 170ms ease,
+    background 170ms ease,
+    border-color 170ms ease,
+    box-shadow 170ms ease;
+
+  svg {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 18px;
+    stroke-width: 1.8;
+  }
+
+  &:hover {
+    color: var(--neutral-on-background-strong);
+    background: var(--neutral-alpha-weak);
+    border-color: var(--neutral-border-medium);
+  }
+
+  &.is-active {
+    color: var(--neutral-on-solid-strong);
+    border-color: rgba(255, 255, 255, 0.16);
+    background: var(--brand-solid-strong);
+    box-shadow:
+      0 10px 28px -18px var(--brand-alpha-strong),
+      inset 0 1px 0 rgba(255, 255, 255, 0.22);
+
+    svg {
+      filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.36));
+    }
+  }
+
+  &.is-disabled {
+    cursor: not-allowed;
+    opacity: 0.48;
+  }
+}
+
+.ny-sidebar__item-label {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--dc-font-body);
+  font-size: 0.84rem;
+  font-weight: 600;
+  transition:
+    max-width 210ms ease,
+    opacity 170ms ease;
+}
+
+.ny-lobby-shell.is-sidebar-collapsed {
+  .ny-sidebar {
+    padding-inline: 9px;
+  }
+
+  // Collapsed: drop the logo + wordmark entirely so the rail reads as
+  // intentional — only the centered toggle sits at the top, icons below.
+  .ny-sidebar__brand {
+    display: none;
+  }
+
+  .ny-sidebar__wordmark,
+  .ny-sidebar__item-label {
+    max-width: 0;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  // Section labels collapse fully (height 0, no padding) so they leave no
+  // vertical gap — the rail reads as one clean, centered column of icons.
+  .ny-sidebar__section-label {
+    height: 0;
+    margin: 0;
+    padding: 0;
+    opacity: 0;
+    overflow: hidden;
+  }
+
+  // Center the brand divider row + toggle within the rail.
+  .ny-sidebar__brand-row {
+    justify-content: center;
+    margin: 0;
+    padding: 0;
+  }
+
+  .ny-sidebar__toggle {
+    margin: 0 auto;
+  }
+
+  // Each nav button becomes a fixed rounded-square, centered on both axes.
+  // gap:0 stops the zero-width hidden label from nudging the glyph off-centre;
+  // a fixed 44px box gives every item — and the active gradient tile — the
+  // same balanced footprint so the collapsed rail looks intentional.
+  .ny-sidebar__item {
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+    margin: 0 auto;
+    padding: 0;
+    gap: 0;
+    justify-content: center;
+  }
+}
+
+.ny-lobby-main {
+  grid-area: main;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ny-lobby-main__guest:not(:empty) {
+  .ny-guest-banner {
+    width: min(860px, 100%);
+    margin: 0;
+  }
+}
+
+.ny-command-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  overflow: hidden;
+  isolation: isolate;
+  // Fixed height shared with the sidebar brand row so the search sits on the
+  // same line as the logo + collapse toggle.
+  height: var(--topbar-height);
+  display: grid;
+  // Wider search column.
+  grid-template-columns: minmax(360px, 720px) minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+
+  // Horizontal padding matches the scroll content gap so the search bar's left
+  // edge lines up with the section cards below.
+  padding: 0 var(--app-gap);
+
+  border-bottom: 1px solid var(--neutral-border-medium);
+  background: color-mix(in srgb, var(--page-background) 74%, transparent);
+  backdrop-filter: blur(24px) saturate(150%);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background: radial-gradient(140px 46px at 25% 50%, var(--brand-alpha-medium), transparent 66%);
+  }
+}
+
+.ny-lobby-main__scroll {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 1px var(--app-gap) var(--app-gap);
+}
+
+.ny-command-bar__search {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--neutral-border-medium);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface-background) 78%, transparent);
+  color: var(--neutral-on-background-medium);
+
+  svg {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 18px;
+  }
+
+  input {
+    min-width: 0;
+    flex: 1;
+    height: 38px;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--neutral-on-background-strong);
+    font: inherit;
+  }
+
+  input::placeholder {
+    color: var(--neutral-on-background-weak);
+  }
+}
+
+.ny-command-bar__search {
+  padding: 0 10px 0 13px;
+}
+
+.ny-command-bar__shortcut {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border: 1px solid var(--neutral-border-medium);
+  border-radius: 7px;
+  color: var(--neutral-on-background-weak);
+  font-family: var(--dc-font-mono);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.ny-command-bar__actions {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.ny-command-bar__action,
+.ny-command-bar__icon,
+.ny-dashboard-btn,
+.ny-health-rail__actions button,
+.ny-quick-actions button {
+  border: 1px solid var(--neutral-border-medium);
+  border-radius: 10px;
+  color: var(--neutral-on-background-medium);
+  background: color-mix(in srgb, var(--surface-background) 74%, transparent);
+  cursor: pointer;
+  transition:
+    color 160ms ease,
+    background 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease,
+    opacity 160ms ease;
+
+  &:hover:not(:disabled) {
+    color: var(--neutral-on-background-strong);
+    border-color: var(--brand-border-medium);
+    background: var(--brand-alpha-weak);
+    transform: translateY(-1px);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.48;
+  }
+}
+
+.ny-command-bar__action {
+  position: relative;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  font-size: 0.82rem;
+  font-weight: 650;
+
+  svg {
+    width: 17px;
+    height: 17px;
+  }
+}
+
+.ny-command-bar__icon {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+
+  svg {
+    width: 17px;
+    height: 17px;
+  }
+}
+
+.ny-command-bar__badge {
+  min-width: 18px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0 5px;
+  border-radius: 999px;
+  color: var(--neutral-on-solid-strong);
+  background: var(--brand-solid-strong);
+  font-family: var(--dc-font-mono);
+  font-size: 0.66rem;
+}
+
+.ny-command-bar__dot {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--brand-on-background-strong);
+  box-shadow: 0 0 10px var(--brand-alpha-strong);
+}
+
+.ny-lobby-main__scroll {
+  // The whole right grid scrolls as one unit. The library column and the
+  // health rail no longer scroll independently — they flow at their natural
+  // height and scroll together here. Only the command bar stays pinned; the
+  // welcome banner scrolls away with everything else.
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  // Tight top padding so the hero sits close under the slim command bar.
+  padding: 10px var(--app-gap) var(--app-gap);
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.ny-hero-section {
+  flex: 0 0 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.ny-welcome-banner {
+  position: relative;
+  height: clamp(220px, 18vw, 270px);
+  min-height: 220px;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  border: 1px solid rgba(244, 92, 255, 0.34);
+  border-radius: var(--panel-radius);
+  overflow: hidden;
+  isolation: isolate;
+
+  background:
+    radial-gradient(
+      circle at 18% 24%,
+      rgba(240, 92, 255, 0.3) 0%,
+      rgba(240, 92, 255, 0.1) 34%,
+      transparent 60%
+    ),
+    linear-gradient(
+      135deg,
+      rgba(32, 18, 58, 0.9) 0%,
+      rgba(13, 18, 42, 0.92) 42%,
+      rgba(8, 29, 50, 0.9) 100%
+    );
+
+  backdrop-filter: blur(22px) saturate(135%);
+  -webkit-backdrop-filter: blur(22px) saturate(135%);
+
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 18px 70px -38px rgba(240, 92, 255, 0.62);
+
+  &::before,
+  &::after {
+    content: "";
+    position: absolute;
+    pointer-events: none;
+  }
+
+  &::before {
+    inset: 0;
+    z-index: -2;
+    background:
+      linear-gradient(118deg, transparent 0 28%, rgba(255, 255, 255, 0.06) 28.2% 28.45%, transparent 28.7% 100%),
+      linear-gradient(150deg, transparent 0 72%, rgba(255, 79, 216, 0.08) 72.2% 72.45%, transparent 72.7% 100%);
+    mix-blend-mode: screen;
+    opacity: 0.56;
+    transform: translate3d(0, 0, 0);
+    animation: ny-banner-ambient-drift 18s ease-in-out infinite;
+  }
+
+  &::after {
+    inset: 1px;
+    z-index: 0;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: calc(var(--panel-radius) - 1px);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.12),
+      inset 0 0 42px rgba(255, 79, 216, 0.07);
+  }
+}
+
+.ny-welcome-banner__image,
+.ny-welcome-banner__overlay {
+  position: absolute;
+  inset: 0;
+}
+
+.ny-welcome-banner__image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.62;
+  filter: saturate(1.12) contrast(1.08);
+  z-index: -4;
+}
+
+.ny-welcome-banner__overlay {
+  z-index: -3;
+  background:
+    radial-gradient(circle at 20% 14%, rgba(255, 79, 216, 0.22), transparent 30%),
+    linear-gradient(90deg, rgba(7, 9, 15, 0.96), rgba(7, 9, 15, 0.56) 56%, rgba(7, 9, 15, 0.86)),
+    linear-gradient(180deg, rgba(7, 9, 15, 0.2), rgba(7, 9, 15, 0.6));
+  background-size: 124% 124%, 100% 100%, 100% 100%;
+  animation: ny-banner-overlay-drift 22s ease-in-out infinite;
+}
+
+.ny-welcome-banner__vfx {
+  position: absolute;
+  inset: -1px;
+  z-index: 1;
+  pointer-events: none;
+  overflow: hidden;
+  mix-blend-mode: screen;
+  opacity: 0.72;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      transparent 0 35px,
+      rgba(255, 255, 255, 0.055) 35px 36px,
+      transparent 36px 72px
+    ),
+    repeating-linear-gradient(
+      180deg,
+      transparent 0 24px,
+      rgba(255, 255, 255, 0.04) 24px 25px,
+      transparent 25px 50px
+    ),
+    radial-gradient(circle at 26% 82%, rgba(255, 79, 216, 0.12), transparent 34%);
+  background-position: 0 0, 0 0, 0 0;
+  mask-image: linear-gradient(90deg, transparent, #000 14%, #000 92%, transparent);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 14%, #000 92%, transparent);
+  animation:
+    ny-banner-vfx-grid 16s linear infinite,
+    ny-banner-vfx-glow 6.8s ease-in-out infinite;
+}
+
+.ny-welcome-banner__vfx-beam,
+.ny-welcome-banner__vfx-pulse {
+  position: absolute;
+  display: block;
+  pointer-events: none;
+}
+
+.ny-welcome-banner__vfx-beam {
+  left: -34%;
+  width: 48%;
+  height: 1px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.08),
+    rgba(255, 79, 216, 0.5),
+    transparent
+  );
+  box-shadow: 0 0 28px rgba(255, 79, 216, 0.28);
+  transform: rotate(-14deg);
+  animation: ny-banner-vfx-beam 8.5s linear infinite;
+}
+
+.ny-welcome-banner__vfx-beam:first-child {
+  top: 31%;
+}
+
+.ny-welcome-banner__vfx-beam:nth-child(2) {
+  top: 68%;
+  animation-delay: -4.2s;
+  animation-duration: 11s;
+  opacity: 0.72;
+}
+
+.ny-welcome-banner__vfx-pulse {
+  right: 58px;
+  top: 50%;
+  width: 224px;
+  height: 224px;
+  border: 1px solid var(--brand-border-medium);
+  border-radius: 999px;
+  box-shadow:
+    inset 0 0 22px var(--brand-alpha-weak),
+    0 0 28px rgba(255, 79, 216, 0.1);
+  transform: translateY(-50%);
+  animation: ny-banner-vfx-pulse 5.6s ease-in-out infinite;
+}
+
+.ny-welcome-banner__content {
+  position: relative;
+  z-index: 2;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(420px, 444px);
+  gap: 22px;
+  align-items: center;
+  padding: 14px 26px;
+
+  &::before,
+  &::after {
+    content: none;
+  }
+}
+
+.ny-welcome-banner__copy {
+  position: relative;
+  min-width: 0;
+
+  &::after {
+    content: none;
+  }
+
+  h1 {
+    margin: 0;
+    max-width: 720px;
+    color: #fff;
+    font-size: clamp(2.2rem, 3.3vw, 3.65rem);
+    line-height: 0.98;
+    letter-spacing: 0;
+    text-wrap: balance;
+    text-shadow:
+      0 0 22px rgba(255, 79, 216, 0.24),
+      0 12px 34px rgba(0, 0, 0, 0.48);
+  }
+
+  p {
+    max-width: 52ch;
+    margin: 12px 0 0;
+    color: rgba(248, 247, 255, 0.8);
+    font-size: 1rem;
+    line-height: 1.45;
+    text-shadow: 0 6px 18px rgba(0, 0, 0, 0.36);
+  }
+}
+
+.ny-welcome-banner__micro-row {
+  max-width: 100%;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+
+  span {
+    min-width: 0;
+    min-height: 24px;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 10px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.78);
+    background:
+      linear-gradient(135deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.035)),
+      rgba(7, 9, 15, 0.34);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.14),
+      0 8px 24px -18px rgba(255, 79, 216, 0.8);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    font-family: var(--dc-font-mono);
+    font-size: 0.58rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    line-height: 1;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  span:last-child {
+    color: rgba(255, 255, 255, 0.86);
+    border-color: rgba(255, 255, 255, 0.22);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.14),
+      0 8px 24px -18px rgba(0, 0, 0, 0.6);
+  }
+}
+
+.ny-welcome-banner__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.ny-welcome-banner .ny-dashboard-btn {
+  min-height: 40px;
+  border-radius: 12px;
+  padding-inline: 15px;
+  color: rgba(248, 247, 255, 0.84);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.035)),
+    rgba(7, 9, 15, 0.34);
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 8px 24px -18px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  white-space: nowrap;
+}
+
+.ny-dashboard-btn {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  font-weight: 700;
+
+  svg {
+    width: 17px;
+    height: 17px;
+  }
+}
+
+.ny-dashboard-btn--primary {
+  border-color: transparent;
+  color: var(--neutral-on-solid-strong);
+  background: var(--brand-solid-strong);
+  box-shadow: 0 10px 28px -16px var(--brand-alpha-strong);
+}
+
+.ny-welcome-banner .ny-dashboard-btn--primary {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.18), transparent 36%),
+    var(--brand-solid-strong);
+  box-shadow:
+    0 12px 30px -16px var(--brand-alpha-strong),
+    0 0 22px -10px var(--brand-alpha-strong),
+    inset 0 1px 0 rgba(255, 255, 255, 0.24);
+}
+
+.ny-welcome-banner__error {
+  color: var(--warning-solid-strong) !important;
+  font-size: 0.82rem !important;
+}
+
+.ny-welcome-banner__side {
+  position: relative;
+  z-index: 2;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 122px minmax(0, 286px);
+  gap: 12px;
+  align-items: stretch;
+  justify-content: end;
+
+  &::before {
+    content: "";
+    position: absolute;
+    width: 300px;
+    height: 300px;
+    right: -24px;
+    top: 50%;
+    transform: translateY(-50%);
+    border-radius: 999px;
+    background: radial-gradient(circle, transparent 59%, rgba(255, 79, 216, 0.14) 60% 60.8%, transparent 62%);
+    filter: blur(0.2px);
+    opacity: 0.66;
+    pointer-events: none;
+    animation: ny-archive-orbit-breathe 7.5s ease-in-out infinite;
+  }
+
+  &::after {
+    content: none;
+  }
+}
+
+.ny-welcome-banner__mascot-home {
+  appearance: none;
+  position: relative;
+  z-index: 1;
+  width: 122px;
+  min-height: 186px;
+  align-self: stretch;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 16px;
+  color: inherit;
+  background:
+    radial-gradient(circle at 50% 24%, rgba(255, 79, 216, 0.2), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.11), rgba(255, 255, 255, 0.035)),
+    rgba(7, 9, 15, 0.58);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 18px 42px -30px rgba(0, 0, 0, 0.9),
+    0 0 26px -20px rgba(255, 79, 216, 0.9);
+  overflow: hidden;
+  cursor: pointer;
+  font: inherit;
+  backdrop-filter: blur(18px) saturate(145%);
+  -webkit-backdrop-filter: blur(18px) saturate(145%);
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+
+  &::before,
+  &::after {
+    content: "";
+    position: absolute;
+    pointer-events: none;
+  }
+
+  &::before {
+    inset: 8px;
+    z-index: 1;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+  }
+
+  &::after {
+    left: 14px;
+    right: 14px;
+    bottom: 10px;
+    z-index: 2;
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 79, 216, 0.58),
+      transparent
+    );
+  }
+
+  img {
+    position: absolute;
+    left: 50%;
+    bottom: -18px;
+    z-index: 0;
+    width: 178px;
+    max-width: none;
+    transform: translateX(-50%);
+    filter:
+      drop-shadow(0 18px 22px rgba(0, 0, 0, 0.36))
+      drop-shadow(0 0 16px rgba(255, 79, 216, 0.18));
+    animation: ny-mascot-expression-pop 260ms ease-out;
+  }
+
+  &:hover {
+    border-color: var(--brand-border-strong);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.18),
+      0 18px 42px -30px rgba(0, 0, 0, 0.9),
+      0 0 30px -18px var(--brand-alpha-strong);
+    transform: translateY(-1px);
+  }
+
+  &:active {
+    transform: translateY(0) scale(0.99);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--brand-border-strong);
+    outline-offset: 3px;
+  }
+}
+
+.ny-welcome-banner__mascot-name {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  min-height: 20px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  color: rgba(255, 255, 255, 0.74);
+  background: rgba(7, 9, 15, 0.46);
+  font-family: var(--dc-font-mono);
+  font-size: 0.54rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.ny-welcome-banner__status-card {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  min-height: 186px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 14% 100%, rgba(255, 79, 216, 0.14), transparent 42%),
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.03) 0 1px,
+      transparent 1px 22px
+    ),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.035)),
+    rgba(7, 9, 15, 0.68);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 18px 46px -28px rgba(0, 0, 0, 0.88),
+    0 0 28px -22px var(--brand-alpha-strong);
+  backdrop-filter: blur(18px) saturate(145%);
+  -webkit-backdrop-filter: blur(18px) saturate(145%);
+  overflow: hidden;
+
+  &::before,
+  &::after {
+    content: "";
+    position: absolute;
+    pointer-events: none;
+  }
+
+  &::before {
+    left: 12px;
+    right: 12px;
+    top: 0;
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 79, 216, 0.72),
+      rgba(255, 79, 216, 0.36),
+      transparent
+    );
+    background-size: 160% 100%;
+    animation: ny-status-edge-scan 4.8s linear infinite;
+  }
+
+  &::after {
+    right: 12px;
+    bottom: 12px;
+    width: 46px;
+    height: 30px;
+    border-radius: 8px;
+    background-image: radial-gradient(circle, rgba(255, 255, 255, 0.52) 0 1px, transparent 1.5px);
+    background-size: 9px 9px;
+    opacity: 0.16;
+  }
+}
+
+.ny-welcome-banner__status-grid {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 94px;
+  gap: 10px;
+}
+
+.ny-welcome-banner__status-info-box,
+.ny-welcome-banner__datetime-box {
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.025)),
+    rgba(7, 9, 15, 0.22);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 12px 24px -22px rgba(0, 0, 0, 0.88);
+}
+
+.ny-welcome-banner__status-info-box {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 9px;
+  padding: 14px 13px;
+}
+
+.ny-welcome-banner__datetime-box {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 9px;
+  color: rgba(248, 247, 255, 0.86);
+  text-decoration: none;
+}
+
+.ny-welcome-banner__status-kicker {
+  color: rgba(255, 255, 255, 0.74);
+  font-family: var(--dc-font-mono);
+  font-size: 0.58rem;
+  font-weight: 750;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.ny-welcome-banner__status-label {
+  color: #fff;
+  font-size: 1.08rem;
+  font-weight: 800;
+  line-height: 1.05;
+}
+
+.ny-welcome-banner__status-root {
+  color: rgba(248, 247, 255, 0.68);
+  font-size: 0.84rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ny-welcome-banner__calendar-card {
+  min-width: 0;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 3px;
+  padding: 8px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.1), transparent 62%),
+    rgba(255, 255, 255, 0.035);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  font-family: var(--dc-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.ny-welcome-banner__calendar-day {
+  color: #fff;
+  font-size: 1.28rem;
+  font-weight: 850;
+  line-height: 0.92;
+  letter-spacing: 0;
+
+  sup {
+    margin-left: 1px;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 0.52rem;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    vertical-align: super;
+  }
+}
+
+.ny-welcome-banner__calendar-month {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.ny-welcome-banner__status-clock {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 15px minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  color: rgba(248, 247, 255, 0.88);
+  font-family: var(--dc-font-mono);
+  font-variant-numeric: tabular-nums;
+
+  svg {
+    width: 14px;
+    height: 14px;
+    color: rgba(255, 255, 255, 0.72);
+    filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.18));
+  }
+}
+
+.ny-welcome-banner__status-clock-main {
+  min-width: 0;
+  color: #fff;
+  font-size: 0.98rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ny-welcome-banner__status-clock-zone {
+  min-height: 19px;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 7px;
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(7, 9, 15, 0.28);
+  font-family: var(--dc-font-mono);
+  font-size: 0.5rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.ny-welcome-banner__status-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 2px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.09);
+  color: rgba(255, 255, 255, 0.5);
+  font-family: var(--dc-font-mono);
+  font-size: 0.56rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  line-height: 1;
+  text-transform: uppercase;
+
+  span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  span:last-child {
+    color: rgba(255, 255, 255, 0.66);
+    text-align: right;
+  }
+}
+
+@keyframes ny-banner-ambient-drift {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: translate3d(-1.2%, -1%, 0) scale(1);
+  }
+
+  50% {
+    opacity: 0.68;
+    transform: translate3d(1.4%, 1%, 0) scale(1.03);
+  }
+}
+
+@keyframes ny-banner-overlay-drift {
+  0%,
+  100% {
+    background-position: 0% 0%, 100% 0%, 0 0, 0 0;
+  }
+
+  50% {
+    background-position: 8% 4%, 88% 6%, 0 0, 0 0;
+  }
+}
+
+@keyframes ny-banner-vfx-grid {
+  0% {
+    background-position: 0 0, 0 0, 0 0, 0 0;
+  }
+
+  100% {
+    background-position: 72px 0, 0 50px, 0 0, 0 0;
+  }
+}
+
+@keyframes ny-banner-vfx-glow {
+  0%,
+  100% {
+    opacity: 0.54;
+  }
+
+  45% {
+    opacity: 0.82;
+  }
+
+  72% {
+    opacity: 0.62;
+  }
+}
+
+@keyframes ny-banner-vfx-beam {
+  0% {
+    transform: translateX(0) rotate(-14deg);
+  }
+
+  100% {
+    transform: translateX(310%) rotate(-14deg);
+  }
+}
+
+@keyframes ny-banner-vfx-pulse {
+  0%,
+  100% {
+    opacity: 0.2;
+    transform: translateY(-50%) scale(0.88);
+  }
+
+  50% {
+    opacity: 0.6;
+    transform: translateY(-50%) scale(1.06);
+  }
+}
+
+@keyframes ny-status-edge-scan {
+  0% {
+    background-position: 160% 0;
+  }
+
+  100% {
+    background-position: -160% 0;
+  }
+}
+
+@keyframes ny-mascot-expression-pop {
+  0% {
+    opacity: 0.62;
+    transform: translateX(-50%) scale(0.96);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateX(-50%) scale(1);
+  }
+}
+
+@keyframes ny-archive-orbit-breathe {
+  0%,
+  100% {
+    opacity: 0.54;
+    transform: translateY(-50%) scale(0.98) rotate(0deg);
+  }
+
+  50% {
+    opacity: 0.82;
+    transform: translateY(-50%) scale(1.04) rotate(8deg);
+  }
+}
+
+.ny-dashboard-split {
+  flex: 0 0 auto;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 22%);
+  gap: var(--app-gap);
+  // Each column sizes to its own content and scrolls with the page rather than
+  // inside its own scroll box, so `align-items: start` keeps them top-aligned.
+  align-items: start;
+}
+
+.ny-library-pane,
+.ny-health-pane {
+  min-width: 0;
+}
+
+.ny-library-area,
+.ny-health-panel {
+  min-width: 0;
+  border: 1px solid var(--neutral-border-medium);
+  border-radius: var(--panel-radius);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 42%),
+    color-mix(in srgb, var(--surface-background) 80%, transparent);
+  backdrop-filter: blur(18px) saturate(135%);
+  -webkit-backdrop-filter: blur(18px) saturate(135%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.055);
+}
+
+.ny-library-area {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+}
+
+.ny-library-area__chrome {
+  position: sticky;
+  top: -16px;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: -16px -16px 0;
+  padding: 16px 16px 12px;
+  border-radius: var(--panel-radius) var(--panel-radius) 0 0;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-background) 96%, transparent), color-mix(in srgb, var(--surface-background) 86%, transparent));
+  backdrop-filter: blur(18px) saturate(135%);
+  -webkit-backdrop-filter: blur(18px) saturate(135%);
+  border-bottom: 1px solid var(--neutral-border-weak);
+}
+
+// Home lobby: the curated shelf header scrolls with the content instead of
+// pinning to the top of the pane, so it reads as a quiet section heading
+// (like the right-rail panels) rather than a functional sticky toolbar.
+.ny-library-area--home .ny-library-area__chrome {
+  position: static;
+  top: auto;
+  z-index: auto;
+  margin: 0;
+  padding: 0 0 14px;
+  border-radius: 0;
+  border-bottom: 1px solid var(--neutral-border-weak);
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.ny-library-area__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+
+  h2 {
+    margin: 0;
+    font-size: 1.18rem;
+    letter-spacing: 0;
+  }
+
+  // Subtitle under the title. Scoped to the title block so the action-row
+  // separators ("|") don't inherit the muted subtitle styling.
+  > div:first-child > span {
+    display: inline-block;
+    margin-top: 4px;
+    color: var(--neutral-on-background-weak);
+    font-size: 0.84rem;
+  }
+}
+
+.ny-library-area__actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ny-library-area__separator {
+  color: var(--neutral-on-background-weak);
+  font-size: 0.9rem;
+  user-select: none;
+}
+
+.ny-library-area__refresh {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 1px solid var(--neutral-border-medium);
+  border-radius: 10px;
+  color: var(--neutral-on-background-medium);
+  background: color-mix(in srgb, var(--surface-background) 68%, transparent);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 650;
+  transition:
+    color 160ms ease,
+    background 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease;
+
+  svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  &:hover {
+    color: var(--neutral-on-background-strong);
+    border-color: var(--brand-border-medium);
+    background: var(--brand-alpha-weak);
+    transform: translateY(-1px);
+  }
+}
+
+.ny-library-toolbar__view button {
+  border: 1px solid var(--neutral-border-medium);
+  color: var(--neutral-on-background-medium);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    color 160ms ease,
+    background 160ms ease,
+    border-color 160ms ease;
+
+  &:hover,
+  &.is-active {
+    color: var(--neutral-on-background-strong);
+    border-color: var(--brand-border-medium);
+    background: var(--brand-alpha-weak);
+  }
+}
+
+.ny-library-toolbar__sort {
+  position: relative;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 34px 0 10px;
+  border: 1px solid var(--neutral-border-medium);
+  border-radius: 10px;
+  color: var(--neutral-on-background-medium);
+  background: color-mix(in srgb, var(--surface-background) 68%, transparent);
+  font-size: 0.78rem;
+  font-weight: 650;
+
+  select {
+    appearance: none;
+    border: 0;
+    outline: 0;
+    color: var(--neutral-on-background-strong);
+    background: transparent;
+    font: inherit;
+    cursor: pointer;
+  }
+
+  svg {
+    position: absolute;
+    right: 10px;
+    width: 14px;
+    height: 14px;
+    pointer-events: none;
+  }
+}
+
+.ny-library-toolbar__view {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--neutral-border-medium);
+  border-radius: 11px;
+
+  button {
+    width: 30px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    border-radius: 8px;
+
+    svg {
+      width: 15px;
+      height: 15px;
+    }
+  }
+}
+
+.ny-library-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 14px;
+  min-width: 0;
+}
+
+.ny-library-grid--list {
+  grid-template-columns: 1fr;
+}
+
+// --- Curated Home shelves --------------------------------------------------
+// Three quiet sections (Favorites, Nyrima Pick, Recently Picked) stacked under
+// the non-sticky shelf header. Each owns its own heading; the cards reuse the
+// existing .ny-library-grid so the visual language stays consistent.
+.ny-home-shelves {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.ny-home-section {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ny-home-section__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  h3 {
+    margin: 0;
+    font-size: 1.02rem;
+    letter-spacing: 0;
+  }
+
+  p {
+    margin: 2px 0 0;
+    color: var(--neutral-on-background-weak);
+    font-size: 0.8rem;
+  }
+}
+
+.ny-home-section__icon {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--brand-border-medium);
+  border-radius: 9px;
+  color: var(--brand-on-background-strong);
+  background: var(--brand-alpha-weak);
+
+  svg {
+    width: 15px;
+    height: 15px;
+  }
+}
+
+.ny-home-section__empty {
+  margin: 0;
+  padding: 16px;
+  border: 1px dashed var(--neutral-border-medium);
+  border-radius: 14px;
+  background: var(--neutral-alpha-weak);
+  color: var(--neutral-on-background-medium);
+  font-size: 0.86rem;
+}
+
+// Nyrima Pick — mascot on the left, picked folders on the right. Collapses to
+// a stacked layout on narrow panes so the mascot never crushes the cards.
+.ny-home-pick {
+  display: grid;
+  grid-template-columns: minmax(120px, 168px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: stretch;
+  padding: 16px;
+  border: 1px solid var(--brand-border-medium);
+  border-radius: var(--panel-radius);
+  background:
+    radial-gradient(circle at 16% 18%, var(--brand-alpha-weak), transparent 56%),
+    radial-gradient(circle at 92% 90%, var(--brand-alpha-weak), transparent 52%),
+    color-mix(in srgb, var(--surface-background) 80%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.ny-home-pick__mascot {
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+
+  img {
+    width: 100%;
+    max-width: 168px;
+    height: auto;
+    object-fit: contain;
+    filter: drop-shadow(0 14px 28px var(--brand-alpha-strong));
+  }
+}
+
+.ny-home-pick__content {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+@media (max-width: 720px) {
+  .ny-home-pick {
+    grid-template-columns: 1fr;
+  }
+
+  .ny-home-pick__mascot img {
+    max-width: 132px;
+  }
+}
+
+.ny-health-rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--app-gap);
+  min-width: 0;
+}
+
+.ny-health-panel {
+  padding: 14px;
+}
+
+.ny-health-panel__head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 12px;
+
+  h3 {
+    margin: 0;
+    font-size: 0.98rem;
+    letter-spacing: 0;
+  }
+}
+
+.ny-health-panel__icon {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--brand-border-medium);
+  border-radius: 10px;
+  color: var(--brand-on-background-strong);
+  background: var(--brand-alpha-weak);
+
+  svg {
+    width: 16px;
+    height: 16px;
+  }
+}
+
+.ny-health-rail__metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ny-health-metric {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--neutral-border-weak);
+  border-radius: 12px;
+  background: var(--neutral-alpha-weak);
+
+  span,
+  small {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  span {
+    color: var(--neutral-on-background-strong);
+    font-family: var(--dc-font-mono);
+    font-size: 1.08rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  small {
+    margin-top: 3px;
+    color: var(--neutral-on-background-weak);
+    font-size: 0.72rem;
+  }
+
+  &.is-accent {
+    border-color: var(--accent-border-medium);
+    background: var(--accent-alpha-weak);
+  }
+}
+
+.ny-health-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--neutral-border-weak);
+
+  span {
+    min-width: 0;
+    color: var(--neutral-on-background-weak);
+    font-size: 0.78rem;
+  }
+
+  strong {
+    min-width: 0;
+    max-width: 52%;
+    color: var(--neutral-on-background-medium);
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .is-ready {
+    color: var(--success-solid-strong);
+  }
+
+  .is-warning {
+    color: var(--warning-solid-strong);
+  }
+
+  .is-offline {
+    color: var(--danger-solid-strong);
+  }
+}
+
+.ny-health-rail__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.ny-health-rail__actions button,
+.ny-quick-actions button {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 10px;
+  font-size: 0.78rem;
+  font-weight: 650;
+
+  svg {
+    width: 15px;
+    height: 15px;
+  }
+}
+
+// Quick Actions — one wide gradient primary over a compact secondary trio.
+.ny-quick-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ny-quick-actions__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+
+  button {
+    min-width: 0;
+    gap: 5px;
+    padding: 0 6px;
+    font-size: 0.74rem;
+    font-weight: 650;
+    overflow: hidden;
+
+    svg {
+      width: 14px;
+      height: 14px;
+      flex: 0 0 14px;
+    }
+  }
+}
+
+.ny-quick-actions__primary {
+  width: 100%;
+  min-height: 40px;
+  border-color: transparent !important;
+  color: var(--neutral-on-solid-strong) !important;
+  background: var(--brand-solid-strong) !important;
+  box-shadow: 0 10px 26px -16px var(--brand-alpha-strong);
+  font-weight: 750;
+
+  &:hover:not(:disabled) {
+    transform: translateY(-1px);
+  }
+}
+
+// Memory Health — two compact source cards, each with a status dot.
+.ny-memory-source {
+  & + & {
+    margin-top: 10px;
+  }
+}
+
+.ny-memory-source__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0 6px;
+}
+
+.ny-memory-source__icon {
+  display: grid;
+  place-items: center;
+  color: var(--neutral-on-background-medium);
+
+  svg {
+    width: 15px;
+    height: 15px;
+  }
+}
+
+.ny-memory-source__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--neutral-on-background-strong);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.ny-memory-source__status {
+  flex: 0 0 auto;
+  font-family: var(--dc-font-mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+
+  &.is-ready {
+    color: var(--success-solid-strong);
+  }
+
+  &.is-warning {
+    color: var(--warning-solid-strong);
+  }
+
+  &.is-muted {
+    color: var(--neutral-on-background-weak);
+  }
+}
+
+.ny-source-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-radius: 999px;
+  background: var(--neutral-on-background-weak);
+
+  &.is-ready {
+    background: var(--success-solid-strong);
+    box-shadow: 0 0 8px var(--success-solid-strong);
+  }
+
+  &.is-warning {
+    background: var(--warning-solid-strong);
+    box-shadow: 0 0 8px var(--warning-solid-strong);
+  }
+
+  &.is-muted {
+    background: var(--neutral-on-background-weak);
+  }
+}
+
+// System Health — the Internet Speed row carries an inline (disabled) Test.
+.ny-health-row--action {
+  align-items: center;
+}
+
+.ny-health-row__trailing {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+
+  strong {
+    color: var(--neutral-on-background-medium);
+    font-size: 0.78rem;
+    font-weight: 700;
+  }
+
+  button {
+    min-height: 26px;
+    padding: 0 9px;
+    border: 1px solid var(--neutral-border-medium);
+    border-radius: 8px;
+    color: var(--neutral-on-background-medium);
+    background: rgba(255, 255, 255, 0.035);
+    font-size: 0.72rem;
+    font-weight: 650;
+    cursor: pointer;
+
+    &:disabled {
+      cursor: not-allowed;
+      opacity: 0.46;
+    }
+  }
+}
+
+.continue-player-dock {
+  grid-area: player;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  // Center column gets a higher minimum and the flexible 1fr so the controls
+  // + timeline always have room; the right utility cluster is capped tighter
+  // so it never overpowers the center.
+  grid-template-columns: minmax(232px, 340px) minmax(380px, 1fr) minmax(248px, 332px);
+  align-items: center;
+  gap: 18px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--neutral-border-medium);
+  border-radius: 25px 25px 0px 0px;
+  background:
+    linear-gradient(90deg, var(--brand-alpha-weak), transparent 38%),
+    color-mix(in srgb, var(--surface-background-strong) 86%, transparent);
+  backdrop-filter: blur(24px) saturate(150%);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+}
+
+.continue-player-dock__media {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.continue-player-dock__thumb {
+  width: 54px;
+  height: 54px;
+  flex: 0 0 54px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--neutral-border-medium);
+  border-radius: 14px;
+  background: var(--surface-background);
+  overflow: hidden;
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+}
+
+.continue-player-dock__copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+
+  span,
+  small {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  span {
+    color: var(--neutral-on-background-strong);
+    font-size: 0.92rem;
+    font-weight: 750;
+  }
+
+  small {
+    color: var(--neutral-on-background-weak);
+    font-size: 0.78rem;
+  }
+}
+
+.continue-player-dock__center {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  align-items: center;
+}
+
+.continue-player-dock__controls,
+.continue-player-dock__right {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.continue-player-dock__button {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--neutral-border-medium);
+  border-radius: 10px;
+  color: var(--neutral-on-background-medium);
+  background: rgba(255, 255, 255, 0.035);
+  cursor: pointer;
+  transition:
+    color 160ms ease,
+    background 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease,
+    opacity 160ms ease;
+
+  svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  &:hover:not(:disabled) {
+    color: var(--neutral-on-background-strong);
+    border-color: var(--neutral-border-strong);
+    background: var(--neutral-alpha-medium);
+    transform: translateY(-1px);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.42;
+  }
+
+  &.is-primary {
+    width: 42px;
+    height: 42px;
+    border: 0;
+    color: var(--neutral-on-solid-strong);
+    background: var(--brand-solid-strong);
+    box-shadow: 0 10px 26px -16px var(--brand-alpha-strong);
+  }
+}
+
+.continue-player-dock__timeline {
+  width: min(100%, 560px);
+  display: grid;
+  grid-template-columns: 48px minmax(120px, 1fr) 48px;
+  gap: 9px;
+  align-items: center;
+  color: var(--neutral-on-background-weak);
+  font-family: var(--dc-font-mono);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.continue-player-dock__track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--neutral-alpha-medium);
+
+  span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--brand-solid-strong);
+    box-shadow: 0 0 10px -1px var(--brand-alpha-strong);
+  }
+}
+
+.continue-player-dock__right {
+  min-width: 0;
+  justify-content: flex-end;
+}
+
+.continue-player-dock__volume {
+  min-width: 104px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--neutral-on-background-medium);
+
+  svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  input {
+    min-width: 0;
+    width: 96px;
+    accent-color: var(--brand-solid-strong);
+  }
+}
+
+.ny-landing__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 44px 24px;
+  border: 1px dashed var(--neutral-border-medium);
+  border-radius: 16px;
+  background:
+    linear-gradient(135deg, var(--brand-alpha-weak), transparent 52%),
+    var(--surface-background-weak);
+  text-align: center;
+}
+
+.ny-landing__empty-title {
+  margin: 0;
+  color: var(--neutral-on-background-strong);
+  font-size: 1.05rem;
+  font-weight: 750;
+  letter-spacing: 0;
+}
+
+.ny-landing__empty-sub {
+  max-width: 44ch;
+  margin: 0;
+  color: var(--neutral-on-background-medium);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+@media (max-width: 1439px) {
+  .ny-dashboard-split {
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 22%);
+  }
+
+  .continue-player-dock {
+    grid-template-columns: minmax(220px, 320px) minmax(320px, 1fr) minmax(230px, 330px);
+  }
+
+  .ny-command-bar__action span {
+    display: none;
+  }
+}
+
+@media (max-width: 1279px) {
+  .ny-dashboard-split {
+    grid-template-columns: 1fr;
+  }
+
+  .ny-library-grid {
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  }
+
+  .continue-player-dock {
+    grid-template-columns: minmax(210px, 300px) minmax(280px, 1fr);
+  }
+
+  .continue-player-dock__right {
+    display: none;
+  }
+}
+
+@media (max-width: 980px) {
+  .ny-command-bar {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .ny-command-bar__action {
+    display: none;
+  }
+
+  .ny-welcome-banner__content {
+    grid-template-columns: 1fr;
+    padding: 22px;
+
+    &::after {
+      display: none;
+    }
+  }
+
+  .ny-welcome-banner__side {
+    display: none;
+  }
+
+  .ny-welcome-banner__copy {
+    padding-top: 0;
+  }
+
+  .ny-welcome-banner__rings::before {
+    right: -128px;
+    opacity: 0.42;
+  }
+
+  .ny-health-rail {
+    grid-template-columns: 1fr;
+  }
+
+  .continue-player-dock {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .continue-player-dock__timeline {
+    display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .ny-welcome-banner {
+    height: auto;
+    min-height: 252px;
+  }
+
+  .ny-welcome-banner__content {
+    align-items: center;
+  }
+
+  .ny-welcome-banner__micro-row {
+    gap: 6px;
+
+    span {
+      min-height: 22px;
+      padding: 0 8px;
+      font-size: 0.54rem;
+      letter-spacing: 0.08em;
+    }
+  }
+
+  .ny-welcome-banner__copy h1 {
+    font-size: clamp(1.85rem, 9vw, 2.45rem);
+  }
+
+  .ny-welcome-banner__copy p {
+    max-width: 34ch;
+    font-size: 0.94rem;
+  }
+
+  .ny-welcome-banner__rings::after {
+    opacity: 0.18;
+  }
+
+  .ny-welcome-banner__engraving {
+    left: 20px;
+    right: auto;
+    bottom: 10px;
+    max-width: calc(100% - 40px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ny-lobby-shell,
+  .ny-sidebar,
+  .ny-sidebar__wordmark,
+  .ny-sidebar__item-label,
+  .ny-sidebar__section-label,
+  .ny-sidebar__item,
+  .ny-dashboard-btn,
+  .ny-command-bar__action,
+  .ny-command-bar__icon,
+  .continue-player-dock__button {
+    transition: none;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Brand decoration — "Soft Anime Terminal"
+   ---------------------------------------------------------------------------
+   A quiet Nyrima identity layered over the functional lobby: an aurora + a
+   barely-there slogan watermark behind everything, a neon "World Index Rail"
+   on the sidebar, a "Command Deck" status line + gradient seam on the topbar,
+   portal rings and a hidden slogan engraving in the hero, a "Nyrima Console"
+   treatment on the right rail, and a "World Playback Dock" finish on the
+   player. Everything here is Home-only (scoped under the lobby classes, which
+   the full Library page does not use) and kept low-contrast so it never
+   competes with content. All motion is gated by prefers-reduced-motion below.
+   ═════════════════════════════════════════════════════════════════════════ */
+
+// Establish a stacking context and lift the real panels above the decorative
+// pseudo-layers (aurora + watermark) painted on the shell.
+.ny-lobby-shell {
+  position: relative;
+  isolation: isolate;
+}
+
+.ny-sidebar,
+.ny-lobby-main {
+  position: relative;
+  z-index: 1;
+}
+
+// 1 · Global background — a single soft blurred brand-pink aurora that drifts
+// slowly (the "lamp").
+.ny-lobby-shell::before {
+  content: "";
+  position: absolute;
+  inset: -12%;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(38% 42% at 18% 16%, var(--brand-alpha-medium), transparent 70%);
+  filter: blur(8px);
+  animation: ny-aurora-drift 38s ease-in-out infinite alternate;
+}
+
+// 1 · Slogan watermark — a large, ~0.05 opacity engraving across the lower
+// right of the archive. Sits behind the translucent panels so it only ever
+// reads as a faint background texture.
+.ny-lobby-shell::after {
+  content: "Every World, One Archive";
+  position: absolute;
+  right: clamp(1rem, 4vw, 5rem);
+  bottom: clamp(4.5rem, 12vh, 10rem);
+  z-index: 0;
+  max-width: 58%;
+  pointer-events: none;
+  font-family: var(--dc-font-display);
+  font-size: clamp(2.4rem, 6vw, 5.2rem);
+  font-weight: 800;
+  line-height: 0.94;
+  letter-spacing: -0.02em;
+  text-align: right;
+  text-transform: uppercase;
+  color: var(--brand-on-background-strong);
+  opacity: 0.05;
+}
+
+@keyframes ny-aurora-drift {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  100% {
+    transform: translate3d(0, -2%, 0) scale(1.06);
+  }
+}
+
+// 2 · Sidebar — "World Index Rail".
+// A hairline brand-pink neon seam down the sidebar's right edge, layered over
+// the existing 1px border.
+.ny-sidebar::after {
+  content: "";
+  position: absolute;
+  top: 14%;
+  bottom: 14%;
+  right: -1px;
+  width: 2px;
+  z-index: 2;
+  pointer-events: none;
+  border-radius: 2px;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    rgba(255, 79, 216, 0.55) 22%,
+    rgba(255, 79, 216, 0.55) 78%,
+    transparent
+  );
+  box-shadow: 0 0 12px var(--brand-alpha-medium);
+}
+
+// Tiny glowing node before each section label so the nav reads like indexed
+// stops on the rail.
+.ny-sidebar__section-label {
+  position: relative;
+  padding-left: 18px;
+}
+
+.ny-sidebar__section-label::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background: var(--brand-on-background-strong);
+  box-shadow: 0 0 8px var(--brand-alpha-strong);
+}
+
+// Active stop — a faint scanline wash over the existing gradient fill.
+.ny-sidebar__item.is-active::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(255, 255, 255, 0.07) 0 1px,
+    transparent 1px 4px
+  );
+  mix-blend-mode: overlay;
+}
+
+.ny-sidebar__item.is-active > * {
+  position: relative;
+  z-index: 1;
+}
+
+// 3 · Topbar — "Command Deck". A small terminal status engraving + a gradient
+// seam fading transparent → brand-pink → transparent under the bar.
+.ny-command-bar__status {
+  position: relative;
+  z-index: 1;
+  margin-right: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 4px;
+  color: var(--neutral-on-background-weak);
+  font-family: var(--dc-font-mono);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0.62;
+  user-select: none;
+
+  i {
+    font-style: normal;
+    color: var(--brand-on-background-medium);
+    opacity: 0.9;
+  }
+}
+
+.ny-command-bar__status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--success-solid-strong);
+  box-shadow: 0 0 8px var(--success-solid-strong);
+}
+
+.ny-command-bar::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 79, 216, 0.6) 32%,
+    rgba(255, 79, 216, 0.6) 68%,
+    transparent
+  );
+}
+
+// 4 · Hero: one restrained portal accent plus a subtle slogan engraving.
+// The copy, CTAs, and status card own the hierarchy.
+.ny-welcome-banner__rings {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+  background:
+    linear-gradient(120deg, transparent 0 64%, rgba(255, 79, 216, 0.08) 64.2% 64.45%, transparent 64.7% 100%),
+    radial-gradient(circle at 83% 50%, rgba(255, 79, 216, 0.09), transparent 30%);
+  mix-blend-mode: screen;
+  animation: ny-banner-rings-haze 12s ease-in-out infinite;
+}
+
+.ny-welcome-banner__rings::before,
+.ny-welcome-banner__rings::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+}
+
+.ny-welcome-banner__rings::before {
+  width: 330px;
+  height: 330px;
+  right: 50px;
+  top: 50%;
+  border-radius: 999px;
+  background:
+    conic-gradient(
+      from 18deg,
+      transparent 0 42deg,
+      rgba(255, 79, 216, 0.18) 43deg 45deg,
+      transparent 46deg 154deg,
+      rgba(255, 79, 216, 0.16) 155deg 158deg,
+      transparent 159deg 268deg,
+      rgba(255, 255, 255, 0.12) 269deg 270deg,
+      transparent 271deg 360deg
+    ),
+    radial-gradient(circle, transparent 0 82px, rgba(255, 79, 216, 0.16) 83px 84px, transparent 85px 122px, rgba(255, 79, 216, 0.12) 123px 124px, transparent 125px);
+  filter: drop-shadow(0 0 16px rgba(255, 79, 216, 0.14));
+  opacity: 0.58;
+  transform: translateY(-50%);
+  transform-origin: 50% 50%;
+  animation: ny-banner-portal-turn 24s linear infinite;
+}
+
+.ny-welcome-banner__rings::after {
+  content: none;
+}
+
+.ny-welcome-banner__engraving {
+  position: absolute;
+  right: 16px;
+  bottom: 12px;
+  z-index: 1;
+  pointer-events: none;
+  color: rgba(255, 255, 255, 0.9);
+  font-family: var(--dc-font-mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  opacity: 0.18;
+}
+
+@keyframes ny-banner-rings-haze {
+  0%,
+  100% {
+    opacity: 0.78;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes ny-banner-portal-turn {
+  0% {
+    transform: translateY(-50%) rotate(0deg);
+  }
+
+  100% {
+    transform: translateY(-50%) rotate(360deg);
+  }
+}
+
+// 5 · Library Shelf — favorites as "pinned worlds" + Ny-chan speech bubble.
+.ny-home-section--favorites .ny-library-card {
+  border-color: var(--brand-border-medium);
+  box-shadow:
+    0 0 0 1px var(--brand-alpha-weak),
+    0 14px 36px -26px var(--brand-alpha-strong);
+}
+
+// A small FAVORITE tag in the poster's free bottom-left corner — the
+// continue / new / pin pills already own the other three corners.
+.ny-home-section--favorites .ny-library-card__poster::before {
+  content: "Favorite";
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 3;
+  padding: 3px 9px;
+  border-radius: 999px;
+  color: var(--neutral-on-solid-strong);
+  font-family: var(--dc-font-mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  background: var(--brand-solid-strong);
+  box-shadow: 0 6px 16px -8px var(--brand-alpha-strong);
+  pointer-events: none;
+}
+
+// Recently Picked reads as "recent portals" — a cyan capsule on its icon.
+.ny-home-section--recent .ny-home-section__icon {
+  border-color: var(--accent-border-medium);
+  color: var(--accent-on-background-strong);
+  background: var(--accent-alpha-weak);
+}
+
+.ny-home-pick__mascot {
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.ny-home-pick__speech {
+  margin: 0;
+  max-width: 100%;
+  padding: 8px 11px;
+  border: 1px solid var(--neutral-border-weak);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface-background) 82%, transparent);
+  color: var(--neutral-on-background-medium);
+  font-size: 0.74rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
+// 7 · Right rail — "Nyrima Console". Per-panel background tints + helper text.
+.ny-health-panel--tools {
+  background:
+    linear-gradient(180deg, var(--brand-alpha-weak), transparent 46%),
+    color-mix(in srgb, var(--surface-background) 80%, transparent);
+}
+
+.ny-health-panel--stats {
+  background:
+    linear-gradient(180deg, var(--accent-alpha-weak), transparent 46%),
+    color-mix(in srgb, var(--surface-background) 80%, transparent);
+}
+
+.ny-health-panel--gates {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 46%),
+    color-mix(in srgb, var(--surface-background) 80%, transparent);
+}
+
+.ny-health-panel--system {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 46%),
+    color-mix(in srgb, var(--surface-background) 80%, transparent);
+}
+
+.ny-health-panel__hint {
+  margin: 12px 0 0;
+  color: var(--neutral-on-background-weak);
+  font-family: var(--dc-font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  opacity: 0.72;
+}
+
+// 8 · Player — "World Playback Dock". Eyebrow + container chip, a soft glow /
+// idle pulse on the resume button, and a hover-only slogan engraving.
+.continue-player-dock {
+  position: relative;
+  z-index: 1;
+  overflow: hidden;
+  isolation: isolate;
+  border-top-color: rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 79, 216, 0.55) 20%,
+      rgba(255, 79, 216, 0.56) 56%,
+      transparent 92%
+    ) top / 100% 1px no-repeat,
+    linear-gradient(90deg, rgba(255, 79, 216, 0.06), transparent 50%),
+    color-mix(in srgb, var(--surface-background-strong) 88%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 -1px 0 var(--brand-alpha-weak),
+    0 -18px 48px -36px rgba(255, 79, 216, 0.62);
+}
+
+.continue-player-dock__media,
+.continue-player-dock__center,
+.continue-player-dock__right {
+  position: relative;
+  z-index: 2;
+}
+
+.continue-player-dock__copy .continue-player-dock__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--brand-on-background-medium);
+  font-family: var(--dc-font-mono);
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.continue-player-dock__copy .continue-player-dock__badge {
+  padding: 1px 6px;
+  border: 1px solid var(--neutral-border-strong);
+  border-radius: 6px;
+  color: var(--neutral-on-background-strong);
+  font-family: var(--dc-font-mono);
+  font-size: 0.56rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  background: var(--neutral-alpha-medium);
+}
+
+.continue-player-dock__button.is-primary {
+  box-shadow:
+    0 10px 26px -16px var(--brand-alpha-strong),
+    0 0 18px -4px var(--brand-alpha-medium);
+}
+
+.continue-player-dock__button.is-primary:not(:disabled) {
+  animation: ny-dock-pulse 3.2s ease-in-out infinite;
+}
+
+@keyframes ny-dock-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 10px 26px -16px var(--brand-alpha-strong),
+      0 0 16px -6px var(--brand-alpha-medium);
+  }
+  50% {
+    box-shadow:
+      0 10px 26px -16px var(--brand-alpha-strong),
+      0 0 26px -2px var(--brand-alpha-strong);
+  }
+}
+
+.continue-player-dock__engraving {
+  position: absolute;
+  left: 50%;
+  bottom: 3px;
+  transform: translateX(-50%);
+  z-index: 0;
+  pointer-events: none;
+  color: var(--neutral-on-background-weak);
+  font-family: var(--dc-font-mono);
+  font-size: 0.56rem;
+  font-weight: 600;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 320ms ease;
+}
+
+.continue-player-dock:hover .continue-player-dock__engraving {
+  opacity: 0.22;
+}
+
+// Show the topbar status engraving only when the command bar is wide enough
+// that it can't crowd the search field or the labelled action buttons.
+@media (max-width: 1720px) {
+  .ny-command-bar__status {
+    display: none;
+  }
+}
+
+// Decoration motion — disabled for reduced-motion users (the aurora drift and
+// the resume-button pulse), and the engraving reveals instantly.
+@media (prefers-reduced-motion: reduce) {
+  .ny-lobby-shell::before,
+  .continue-player-dock__button.is-primary:not(:disabled) {
+    animation: none;
+  }
+
+  .continue-player-dock__engraving {
+    transition: none;
+  }
+}
+
+/* ── "Nyrima Console" + "Command Deck" polish ──────────────────────────────
+   De-flatten the right-rail panels and the topbar with subtle HUD detailing:
+   neon corner brackets, a gradient header seam, livelier gradient icon
+   capsules, and a neon focus state on the search field. Still low-contrast so
+   the data stays the focus. */
+
+.ny-health-panel {
+  position: relative;
+}
+
+// Thin neon L-brackets in opposite corners so each panel reads like a console
+// readout instead of a plain card.
+.ny-health-panel::before,
+.ny-health-panel::after {
+  content: "";
+  position: absolute;
+  width: 13px;
+  height: 13px;
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+.ny-health-panel::before {
+  top: 9px;
+  left: 9px;
+  border-top: 1.5px solid var(--brand-border-medium);
+  border-left: 1.5px solid var(--brand-border-medium);
+  border-top-left-radius: 5px;
+}
+
+.ny-health-panel::after {
+  right: 9px;
+  bottom: 9px;
+  border-right: 1.5px solid var(--neutral-border-strong);
+  border-bottom: 1.5px solid var(--neutral-border-strong);
+  border-bottom-right-radius: 5px;
+}
+
+// Gradient seam under each panel header so the title reads like a labelled
+// console section.
+.ny-health-panel__head {
+  position: relative;
+  padding-bottom: 11px;
+  border-bottom: 1px solid var(--neutral-border-weak);
+}
+
+.ny-health-panel__head::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  width: 54px;
+  height: 1px;
+  background: var(--brand-on-background-strong);
+  box-shadow: 0 0 8px var(--brand-alpha-medium);
+}
+
+// Icon capsule (white glyph on a solid pink fill) shared by every panel head,
+// so the titles get a pop of brand colour.
+.ny-health-panel__icon {
+  border-color: transparent;
+  color: var(--neutral-on-solid-strong);
+  background: var(--brand-solid-strong);
+  box-shadow:
+    0 6px 16px -10px var(--brand-alpha-strong),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+// Command Deck — neon focus glow on the search field + an accent search icon.
+.ny-command-bar__search {
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.ny-command-bar__search:focus-within {
+  border-color: var(--brand-border-medium);
+  box-shadow:
+    0 0 0 1px var(--brand-border-medium),
+    0 0 20px -6px var(--brand-alpha-strong);
+}
+
+.ny-command-bar__search:focus-within svg {
+  color: var(--brand-on-background-strong);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ny-command-bar__search {
+    transition: none;
+  }
+}
+
+/* ── Sidebar "world-index rail" — anime-tech ornament frame ────────────────
+   Reference-inspired but restrained: a single pink lamp wash, thin diamond
+   linework, dotted clusters, tiny spark nodes, and the existing live neon
+   edge. Motifs stay on the edges so the navigation labels remain readable. */
+
+.ny-sidebar {
+  isolation: isolate;
+}
+
+.ny-sidebar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 42% at 24% -8%, var(--brand-alpha-medium), transparent 66%),
+    radial-gradient(110% 44% at 82% 104%, var(--brand-alpha-weak), transparent 64%),
+    url("data:image/svg+xml,%3Csvg width='220' height='680' viewBox='0 0 220 680' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M144 50l34 34-34 34-34-34z' stroke='%23f9c7ff' stroke-opacity='.13'/%3E%3Cpath d='M166 50l28 28' stroke='%23ff9bea' stroke-opacity='.18'/%3E%3Cpath d='M28 158l35-35 35 35-35 35z' stroke='%23ffffff' stroke-opacity='.12'/%3E%3Cpath d='M53 121v-38M53 193v38M18 158h-18M99 158h42' stroke='%23f9c7ff' stroke-opacity='.16'/%3E%3Cpath d='M26 304h86M38 316h62M50 328h34' stroke='%23ffffff' stroke-opacity='.18'/%3E%3Cpath d='M138 410l42 42-42 42-42-42z' stroke='%23ff9bea' stroke-opacity='.16'/%3E%3Cpath d='M116 452h92M180 452v92' stroke='%23f9c7ff' stroke-opacity='.12'/%3E%3Cpath d='M32 550l44-44 44 44-44 44zM52 550l24-24 24 24-24 24z' stroke='%23ffffff' stroke-opacity='.13'/%3E%3C/g%3E%3Cg fill='%23ffffff' fill-opacity='.16'%3E%3Ccircle cx='18' cy='256' r='1.2'/%3E%3Ccircle cx='34' cy='256' r='1.2'/%3E%3Ccircle cx='50' cy='256' r='1.2'/%3E%3Ccircle cx='66' cy='256' r='1.2'/%3E%3Ccircle cx='82' cy='256' r='1.2'/%3E%3Ccircle cx='18' cy='272' r='1.2'/%3E%3Ccircle cx='34' cy='272' r='1.2'/%3E%3Ccircle cx='50' cy='272' r='1.2'/%3E%3Ccircle cx='66' cy='272' r='1.2'/%3E%3Ccircle cx='82' cy='272' r='1.2'/%3E%3Ccircle cx='18' cy='288' r='1.2'/%3E%3Ccircle cx='34' cy='288' r='1.2'/%3E%3Ccircle cx='50' cy='288' r='1.2'/%3E%3Ccircle cx='66' cy='288' r='1.2'/%3E%3Ccircle cx='82' cy='288' r='1.2'/%3E%3Ccircle cx='148' cy='610' r='1.2'/%3E%3Ccircle cx='164' cy='610' r='1.2'/%3E%3Ccircle cx='180' cy='610' r='1.2'/%3E%3Ccircle cx='196' cy='610' r='1.2'/%3E%3Ccircle cx='148' cy='626' r='1.2'/%3E%3Ccircle cx='164' cy='626' r='1.2'/%3E%3Ccircle cx='180' cy='626' r='1.2'/%3E%3Ccircle cx='196' cy='626' r='1.2'/%3E%3Ccircle cx='148' cy='642' r='1.2'/%3E%3Ccircle cx='164' cy='642' r='1.2'/%3E%3Ccircle cx='180' cy='642' r='1.2'/%3E%3Ccircle cx='196' cy='642' r='1.2'/%3E%3C/g%3E%3Cg stroke='%23f9c7ff' stroke-opacity='.34' stroke-linecap='round'%3E%3Cpath d='M184 188v26M171 201h26M184 194l9-9M184 194l-9-9'/%3E%3Cpath d='M38 644v18M29 653h18M38 648l6-6M38 648l-6-6'/%3E%3C/g%3E%3C/svg%3E");
+  background-position:
+    center top,
+    center bottom,
+    center top;
+  background-repeat: no-repeat;
+  background-size:
+    auto,
+    auto,
+    220px 680px;
+  opacity: 0.92;
+  animation: ny-sidebar-motif-drift 32s ease-in-out infinite alternate;
+}
+
+.ny-sidebar__brand-row,
+.ny-sidebar__nav {
+  position: relative;
+  z-index: 1;
+}
+
+.ny-sidebar__brand-row::before,
+.ny-sidebar__brand-row::after,
+.ny-sidebar__nav::before {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+}
+
+.ny-sidebar__brand-row::before {
+  left: 15px;
+  right: 15px;
+  bottom: -1px;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 194, 252, 0.36) 18%,
+    rgba(255, 79, 216, 0.22) 52%,
+    rgba(255, 194, 252, 0.18) 82%,
+    transparent
+  );
+  box-shadow: 0 0 10px rgba(255, 79, 216, 0.18);
+}
+
+.ny-sidebar__brand-row::after {
+  top: 14px;
+  right: 18px;
+  width: 28px;
+  height: 28px;
+  opacity: 0.5;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.92) 0 1.5px, transparent 2px),
+    linear-gradient(90deg, transparent 45%, rgba(255, 222, 255, 0.52) 48% 52%, transparent 55%),
+    linear-gradient(0deg, transparent 45%, rgba(255, 222, 255, 0.52) 48% 52%, transparent 55%);
+  filter: drop-shadow(0 0 7px rgba(255, 79, 216, 0.32));
+  animation: ny-sidebar-spark 7.2s ease-in-out infinite;
+}
+
+.ny-sidebar__nav::before {
+  inset: 2px -10px 8px;
+  z-index: 0;
+  opacity: 0.34;
+  background:
+    radial-gradient(1.5px 1.5px at 30px 44px, rgba(255, 255, 255, 0.62), transparent),
+    radial-gradient(1px 1px at 146px 128px, rgba(255, 214, 255, 0.52), transparent),
+    radial-gradient(1.5px 1.5px at 176px 310px, rgba(255, 79, 216, 0.5), transparent),
+    radial-gradient(1px 1px at 54px 470px, rgba(255, 255, 255, 0.48), transparent),
+    linear-gradient(135deg, transparent 0 42%, rgba(255, 194, 252, 0.08) 42.5% 43%, transparent 43.5% 100%),
+    linear-gradient(135deg, transparent 0 67%, rgba(255, 79, 216, 0.09) 67.5% 68%, transparent 68.5% 100%);
+  background-repeat: no-repeat;
+  mix-blend-mode: screen;
+  animation: ny-sidebar-points-drift 18s ease-in-out infinite alternate;
+}
+
+.ny-sidebar__section,
+.ny-sidebar__item {
+  position: relative;
+  z-index: 1;
+}
+
+// Slow shimmer along the neon rail so the edge feels live rather than static.
+.ny-sidebar::after {
+  background-size: 100% 220%;
+  animation: ny-rail-shimmer 9s ease-in-out infinite alternate;
+}
+
+@keyframes ny-sidebar-motif-drift {
+  0% {
+    transform: translate3d(0, -4px, 0);
+    opacity: 0.84;
+  }
+  100% {
+    transform: translate3d(0, 5px, 0);
+    opacity: 0.98;
+  }
+}
+
+@keyframes ny-sidebar-points-drift {
+  0% {
+    transform: translate3d(0, -2px, 0);
+  }
+  100% {
+    transform: translate3d(0, 3px, 0);
+  }
+}
+
+@keyframes ny-sidebar-spark {
+  0%,
+  72%,
+  100% {
+    transform: scale(0.82) rotate(0deg);
+    opacity: 0.28;
+  }
+  42% {
+    transform: scale(1) rotate(45deg);
+    opacity: 0.62;
+  }
+}
+
+@keyframes ny-rail-shimmer {
+  0% {
+    background-position: 50% 0%;
+  }
+  100% {
+    background-position: 50% 100%;
+  }
+}
+
+// Active item — a little more glow + a slow drift over the existing scanline.
+.ny-sidebar__item.is-active {
+  box-shadow:
+    0 10px 28px -16px var(--brand-alpha-strong),
+    0 0 18px -7px var(--brand-alpha-medium),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+.ny-sidebar__item.is-active::after {
+  background-size: 100% 200%;
+  animation: ny-scan 7s linear infinite;
+}
+
+@keyframes ny-scan {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 0 200%;
+  }
+}
+
+/* ── Player "world playback dock" — seamless flowing wave + control polish ─
+   Two oversized layers repeat across their own first and second halves. Each
+   translates by exactly half its width, so the loop lands on the same frame. */
+
+.continue-player-dock::before,
+.continue-player-dock::after {
+  content: "";
+  position: absolute;
+  top: -74px;
+  bottom: -74px;
+  left: 0;
+  width: 220%;
+  pointer-events: none;
+  background-repeat: repeat-x;
+  background-size: 50% 100%;
+  will-change: transform;
+}
+
+.continue-player-dock::before {
+  z-index: 0;
+  background:
+    radial-gradient(38% 92% at 8% 78%, rgba(255, 79, 216, 0.18), transparent 60%),
+    radial-gradient(34% 82% at 28% 18%, rgba(255, 79, 216, 0.14), transparent 58%),
+    radial-gradient(36% 86% at 52% 72%, rgba(255, 79, 216, 0.18), transparent 62%),
+    radial-gradient(34% 80% at 76% 20%, rgba(255, 79, 216, 0.13), transparent 60%),
+    radial-gradient(40% 92% at 96% 78%, rgba(255, 79, 216, 0.18), transparent 62%),
+    linear-gradient(
+      90deg,
+      rgba(7, 9, 15, 0),
+      rgba(255, 79, 216, 0.08) 18%,
+      rgba(255, 79, 216, 0.08) 42%,
+      rgba(255, 79, 216, 0.08) 66%,
+      rgba(7, 9, 15, 0)
+    );
+  filter: blur(18px) saturate(135%);
+  opacity: 0.74;
+  animation: ny-dock-wave-x 34s linear infinite;
+}
+
+.continue-player-dock::after {
+  z-index: 1;
+  top: -92px;
+  bottom: -92px;
+  opacity: 0.38;
+  background:
+    repeating-linear-gradient(
+      116deg,
+      transparent 0 26px,
+      rgba(255, 255, 255, 0.04) 26px 27px,
+      transparent 27px 54px
+    ),
+    radial-gradient(24% 72% at 16% 48%, rgba(255, 194, 252, 0.14), transparent 62%),
+    radial-gradient(28% 74% at 44% 54%, rgba(255, 79, 216, 0.12), transparent 64%),
+    radial-gradient(24% 72% at 70% 46%, rgba(255, 79, 216, 0.13), transparent 62%),
+    radial-gradient(26% 72% at 94% 54%, rgba(255, 79, 216, 0.12), transparent 64%);
+  filter: blur(22px) saturate(145%);
+  mix-blend-mode: screen;
+  transform: translate3d(0, 0, 0) rotate(-1.6deg);
+  animation: ny-dock-wave-angled 47s linear infinite;
+}
+
+@keyframes ny-dock-wave-x {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+@keyframes ny-dock-wave-angled {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(-1.6deg);
+  }
+  100% {
+    transform: translate3d(-50%, 0, 0) rotate(-1.6deg);
+  }
+}
+
+// Focal play button a touch larger; a little more breathing room around it.
+.continue-player-dock__button.is-primary {
+  width: 44px;
+  height: 44px;
+}
+
+.continue-player-dock__controls {
+  gap: 9px;
+}
+
+// Thin, refined volume slider — custom 4px track + small 11px gradient thumb,
+// replacing the chunkier native accent-color rendering.
+.continue-player-dock__volume input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 84px;
+  height: 16px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.continue-player-dock__volume input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--neutral-alpha-medium);
+}
+
+.continue-player-dock__volume input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  margin-top: -3.5px;
+  width: 11px;
+  height: 11px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--brand-solid-strong);
+  box-shadow: 0 0 8px -1px var(--brand-alpha-strong);
+}
+
+.continue-player-dock__volume input[type="range"]::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--neutral-alpha-medium);
+}
+
+.continue-player-dock__volume input[type="range"]::-moz-range-thumb {
+  width: 11px;
+  height: 11px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--brand-solid-strong);
+  box-shadow: 0 0 8px -1px var(--brand-alpha-strong);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ny-sidebar::before,
+  .ny-sidebar::after,
+  .ny-sidebar__brand-row::after,
+  .ny-sidebar__nav::before,
+  .ny-sidebar__item.is-active::after,
+  .ny-welcome-banner::before,
+  .ny-welcome-banner__overlay,
+  .ny-welcome-banner__vfx,
+  .ny-welcome-banner__vfx-beam,
+  .ny-welcome-banner__vfx-pulse,
+  .ny-welcome-banner__mascot-home img,
+  .ny-welcome-banner__status-card::before,
+  .ny-welcome-banner__rings,
+  .ny-welcome-banner__rings::before,
+  .ny-welcome-banner__side::before,
+  .ny-welcome-banner__side::after,
+  .ny-welcome-banner__content::before,
+  .ny-welcome-banner__content::after,
+  .continue-player-dock::before,
+  .continue-player-dock::after {
+    animation: none;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Lobby entrance — staggered "appear" animation
+   ---------------------------------------------------------------------------
+   When the dashboard mounts, the major regions fade + rise into place in a
+   short cascade: chrome (sidebar, command bar) first, then the hero, then the
+   content panes, with the player dock sliding up from the bottom last. All of
+   it is transform/opacity only (compositor-friendly) and runs once on mount —
+   the existing ambient/looping animations above are untouched. Fully disabled
+   under prefers-reduced-motion.
+   ═════════════════════════════════════════════════════════════════════════ */
+
+@keyframes ny-lobby-rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 16px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes ny-lobby-dock-rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 100%, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes ny-lobby-slide-in {
+  from {
+    opacity: 0;
+    transform: translate3d(-14px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ny-sidebar,
+  .ny-command-bar,
+  .ny-lobby-main__guest,
+  .ny-hero-section,
+  .ny-library-pane,
+  .ny-health-pane,
+  .continue-player-dock {
+    animation: ny-lobby-rise 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+    // Stagger via a shared cascade step so the regions arrive in sequence.
+    --ny-appear-step: 80ms;
+  }
+
+  .ny-sidebar {
+    animation-name: ny-lobby-slide-in;
+    animation-delay: 0ms;
+  }
+
+  .ny-command-bar {
+    animation-delay: calc(var(--ny-appear-step) * 1);
+  }
+
+  .ny-lobby-main__guest {
+    animation-delay: calc(var(--ny-appear-step) * 2);
+  }
+
+  .ny-hero-section {
+    animation-delay: calc(var(--ny-appear-step) * 3);
+  }
+
+  .ny-library-pane {
+    animation-delay: calc(var(--ny-appear-step) * 4);
+  }
+
+  .ny-health-pane {
+    animation-delay: calc(var(--ny-appear-step) * 5);
+  }
+
+  .continue-player-dock {
+    animation-name: ny-lobby-dock-rise;
+    animation-delay: calc(var(--ny-appear-step) * 6);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Sidebar collapse — performance window
+   ---------------------------------------------------------------------------
+   Resizing the rail animates `grid-template-columns`, a LAYOUT property: it
+   can't be GPU-composited, so every frame relayouts + repaints the whole main
+   column. The lobby also stacks ~10 backdrop-filter blur layers and ~14 looping
+   animations — each blur has to re-sample the content moving behind it every
+   frame, which saturates the main thread and drops frames.
+
+   `.is-sidebar-animating` is toggled by JS only for the ~360ms transition. While
+   it's on we shed that per-frame cost so the resize stays smooth:
+     • pause every looping animation (frees the compositor + main thread), and
+     • drop the backdrop blurs on the chrome that sits over the moving content
+       (the single most expensive thing to repaint mid-resize).
+   The panels keep their own translucent backgrounds, so the only visible change
+   is the blur briefly flattening while the rail glides — then it returns.
+   ═════════════════════════════════════════════════════════════════════════ */
+
+.ny-lobby-shell.is-sidebar-animating {
+  will-change: grid-template-columns;
+}
+
+.ny-lobby-shell.is-sidebar-animating *,
+.ny-lobby-shell.is-sidebar-animating *::before,
+.ny-lobby-shell.is-sidebar-animating *::after {
+  animation-play-state: paused !important;
+}
+
+.ny-lobby-shell.is-sidebar-animating .ny-sidebar,
+.ny-lobby-shell.is-sidebar-animating .ny-command-bar,
+.ny-lobby-shell.is-sidebar-animating .ny-welcome-banner,
+.ny-lobby-shell.is-sidebar-animating .ny-health-panel,
+.ny-lobby-shell.is-sidebar-animating .continue-player-dock {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}

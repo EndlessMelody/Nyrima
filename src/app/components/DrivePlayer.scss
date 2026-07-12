@@ -4,8 +4,8 @@
  * Design pillars:
  *  - Dark-first cinematic surface; the player is its own room.
  *  - Tech HUD: monospace timecodes, hairline borders, mono labels.
- *  - Brand chroma: neon pink primary, neon cyan accent. Pink → cyan
- *    gradients drive the play knob and the timeline.
+ *  - Brand chroma: neon pink is the lamp — play knob, timeline progress,
+ *    active toggles. Cyan stays a quiet info accent and never blends with it.
  *  - Auto-hide HUD after ~2.5s of mouse inactivity while playing.
  */
 
@@ -40,11 +40,9 @@
     0 24px 60px -28px rgba(0, 0, 0, 0.9),
     0 0 0 1px var(--hairline-pink),
     0 12px 60px -28px var(--brand-alpha-medium),
-    0 12px 60px -28px var(--accent-alpha-medium),
     // Ambient bloom: large, very-soft spread anchored at the player edges
-    // so it leaks outward without darkening the frame itself. Two shadows
-    // stacked — a tighter halo for accent + a wide low-alpha spread for the
-    // room feel.
+    // so it leaks outward without darkening the frame itself, sampled from
+    // the cached poster art.
     0 28px 90px -10px rgba(var(--ambient-r), var(--ambient-g), var(--ambient-b), 0.36),
     0 0 160px -20px rgba(var(--ambient-r), var(--ambient-g), var(--ambient-b), 0.22);
 
@@ -76,7 +74,7 @@
 }
 
 // ---------------------------------------------------------------------------
-// Top kana eyebrow ("再生中 · NOW PLAYING")
+// Top playback eyebrow.
 // ---------------------------------------------------------------------------
 .dc-vlc__top {
   position: absolute;
@@ -148,7 +146,7 @@
   padding: 5px 8px;
   border-radius: 7px;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(6, 8, 20, 0.62);
+  background: rgba(7, 9, 15, 0.62);
   backdrop-filter: blur(10px);
   font-family: var(--dc-font-mono);
   font-size: 0.625rem;
@@ -231,18 +229,14 @@
   width: 88px;
   height: 88px;
   border-radius: 999px;
-  background: linear-gradient(
-    135deg,
-    var(--brand-solid-medium) 0%,
-    var(--accent-solid-medium) 100%
-  );
+  background: var(--brand-solid-strong);
   display: flex;
   align-items: center;
   justify-content: center;
   box-shadow:
     0 20px 48px -8px var(--brand-alpha-strong),
     0 0 0 1px rgba(255, 255, 255, 0.22) inset,
-    0 0 60px var(--accent-alpha-medium);
+    0 0 60px var(--brand-alpha-medium);
   transition:
     transform 160ms ease,
     box-shadow 160ms ease;
@@ -259,7 +253,7 @@
     box-shadow:
       0 22px 52px -8px var(--brand-alpha-strong),
       0 0 0 1px rgba(255, 255, 255, 0.28) inset,
-      0 0 80px var(--accent-alpha-strong);
+      0 0 80px var(--brand-alpha-strong);
   }
 }
 
@@ -278,7 +272,7 @@
   height: 56px;
   border-radius: 999px;
   border: 1.5px solid var(--brand-border-strong);
-  background: rgba(6, 8, 20, 0.55);
+  background: rgba(7, 9, 15, 0.55);
   color: var(--brand-on-background-strong);
   cursor: pointer;
   display: grid;
@@ -313,12 +307,12 @@
 
   &:hover {
     background: rgba(20, 12, 28, 0.7);
-    border-color: var(--accent-border-strong);
-    color: var(--accent-on-background-strong);
+    border-color: var(--brand-border-strong);
+    color: var(--brand-on-background-strong);
     transform: scale(1.05);
     box-shadow:
-      0 0 24px var(--accent-alpha-medium),
-      0 0 0 1px var(--accent-border-strong) inset;
+      0 0 24px var(--brand-alpha-medium),
+      0 0 0 1px var(--brand-border-strong) inset;
   }
 
   &:active {
@@ -346,8 +340,8 @@
   padding: 18px 20px 16px;
   background: linear-gradient(
     to top,
-    rgba(6, 8, 20, 0.96) 0%,
-    rgba(6, 8, 20, 0.7) 55%,
+    rgba(7, 9, 15, 0.96) 0%,
+    rgba(7, 9, 15, 0.7) 55%,
     transparent 100%
   );
   transform: translateY(110%);
@@ -437,7 +431,7 @@
   position: absolute;
   inset: 0 auto 0 0;
   border-radius: inherit;
-  background: rgba(248, 247, 255, 0.28);
+  background: rgba(238, 240, 246, 0.28);
   pointer-events: none;
 }
 
@@ -445,11 +439,7 @@
   position: absolute;
   inset: 0 auto 0 0;
   border-radius: inherit;
-  background: linear-gradient(
-    90deg,
-    var(--brand-solid-medium) 0%,
-    var(--accent-solid-medium) 100%
-  );
+  background: var(--brand-solid-strong);
   box-shadow: 0 0 10px var(--brand-alpha-medium);
   pointer-events: none;
   transition: width 80ms linear;
@@ -486,7 +476,7 @@
   width: 184px;
   padding: 4px 4px 6px;
   border-radius: 8px;
-  background: rgba(6, 8, 20, 0.94);
+  background: rgba(7, 9, 15, 0.94);
   color: var(--brand-on-background-strong);
   font-family: var(--dc-font-mono);
   font-weight: 500;
@@ -524,7 +514,7 @@
     bottom: -6px;
     border-left: 6px solid transparent;
     border-right: 6px solid transparent;
-    border-top: 6px solid rgba(6, 8, 20, 0.94);
+    border-top: 6px solid rgba(7, 9, 15, 0.94);
   }
 
   canvas {
@@ -609,9 +599,9 @@
   }
 
   &.is-on {
-    color: var(--accent-on-background-strong);
-    background: var(--accent-alpha-medium);
-    box-shadow: 0 0 14px var(--accent-alpha-medium);
+    color: var(--brand-on-background-strong);
+    background: var(--brand-alpha-medium);
+    box-shadow: 0 0 14px var(--brand-alpha-medium);
   }
 
   &:disabled {
@@ -639,11 +629,7 @@
   width: 40px;
   height: 40px;
   border-radius: 999px;
-  background: linear-gradient(
-    135deg,
-    var(--brand-solid-medium) 0%,
-    var(--accent-solid-medium) 100%
-  );
+  background: var(--brand-solid-medium);
   color: #fff;
   box-shadow:
     0 8px 20px -6px var(--brand-alpha-strong),
@@ -656,15 +642,11 @@
   }
 
   &:hover {
-    background: linear-gradient(
-      135deg,
-      var(--brand-solid-strong) 0%,
-      var(--accent-solid-strong) 100%
-    );
+    background: var(--brand-solid-strong);
     color: #fff;
     box-shadow:
       0 10px 24px -6px var(--brand-alpha-strong),
-      0 0 30px var(--accent-alpha-medium),
+      0 0 30px var(--brand-alpha-medium),
       0 0 0 1px rgba(255, 255, 255, 0.24) inset;
     transform: none;
   }
@@ -711,7 +693,7 @@
   background-image: linear-gradient(
     90deg,
     var(--brand-solid-medium) 0%,
-    var(--accent-solid-medium) var(--pct),
+    var(--brand-solid-medium) var(--pct),
     rgba(255, 255, 255, 0.16) var(--pct),
     rgba(255, 255, 255, 0.16) 100%
   );
@@ -768,7 +750,7 @@
   min-width: 200px;
   padding: 6px;
   border-radius: var(--ny-radius-sm);
-  background: rgba(8, 11, 24, 0.96);
+  background: rgba(7, 9, 15, 0.96);
   backdrop-filter: blur(16px);
   border: 1px solid var(--hairline-pink);
   box-shadow:
@@ -856,7 +838,7 @@
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.06em;
-  color: var(--accent-on-background-strong);
+  color: rgba(255, 255, 255, 0.85);
   opacity: 0.9;
   min-width: 4ch;
   text-align: center;
@@ -867,12 +849,15 @@
 .dc-vlc__menu--settings {
   right: -44px;
   min-width: 0;
-  width: min(420px, 80cqw);
+  // Windowed: compact and content-flex (auto height) with a safety cap so it
+  // never overflows the shorter player box and only scrolls when it must.
+  width: min(360px, 80cqw);
   max-width: calc(100cqw - 24px);
-  height: min(460px, calc(100cqh - 126px));
+  height: auto;
+  max-height: min(440px, calc(100cqh - 86px));
   padding: 10px;
   gap: 8px;
-  overflow: hidden;
+  overflow-y: auto;
   z-index: 80;
   scrollbar-width: thin;
   scrollbar-color: var(--brand-alpha-strong) transparent;
@@ -884,6 +869,14 @@
   &::-webkit-scrollbar {
     width: 6px;
   }
+}
+
+// Fullscreen: the screen is huge, so use the roomier fixed size (the original
+// behaviour) rather than hugging content.
+.dc-vlc.is-fullscreen .dc-vlc__menu--settings {
+  width: min(440px, 80cqw);
+  height: min(560px, calc(100cqh - 140px));
+  max-height: none;
 }
 
 .dc-vlc__settings-head {
@@ -1049,7 +1042,7 @@
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
-  color: var(--accent-on-background-strong);
+  color: rgba(255, 255, 255, 0.85);
 }
 
 .dc-vlc__settings-pills--grid {
@@ -1082,7 +1075,7 @@
     radial-gradient(
       ellipse at center,
       var(--brand-alpha-medium) 0%,
-      rgba(8, 11, 24, 0.95) 70%
+      rgba(7, 9, 15, 0.95) 70%
     ),
     repeating-linear-gradient(
       45deg,
@@ -1309,7 +1302,7 @@
 }
 
 // ---------------------------------------------------------------------------
-// Brackets at the four corners — film-cell vibe, painted in pink/cyan.
+// Brackets at the four corners — film-cell vibe, single lamp colour.
 // ---------------------------------------------------------------------------
 .dc-vlc__corners span {
   position: absolute;
@@ -1329,14 +1322,14 @@
   &.tr {
     top: 10px;
     right: 10px;
-    border-top: 1px solid var(--accent-border-strong);
-    border-right: 1px solid var(--accent-border-strong);
+    border-top: 1px solid var(--brand-border-strong);
+    border-right: 1px solid var(--brand-border-strong);
   }
   &.bl {
     bottom: 10px;
     left: 10px;
-    border-bottom: 1px solid var(--accent-border-strong);
-    border-left: 1px solid var(--accent-border-strong);
+    border-bottom: 1px solid var(--brand-border-strong);
+    border-left: 1px solid var(--brand-border-strong);
   }
   &.br {
     bottom: 10px;
@@ -1371,7 +1364,6 @@
     border-radius: 999px;
     border: 1.5px solid rgba(255, 255, 255, 0.16);
     border-top-color: var(--brand-solid-strong);
-    border-right-color: var(--accent-solid-strong);
     animation: dc-vlc-spin 0.9s linear infinite;
   }
 
@@ -1418,7 +1410,7 @@
   overflow-y: auto;
   padding: 18px 22px 22px;
   border-radius: var(--ny-radius-md);
-  background: rgba(8, 11, 24, 0.96);
+  background: rgba(7, 9, 15, 0.96);
   border: 1px solid var(--hairline-pink);
   box-shadow:
     0 30px 60px rgba(0, 0, 0, 0.55),
@@ -1512,7 +1504,7 @@
     border-radius: 5px;
     border: 1px solid rgba(255, 255, 255, 0.14);
     background: rgba(255, 255, 255, 0.04);
-    color: var(--accent-on-background-strong);
+    color: rgba(255, 255, 255, 0.85);
   }
 }
 
@@ -1522,7 +1514,7 @@
   font-weight: 500;
   letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: var(--accent-on-background-strong);
+  color: rgba(255, 255, 255, 0.56);
   margin-bottom: 2px;
 }
 
@@ -1551,12 +1543,12 @@
   width: min(360px, calc(100% - 48px));
   padding: 10px;
   border-radius: var(--ny-radius-md);
-  background: rgba(8, 11, 24, 0.94);
+  background: rgba(7, 9, 15, 0.94);
   border: 1px solid var(--hairline-pink);
   box-shadow:
     0 20px 48px rgba(0, 0, 0, 0.55),
     0 0 0 1px rgba(255, 255, 255, 0.04) inset,
-    0 0 40px -10px var(--accent-alpha-medium);
+    0 0 40px -10px var(--brand-alpha-medium);
   color: rgba(255, 255, 255, 0.92);
   animation: dc-vlc-nextup-in 220ms ease;
 }
@@ -1591,7 +1583,7 @@
       var(--brand-alpha-medium) 0%,
       transparent 70%
     ),
-    rgba(8, 11, 24, 0.85);
+    rgba(7, 9, 15, 0.85);
 }
 
 .dc-vlc__nextup-body {
@@ -1653,11 +1645,7 @@
   }
 
   &--primary {
-    background: linear-gradient(
-      135deg,
-      var(--brand-solid-medium) 0%,
-      var(--accent-solid-medium) 100%
-    );
+    background: var(--brand-solid-strong);
     border-color: transparent;
     color: #fff;
     box-shadow: 0 6px 16px -6px var(--brand-alpha-strong);
@@ -1665,7 +1653,7 @@
     &:hover {
       box-shadow:
         0 8px 22px -6px var(--brand-alpha-strong),
-        0 0 22px var(--accent-alpha-medium);
+        0 0 22px var(--brand-alpha-medium);
     }
   }
 }
@@ -1696,7 +1684,7 @@
   gap: 12px;
   padding: 10px 14px;
   border-radius: var(--ny-radius-sm);
-  background: rgba(8, 11, 24, 0.94);
+  background: rgba(7, 9, 15, 0.94);
   border: 1px solid var(--hairline-pink);
   box-shadow:
     0 14px 32px rgba(0, 0, 0, 0.55),
@@ -1728,7 +1716,7 @@
   font-weight: 500;
   letter-spacing: 0.06em;
   font-variant-numeric: tabular-nums;
-  color: var(--accent-on-background-strong);
+  color: rgba(255, 255, 255, 0.92);
 }
 
 .dc-vlc__resume-actions {
@@ -1761,11 +1749,7 @@
   }
 
   &--primary {
-    background: linear-gradient(
-      135deg,
-      var(--brand-solid-medium) 0%,
-      var(--accent-solid-medium) 100%
-    );
+    background: var(--brand-solid-strong);
     border-color: transparent;
     color: #fff;
     box-shadow: 0 6px 14px -6px var(--brand-alpha-strong);
@@ -1773,7 +1757,7 @@
     &:hover {
       box-shadow:
         0 8px 18px -6px var(--brand-alpha-strong),
-        0 0 18px var(--accent-alpha-medium);
+        0 0 18px var(--brand-alpha-medium);
     }
   }
 }
@@ -1788,11 +1772,7 @@
   bottom: 0;
   height: 2px;
   width: 100%;
-  background: linear-gradient(
-    90deg,
-    var(--brand-solid-medium) 0%,
-    var(--accent-solid-medium) 100%
-  );
+  background: var(--brand-solid-strong);
   transform-origin: left center;
   animation: dc-vlc-resume-drain 3500ms linear forwards;
 }
@@ -1854,7 +1834,7 @@
   gap: 10px;
   padding: 20px 28px;
   border-radius: var(--ny-radius-md);
-  background: rgba(8, 11, 24, 0.62);
+  background: rgba(7, 9, 15, 0.62);
   border: 1px solid var(--hairline-pink);
   box-shadow:
     0 30px 70px rgba(0, 0, 0, 0.55),
@@ -1897,7 +1877,7 @@
 }
 
 .dc-vlc__preroll-episode {
-  color: var(--accent-on-background-strong);
+  color: rgba(255, 255, 255, 0.78);
 }
 
 .dc-vlc__preroll-runtime {

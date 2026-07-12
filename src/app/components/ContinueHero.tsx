@@ -91,7 +91,7 @@ export function ContinueHero({ position, folder, file }: Props) {
 
       <div className="ny-continue-hero__panel">
         <span className="ny-continue-hero__eyebrow">
-          続きから · CONTINUE WATCHING
+          Continue Watching
         </span>
 
         <h2 className="ny-continue-hero__title" title={parsed.fullTitle}>
