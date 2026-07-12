@@ -374,3 +374,40 @@
   color: var(--neutral-on-background-weak);
   margin-top: 2px;
 }
+
+/* ───────────────────────── Advanced disclosure ────────────────────────── */
+
+.ny-login__advanced {
+  border-top: 1px solid var(--brand-border-medium);
+  padding-top: 16px;
+}
+
+.ny-login__advanced-summary {
+  cursor: pointer;
+  list-style: none;
+  font-family: var(--dc-font-mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--neutral-on-background-weak);
+  transition: color 160ms ease;
+}
+
+.ny-login__advanced-summary::-webkit-details-marker {
+  display: none;
+}
+
+.ny-login__advanced-summary:hover {
+  color: var(--neutral-on-background-medium);
+}
+
+.ny-login__advanced[open] .ny-login__advanced-summary {
+  color: var(--neutral-on-background-strong);
+  margin-bottom: 14px;
+}
+
+.ny-login__advanced-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}

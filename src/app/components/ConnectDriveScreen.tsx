@@ -6,21 +6,22 @@
  * Drive button, NyrimaRootDialog for folder pairing) with a single screen
  * that walks the user through:
  *
- *   1. Drive credentials — API key (required) and OAuth Client ID (recommended)
- *   2. Connect Drive    — interactive OAuth consent for personal quota
- *   3. Pair Nyrima folder — paste the Drive folder URL
+ *   1. Connect Drive     — interactive OAuth consent (the app ships an
+ *      app-wide Client ID, so this needs no setup for most users)
+ *   2. Pair Nyrima folder — paste the Drive folder URL
  *
- * All three steps are visible at once. Each step renders a status dot
- * (pending / active / done) so the user can see how far they've gotten
- * without losing context. Step 2 is highlighted as the recommended path
- * but doesn't block completion: an API-key-only setup still works.
+ * Both steps are visible at once, each rendering a status dot (pending /
+ * active / done). A third, collapsed "Advanced" disclosure below holds the
+ * BYOK Drive API key + custom OAuth Client ID fields for power users and
+ * self-hosted deployments without an app-wide Client ID — it's optional and
+ * closed by default since OAuth alone is enough to browse + watch.
  *
- * Once API key + folder are both paired, LandingPage flips out of the
- * onboarding surface; OAuth can be completed (or re-consented after the
- * session ceiling) later from the User Center.
+ * Once Drive is reachable (OAuth connected, or a BYOK API key saved) and a
+ * folder is paired, LandingPage flips out of the onboarding surface.
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "@/auth/AuthProvider";
 import { NyrimaMark } from "./NyrimaMark";
 import { getApiKey, setApiKey } from "../services/api-key";
@@ -181,32 +182,28 @@ export function ConnectDriveScreen({
   }
 
   // ── Step status derivation ────────────────────────────────────────────
-  // Active = the next step the user should attend to. We compute these from
-  // bottom-up: folder is the final goal, so if folder isn't paired but key
-  // is, "active" jumps to folder; OAuth is informational only.
-  const step1Done = keyConfigured;
-  const step2Done = oauthState === "active";
-  const step3Done = rootPaired;
+  const credentialsSaved = keyConfigured;
+  const oauthConnected = oauthState === "active";
+  const folderPaired = rootPaired;
 
   // An OAuth client id is available either app-wide (env) or per-account (BYOK
-  // pasted in Step 1) — Connect Google Drive works in both cases.
+  // pasted in the Advanced section) — Connect Google Drive works in both cases.
   const hasClientConfig = !!GOOGLE_CLIENT_ID || !!oauthClientId.trim();
-  // Drive is usable for folder pairing once EITHER an API key is set (Step 1)
-  // OR OAuth is connected (Step 2) — OAuth alone is enough to browse + watch.
-  const driveReady = step1Done || step2Done;
+  // Drive is usable for folder pairing once EITHER OAuth is connected (Step 1)
+  // OR a BYOK API key is set (Advanced) — OAuth alone is enough to browse + watch.
+  const driveReady = oauthConnected || credentialsSaved;
 
-  const step1: StepStatus = step1Done ? "done" : "active";
-  const step3: StepStatus = step3Done
-    ? "done"
-    : driveReady
-      ? "active"
-      : "pending";
-  // Step 2 is "active" whenever a client id is configured and we're not yet
-  // connected — it no longer waits on the API-key step, since OAuth is the
-  // primary path (and the only one a guest needs).
-  const step2: StepStatus = step2Done
+  // Step 1 (Connect Drive) is the lead step — active whenever a client id is
+  // configured (true for virtually everyone, since the app ships a default)
+  // and we're not yet connected.
+  const step1: StepStatus = oauthConnected
     ? "done"
     : hasClientConfig
+      ? "active"
+      : "pending";
+  const step2: StepStatus = folderPaired
+    ? "done"
+    : driveReady
       ? "active"
       : "pending";
 
@@ -226,97 +223,17 @@ export function ConnectDriveScreen({
           <p className="ny-login__lede">
             {isGuest
               ? "Nyrima needs your permission to find and play your anime files. No Nyrima account required — your keys stay on this device and Nyrima only ever talks to Google Drive on your behalf."
-              : "One short setup, three small steps. Your keys stay on this device; Nyrima only ever talks to Google Drive on your behalf."}
+              : "One click to connect, then pick your folder. Your keys stay on this device; Nyrima only ever talks to Google Drive on your behalf."}
           </p>
         </div>
       </header>
 
-      {/* ─── Step 1 — Credentials ──────────────────────────────────────── */}
+      {/* ─── Step 1 — Connect Drive ────────────────────────────────────── */}
       <Card
         index="01"
-        title="Pair your Drive credentials"
-        status={step1}
-        hint="Drive API key is required. OAuth Client ID is recommended — it doubles streaming reliability by routing through your personal quota."
-      >
-        <Field
-          label="Google Drive API key"
-          required
-          help={
-            <>
-              Get one from{" "}
-              <a
-                href="https://console.cloud.google.com/apis/credentials"
-                target="_blank"
-                rel="noreferrer"
-              >
-                Google Cloud Console
-              </a>{" "}
-              — click <em>Create credentials → API key</em>.
-            </>
-          }
-        >
-          <input
-            type="text"
-            className="ny-login__input"
-            placeholder="AIza..."
-            value={apiKey}
-            onChange={(e) => setApiKeyState(e.target.value)}
-            autoComplete="off"
-            spellCheck={false}
-          />
-        </Field>
-
-        <Field
-          label="OAuth Client ID"
-          help={
-            <>
-              Same Credentials page →{" "}
-              <em>Create credentials → OAuth Client ID → Chrome Extension</em>.
-              Required only for "Connect Drive" in step 2.
-            </>
-          }
-        >
-          <input
-            type="text"
-            className="ny-login__input"
-            placeholder="1234567890-xxxx.apps.googleusercontent.com"
-            value={oauthClientId}
-            onChange={(e) => setOAuthClientIdState(e.target.value)}
-            autoComplete="off"
-            spellCheck={false}
-          />
-        </Field>
-
-        {step1Message && (
-          <p
-            className={`ny-login__msg${step1Status === "error" ? " is-error" : ""}`}
-          >
-            {step1Message}
-          </p>
-        )}
-
-        <div className="ny-login__actions">
-          <button
-            type="button"
-            className="ny-btn ny-btn--primary"
-            onClick={() => void saveCredentials()}
-            disabled={step1Status === "validating"}
-          >
-            {step1Status === "validating"
-              ? "Validating…"
-              : step1Done
-                ? "Update credentials"
-                : "Save & validate"}
-          </button>
-        </div>
-      </Card>
-
-      {/* ─── Step 2 — Connect Drive ────────────────────────────────────── */}
-      <Card
-        index="02"
         title="Connect your Google account"
-        status={step2}
-        hint={`Recommended — keeps your Nyrima session valid for ${OAUTH_INTERACTIVE_SESSION_HOURS} hours and lifts the public-API-key rate limits.`}
+        status={step1}
+        hint={`Keeps your Nyrima session valid for ${OAUTH_INTERACTIVE_SESSION_HOURS} hours and streams through your personal Drive quota.`}
       >
         {oauthState === "active" && profile ? (
           <div className="ny-login__signed">
@@ -375,9 +292,16 @@ export function ConnectDriveScreen({
         ) : (
           <>
             <p className="ny-login__field-help">
-              {hasClientConfig
-                ? `Click Connect Google Drive — Nyrima sends you to Google's consent screen and back. You'll stay connected for ${OAUTH_INTERACTIVE_SESSION_HOURS} hours.`
-                : "Set VITE_GOOGLE_CLIENT_ID, or paste your own OAuth Client ID in Step 1. You can also skip this and use API-key-only access for public folders."}
+              {hasClientConfig ? (
+                `Click Connect Google Drive — Nyrima sends you to Google's consent screen and back. You'll stay connected for ${OAUTH_INTERACTIVE_SESSION_HOURS} hours.`
+              ) : (
+                <>
+                  OAuth isn't configured for this deployment. Use the
+                  Advanced section below to add your own Drive API key, or
+                  paste your own OAuth Client ID from{" "}
+                  <Link to="/settings">Settings → API credentials</Link>.
+                </>
+              )}
             </p>
             {oauthMessage && (
               <p className="ny-login__msg is-error">{oauthMessage}</p>
@@ -401,14 +325,14 @@ export function ConnectDriveScreen({
         )}
       </Card>
 
-      {/* ─── Step 3 — Pair folder ──────────────────────────────────────── */}
+      {/* ─── Step 2 — Pair folder ──────────────────────────────────────── */}
       <Card
-        index="03"
+        index="02"
         title="Pair your cinema folder"
-        status={step3}
+        status={step2}
         hint="Paste the URL of any Google Drive folder. Its immediate subfolders become your libraries — one per show."
       >
-        {step3Done && rootName ? (
+        {folderPaired && rootName ? (
           <p className="ny-login__msg is-ok">
             Paired to "{rootName}". You're all set.
           </p>
@@ -449,6 +373,91 @@ export function ConnectDriveScreen({
           </>
         )}
       </Card>
+
+      {/* ─── Advanced — BYOK credentials (optional) ─────────────────────── */}
+      <details className="ny-login__advanced">
+        <summary className="ny-login__advanced-summary">
+          Advanced: bring your own Drive API key
+        </summary>
+        <div className="ny-login__advanced-body">
+          <p className="ny-login__field-help">
+            Only needed for advanced setups — Connect Google Drive above
+            already covers browsing and streaming. A key mainly helps public
+            "Anyone with the link" folders stream a bit faster.
+          </p>
+
+          <Field
+            label="Google Drive API key"
+            help={
+              <>
+                Get one from{" "}
+                <a
+                  href="https://console.cloud.google.com/apis/credentials"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Google Cloud Console
+                </a>{" "}
+                — click <em>Create credentials → API key</em>.
+              </>
+            }
+          >
+            <input
+              type="text"
+              className="ny-login__input"
+              placeholder="AIza..."
+              value={apiKey}
+              onChange={(e) => setApiKeyState(e.target.value)}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </Field>
+
+          <Field
+            label="OAuth Client ID"
+            help={
+              <>
+                Same Credentials page →{" "}
+                <em>Create credentials → OAuth Client ID → Chrome Extension</em>.
+                Only needed to override the app-wide default above.
+              </>
+            }
+          >
+            <input
+              type="text"
+              className="ny-login__input"
+              placeholder="1234567890-xxxx.apps.googleusercontent.com"
+              value={oauthClientId}
+              onChange={(e) => setOAuthClientIdState(e.target.value)}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </Field>
+
+          {step1Message && (
+            <p
+              className={`ny-login__msg${step1Status === "error" ? " is-error" : ""}`}
+            >
+              {step1Message}
+            </p>
+          )}
+
+          <div className="ny-login__actions">
+            <button
+              type="button"
+              className="ny-btn ny-btn--primary"
+              onClick={() => void saveCredentials()}
+              disabled={step1Status === "validating"}
+            >
+              {step1Status === "validating"
+                ? "Validating…"
+                : credentialsSaved
+                  ? "Update credentials"
+                  : "Save & validate"}
+            </button>
+          </div>
+        </div>
+      </details>
     </section>
   );
 }

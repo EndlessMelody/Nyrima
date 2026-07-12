@@ -86,6 +86,7 @@ import {
   type SidebarNavIcon,
 } from "../navigation/sidebar-nav";
 import { hasApiKey } from "../services/api-key";
+import { getOAuthSessionState } from "../services/auth";
 import { getFileMetadata } from "../services/drive/metadata-service";
 import { formatTimecode } from "../services/formatters";
 import { isInProgress, isWatched } from "../services/storage";
@@ -214,6 +215,7 @@ export function LobbyPage() {
   });
   const [rootDialogOpen, setRootDialogOpen] = useState(false);
   const [keyConfigured, setKeyConfigured] = useState<boolean | null>(null);
+  const [oauthActive, setOAuthActive] = useState<boolean | null>(null);
   const [positions] = usePlaybackPositions();
   const [continueFile, setContinueFile] = useState<DriveFile | null>(null);
   const [query, setQuery] = useState("");
@@ -342,6 +344,21 @@ export function LobbyPage() {
     return () => {
       cancelled = true;
       chrome.storage.onChanged.removeListener(onChanged);
+    };
+  }, []);
+
+  // OAuth-only sign-ins never touch `dc.apiKey`, so the dashboard gate can't
+  // rely on `keyConfigured` alone — that would trap OAuth-only users on the
+  // onboarding screen forever. This runs once on mount; a fresh Connect Drive
+  // consent always returns via a full-page redirect (AuthGoogleCallbackPage),
+  // which remounts this page anyway.
+  useEffect(() => {
+    let cancelled = false;
+    void getOAuthSessionState().then((s) => {
+      if (!cancelled) setOAuthActive(s.state === "active");
+    });
+    return () => {
+      cancelled = true;
     };
   }, []);
 
@@ -574,7 +591,8 @@ export function LobbyPage() {
 
   const hasRoot = !!root;
   const hasLibraries = adaptedFolders.length > 0;
-  const showFullOnboarding = !keyConfigured || !hasRoot;
+  const driveReady = !!keyConfigured || !!oauthActive;
+  const showFullOnboarding = !driveReady || !hasRoot;
   const watchedAnything = Object.values(positions).some(
     (p) => p && p.positionSeconds > 5,
   );
@@ -673,7 +691,7 @@ export function LobbyPage() {
   const bannerBackdrop = customBannerUrl || "/poster.png";
   const driveStatus = !isOnline
     ? "Offline"
-    : keyConfigured
+    : driveReady
       ? "Ready"
       : "Needs Login";
 
@@ -776,7 +794,7 @@ export function LobbyPage() {
             <HealthRail
               folders={adaptedFolders}
               positions={positions}
-              apiKeyConfigured={keyConfigured}
+              apiKeyConfigured={driveReady}
               rootName={root?.name ?? null}
               isOnline={isOnline}
               onPickRoot={() => setRootDialogOpen(true)}

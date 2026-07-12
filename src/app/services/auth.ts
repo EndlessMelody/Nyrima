@@ -20,6 +20,7 @@
 import type { DcResponse } from "@shared/messages";
 import { getApiKey, appendApiKey } from "./api-key";
 import { getOAuthClientId } from "./oauth-key";
+import { isGoogleOAuthConfigured } from "@/config/googleOAuth";
 import { classifyDriveError, DriveAccessError } from "./errors";
 import { driveQueue } from "./drive/request-queue";
 import { trackRequest } from "./drive/dev-mode";
@@ -107,7 +108,7 @@ export async function getOAuthSessionState(): Promise<{
   interactiveAt: number | null;
   expiresAt: number | null;
 }> {
-  const hasClient = !!(await getOAuthClientId());
+  const hasClient = !!(await getOAuthClientId()) || isGoogleOAuthConfigured();
   if (!hasClient) {
     return { state: "not-configured", interactiveAt: null, expiresAt: null };
   }
