@@ -11,10 +11,13 @@
  * partially gating each tab.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@once-ui-system/core/components";
 import { useAuth } from "@/auth/AuthProvider";
+import { LobbyShell, LobbySidebar, LobbyTopbar } from "../components/LobbyChrome";
+import { GuestBanner } from "../components/GuestBanner";
+import { SetupAccessDialog } from "../components/SetupAccessDialog";
 import { SocialLockedState } from "../components/SocialLockedState";
 import { usePostsStore } from "../stores/posts-store";
 import { PostCard } from "../components/posts/PostCard";
@@ -24,7 +27,43 @@ type Tab = "following" | "mine";
 
 export function PostsFeedPage() {
   const { canAccess } = useAuth();
-  return canAccess("social:profile") ? <PostsFeedHub /> : <SocialLockedState />;
+  const [collapsed, setCollapsed] = useState(() =>
+    typeof window === "undefined" ? false : window.innerWidth < 1280,
+  );
+  const [query, setQuery] = useState("");
+  const [setupOpen, setSetupOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <LobbyShell
+      collapsed={collapsed}
+      sidebar={
+        <LobbySidebar
+          collapsed={collapsed}
+          onToggle={() => setCollapsed((v) => !v)}
+          onOpenDrive={() => setSetupOpen(true)}
+        />
+      }
+      topbar={
+        <LobbyTopbar
+          query={query}
+          onQueryChange={setQuery}
+          inputRef={searchInputRef}
+          searchPlaceholder="Search posts..."
+        />
+      }
+    >
+      <div className="ny-lobby-main__guest">
+        <GuestBanner />
+      </div>
+      {canAccess("social:profile") ? <PostsFeedHub /> : <SocialLockedState />}
+      <SetupAccessDialog
+        isOpen={setupOpen}
+        onClose={() => setSetupOpen(false)}
+        onSaved={() => setSetupOpen(false)}
+      />
+    </LobbyShell>
+  );
 }
 
 function PostsFeedHub() {

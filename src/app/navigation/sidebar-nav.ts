@@ -10,7 +10,9 @@ export type SidebarNavItemId =
   | "history"
   | "downloads"
   | "google-drive"
-  | "local-folder";
+  | "local-folder"
+  | "social"
+  | "posts";
 
 export type SidebarNavIcon =
   | "home"
@@ -24,7 +26,9 @@ export type SidebarNavIcon =
   | "history"
   | "downloads"
   | "google-drive"
-  | "local-folder";
+  | "local-folder"
+  | "social"
+  | "posts";
 
 export interface SidebarNavItem {
   id: SidebarNavItemId;
@@ -90,16 +94,17 @@ export const SIDEBAR_NAV_SECTIONS: SidebarNavSection[] = [
       },
     ],
   },
+  {
+    label: "Community",
+    items: [
+      { id: "social", label: "Social", path: "/social", icon: "social" },
+      { id: "posts", label: "Posts", path: "/posts", icon: "posts" },
+    ],
+  },
 ];
 
 const ROUTE_TO_ID = new Map(
   getSidebarNavItems().map((item) => [normalizePathname(item.path!), item.id]),
-);
-
-const LIBRARY_CHROME_ROUTES = new Set(
-  getSidebarNavItems()
-    .map((item) => normalizePathname(item.path!))
-    .filter((path) => path === LIBRARY_ROUTE || path.startsWith(`${LIBRARY_ROUTE}/`)),
 );
 
 export function getSidebarNavItems(): Array<SidebarNavItem & { path: string }> {
@@ -113,11 +118,9 @@ export function resolveSidebarActiveId(pathname: string): SidebarNavItemId {
   const exact = ROUTE_TO_ID.get(normalized);
   if (exact) return exact;
   if (normalized.startsWith(`${LIBRARY_ROUTE}/`)) return "library";
+  if (normalized === "/social" || normalized.startsWith("/social/")) return "social";
+  if (normalized === "/posts" || normalized.startsWith("/posts/")) return "posts";
   return "home";
-}
-
-export function isLibraryChromeRoute(pathname: string): boolean {
-  return LIBRARY_CHROME_ROUTES.has(normalizePathname(pathname));
 }
 
 function normalizePathname(pathname: string): string {

@@ -20,6 +20,8 @@ describe("sidebar navigation config", () => {
       History: "/library/history",
       Downloads: "/library/downloads",
       "Local Folder": "/library/local-folder",
+      Social: "/social",
+      Posts: "/posts",
     });
     expect(links.every((item) => typeof item.path === "string" && item.path.length > 0)).toBe(
       true,
@@ -31,6 +33,7 @@ describe("sidebar navigation config", () => {
       "Browse",
       "Quick Access",
       "Sources",
+      "Community",
     ]);
   });
 
@@ -47,5 +50,10 @@ describe("sidebar navigation config", () => {
     expect(resolveSidebarActiveId("/library/history")).toBe("history");
     expect(resolveSidebarActiveId("/library/downloads")).toBe("downloads");
     expect(resolveSidebarActiveId("/library/local-folder")).toBe("local-folder");
+    expect(resolveSidebarActiveId("/social")).toBe("social");
+    expect(resolveSidebarActiveId("/social/people")).toBe("social");
+    expect(resolveSidebarActiveId("/social/shelf/1a2b3c4d5e")).toBe("social");
+    expect(resolveSidebarActiveId("/posts")).toBe("posts");
+    expect(resolveSidebarActiveId("/posts/new")).toBe("posts");
   });
 });

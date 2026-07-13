@@ -1,116 +1,7 @@
 /**
- * SettingsPage layout. Uses the app's existing surface tokens / .dc-tracker /
- * .ny-btn vocabulary so it reads as part of the authenticated app.
+ * Lobby banner crop tool — styles moved verbatim from SettingsPage.scss when
+ * the tool relocated into the Account Center's Appearance section.
  */
-
-.ny-settings {
-  max-width: 880px;
-  margin: 0 auto;
-  padding: 8px 0 64px;
-  display: flex;
-  flex-direction: column;
-  gap: 28px;
-}
-
-.ny-settings__head {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.ny-settings__title {
-  margin: 0;
-  font-family: var(--dc-font-display);
-  font-size: clamp(24px, 4vw, 32px);
-  font-weight: 700;
-}
-
-.ny-settings__sub {
-  margin: 0;
-  font-size: 14px;
-  opacity: 0.7;
-}
-
-.ny-settings__section {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.ny-settings__section-title {
-  margin: 0;
-  font-size: 13px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  opacity: 0.8;
-}
-
-.ny-settings__row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-  padding: 16px 18px;
-  border: 1px solid var(--neutral-alpha-weak, rgba(255, 255, 255, 0.1));
-  border-radius: 14px;
-  background: var(--surface-background, rgba(255, 255, 255, 0.03));
-}
-
-.ny-settings__row-label {
-  font-size: 12px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  opacity: 0.6;
-  margin-bottom: 4px;
-}
-
-.ny-settings__row-value {
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.ny-settings__muted {
-  font-weight: 400;
-  opacity: 0.6;
-}
-
-.ny-settings__row-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.ny-settings__pills {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.ny-settings__pill {
-  appearance: none;
-  cursor: pointer;
-  padding: 8px 18px;
-  border-radius: 999px;
-  border: 1px solid var(--neutral-alpha-weak, rgba(255, 255, 255, 0.14));
-  background: transparent;
-  color: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  transition: background 140ms ease, border-color 140ms ease;
-
-  &.is-active {
-    border-color: transparent;
-    background: var(--brand-background-strong, rgba(255, 200, 80, 0.2));
-  }
-}
-
-.ny-settings__panel {
-  border: 1px solid var(--neutral-alpha-weak, rgba(255, 255, 255, 0.1));
-  border-radius: 16px;
-  padding: 6px;
-  background: var(--surface-background, rgba(255, 255, 255, 0.02));
-  overflow: hidden;
-}
 
 .ny-banner-setting {
   display: flex;
@@ -120,7 +11,7 @@
   border: 1px solid var(--neutral-alpha-weak, rgba(255, 255, 255, 0.1));
   border-radius: 16px;
   background:
-    linear-gradient(135deg, rgba(255, 79, 216, 0.06), transparent 48%),
+    linear-gradient(135deg, var(--brand-alpha-weak, rgba(255, 79, 216, 0.06)), transparent 48%),
     var(--surface-background, rgba(255, 255, 255, 0.03));
 }
 
@@ -210,7 +101,7 @@
   border: 1px solid var(--brand-border-medium);
   border-radius: 14px;
   background:
-    linear-gradient(135deg, rgba(255, 79, 216, 0.08), transparent 60%),
+    linear-gradient(135deg, var(--brand-alpha-weak, rgba(255, 79, 216, 0.08)), transparent 60%),
     #07090f;
   cursor: grab;
   touch-action: none;

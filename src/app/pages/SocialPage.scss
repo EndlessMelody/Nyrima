@@ -29,10 +29,9 @@
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);
   gap: 24px;
-  /* Viewport (dvh handles the mobile address-bar jump) minus the AppShell
-   * topbar (64px) and `.dc-page`'s 48 + 96 vertical padding. Footer slips
-   * just below the fold — same as Gmail/Linear. */
-  height: calc(100dvh - 64px - 144px);
+  /* Fills the lobby chrome's scroll area (`.ny-lobby-main__scroll` is the
+   * flex column that sizes this); the pane owns its own overflow below. */
+  flex: 1;
   min-height: 520px;
 }
 

@@ -161,6 +161,24 @@ export interface AppSettings {
   lobbyBannerImageDataUrl: string | null;
   /** Epoch ms of the last lobby banner update. Null when default is active. */
   lobbyBannerUpdatedAt: number | null;
+  /** Accent color preset id ("the lamp"). "nyrima-pink" keeps the hand-tuned
+   *  stylesheet untouched; other ids retint the --brand-* token family via an
+   *  override style tag (see accent-presets.ts). */
+  accentPreset: string;
+  /** Route the app lands on after sign-in / guest entry. */
+  defaultLandingPage: "/app" | "/library" | "/library/movies" | "/posts" | "/social";
+  /** Library grid density — "compact" tightens card min-width and gaps. */
+  libraryDensity: "comfortable" | "compact";
+  /** App-level reduced motion, independent of the OS media query. */
+  reducedMotion: boolean;
+  /** User-chosen display nickname shown in the app chrome; overrides the
+   *  account/Drive display name when set. */
+  profileNickname?: string;
+  /** Custom avatar (data URL, capped ~256px). Local-only — never pushed to
+   *  the social `profiles.avatar_url` column. */
+  profileAvatarDataUrl?: string;
+  /** Custom profile banner (data URL, capped ~1200×480). Local-only. */
+  profileBannerDataUrl?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -363,4 +381,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   libraryView: "grouped",
   lobbyBannerImageDataUrl: null,
   lobbyBannerUpdatedAt: null,
+  accentPreset: "nyrima-pink",
+  defaultLandingPage: "/app",
+  libraryDensity: "comfortable",
+  reducedMotion: false,
 };

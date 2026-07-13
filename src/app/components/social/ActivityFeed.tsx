@@ -24,6 +24,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import cn from "classnames";
+import { Link } from "react-router-dom";
 import { useSocialStore } from "../../stores/social-store";
 import { EmptyState, formatAgo } from "./InboxList";
 import { isSupabaseConfigured } from "@/lib/supabase";
@@ -276,7 +277,13 @@ function CommentLine({ comment }: { comment: ShareComment }) {
           <span className="ny-activity-line__name">
             {comment.author.name ?? `@${comment.author.handle}`}
           </span>
-          <span className="ny-activity-line__handle">@{comment.author.handle}</span>
+          {isSupabaseConfigured() ? (
+            <Link className="ny-activity-line__handle" to={`/u/${comment.author.handle}`}>
+              @{comment.author.handle}
+            </Link>
+          ) : (
+            <span className="ny-activity-line__handle">@{comment.author.handle}</span>
+          )}
           <span
             className="ny-activity-line__at"
             title={new Date(comment.at).toLocaleString()}

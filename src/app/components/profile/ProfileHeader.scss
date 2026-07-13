@@ -1,0 +1,137 @@
+.ny-profile-header {
+  border: 1px solid var(--neutral-border-weak);
+  border-radius: var(--ny-radius-md);
+  overflow: hidden;
+  background: var(--surface-background);
+}
+
+.ny-profile-header__banner {
+  height: 96px;
+  background: linear-gradient(
+    120deg,
+    var(--brand-alpha-medium) 0%,
+    var(--accent-alpha-weak) 100%
+  );
+}
+
+.ny-profile-header__body {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+  padding: 0 20px 20px;
+  margin-top: -36px;
+}
+
+.ny-profile-header__avatar {
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  border: 3px solid var(--surface-background);
+  object-fit: cover;
+  background: var(--surface-background-weak);
+  flex-shrink: 0;
+}
+
+.ny-profile-header__avatar--mono {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--dc-font-display);
+  font-size: 2rem;
+  font-weight: 600;
+  color: var(--brand-on-background-strong);
+  background: var(--brand-alpha-weak);
+}
+
+.ny-profile-header__id {
+  flex: 1;
+  min-width: 0;
+  padding-top: 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ny-profile-header__name {
+  margin: 0;
+  font-family: var(--dc-font-display);
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--neutral-on-background-strong);
+}
+
+.ny-profile-header__handle {
+  font-family: var(--dc-font-mono);
+  font-size: 0.75rem;
+  color: var(--neutral-on-background-weak);
+}
+
+.ny-profile-header__bio {
+  margin: 4px 0 0;
+  font-size: 0.875rem;
+  color: var(--neutral-on-background-medium);
+  max-width: 60ch;
+}
+
+.ny-profile-header__genres,
+.ny-profile-header__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ny-profile-header__genre {
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  color: var(--accent-on-background-strong);
+  background: var(--accent-alpha-weak);
+}
+
+.ny-profile-header__link {
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  color: var(--neutral-on-background-medium);
+  background: var(--surface-background-weak);
+  border: 1px solid var(--neutral-border-weak);
+  text-decoration: none;
+
+  &:hover {
+    color: var(--brand-on-background-strong);
+    border-color: var(--brand-border-medium);
+  }
+}
+
+.ny-profile-header__pinned {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 6px 10px;
+  border: 1px solid var(--neutral-border-weak);
+  border-radius: var(--ny-radius-sm);
+  background: var(--surface-background-weak);
+  width: fit-content;
+}
+
+.ny-profile-header__pinned-tag {
+  font-family: var(--dc-font-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--brand-on-background-strong);
+}
+
+.ny-profile-header__pinned-label {
+  font-size: 0.8125rem;
+  color: var(--neutral-on-background-medium);
+}
+
+.ny-profile-header__actions {
+  padding-top: 40px;
+  flex-shrink: 0;
+}

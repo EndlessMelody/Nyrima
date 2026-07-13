@@ -12,7 +12,6 @@ import { LobbyShell, LobbySidebar, LobbyTopbar } from "../components/LobbyChrome
 import { SetupAccessDialog } from "../components/SetupAccessDialog";
 import { LibraryHeroHeader, LibraryStatePanel, LocalFolderPanel, localFolderTotalLabel } from "../components/library-hub";
 import { useLocalLibraryStore } from "../services/local-library/local-library-store";
-import { useSocialStore } from "../stores/social-store";
 import "./AllLibraryPage.scss";
 
 export type LibraryUtilityKind =
@@ -88,7 +87,6 @@ const UTILITY_DEFINITIONS: Record<LibraryUtilityKind, UtilityDefinition> = {
 
 export function LibraryUtilityPage({ kind }: { kind: LibraryUtilityKind }) {
   const definition = UTILITY_DEFINITIONS[kind];
-  const unreadCount = useSocialStore((s) => s.unreadCount);
   const [collapsed, setCollapsed] = useState(() =>
     typeof window === "undefined" ? false : window.innerWidth < 1280,
   );
@@ -117,7 +115,6 @@ export function LibraryUtilityPage({ kind }: { kind: LibraryUtilityKind }) {
           query={query}
           onQueryChange={setQuery}
           inputRef={searchInputRef}
-          unreadCount={unreadCount}
           searchPlaceholder={`Search ${definition.title.toLowerCase()}...`}
         />
       }

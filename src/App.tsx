@@ -20,11 +20,13 @@
  *   /library/:folderId         → a library's contents
  *   /play/:folderId/:fileId    → the player (lazy-loaded)
  *   /read/:folderId/:fileId    → the EPUB / Light Novel reader (lazy-loaded)
+ *   /u/:handle                 → profile dashboard ("me" = your own)
  *   /social[...]               → social hub
  *   /posts                     → posts feed (Following / My posts)
  *   /posts/new, /posts/edit/:folderId → post editor (lazy-loaded, BlockNote)
  *   /posts/view/:folderId      → read-only post view (lazy-loaded)
- *   /settings, /account        → settings + account
+ *   /settings, /account        → redirect into the Account Center overlay
+ *                                 (?settings=<section> on top of any route)
  */
 
 import { Suspense, lazy, useEffect, useState, type ReactNode } from "react";
@@ -34,18 +36,22 @@ import type { PublicSiteProps } from "./landing/PublicSite";
 import { LoginPage } from "./pages/LoginPage";
 import { AuthCallbackPage } from "./pages/AuthCallbackPage";
 import { AuthGoogleCallbackPage } from "./pages/AuthGoogleCallbackPage";
-import { SettingsPage } from "./pages/SettingsPage";
-import { AccountPage } from "./pages/AccountPage";
 import { RequireAuth } from "./auth/RequireAuth";
 import { AppShell } from "./app/components/AppShell";
 import { LibraryGridSkeleton } from "./app/components/LibraryGridSkeleton";
 import { LobbyPage } from "./app/pages/LobbyPage";
 import { DriveDebugPanel } from "./app/components/DriveDebugPanel";
 import { SharingHost } from "./app/components/SharingHost";
+import { ShortcutsOverlayHost } from "./app/components/ShortcutsOverlay";
+import { AccountCenterHost } from "./app/account-center/AccountCenterHost";
+import { useSettingsStore } from "./app/stores/settings-store";
 import { useDevModeStore } from "./app/services/drive/dev-mode";
 import { runMalPosterMigration } from "./app/services/mal-poster-migration";
 import { useLocalLibraryStore } from "./app/services/local-library/local-library-store";
 import { LocalAccessGate } from "./app/components/LocalAccessGate";
+import { useAuth } from "./auth/AuthProvider";
+import { useProfileStatsStore } from "./app/stores/profile-stats-store";
+import { isSupabaseConfigured } from "./lib/supabase";
 
 // The marketing site pulls in Three.js (animated background), the
 // visual-novel landing flow, and its own animation director — none of which
@@ -74,6 +80,12 @@ const LibraryPage = lazy(() =>
 // inbox/shelf views — only needed once the user opens /social.
 const SocialPage = lazy(() =>
   import("./app/pages/SocialPage").then((m) => ({ default: m.SocialPage })),
+);
+
+// The profile dashboard pulls in the heatmap/badges/social-api surface —
+// only needed once the user opens someone's (or their own) `/u/:handle`.
+const ProfileDashboardPage = lazy(() =>
+  import("./app/pages/ProfileDashboardPage").then((m) => ({ default: m.ProfileDashboardPage })),
 );
 
 // Posts feed is a thin list of cards — cheap, but still split out so it
@@ -195,6 +207,7 @@ export function App() {
           </Protected>
         }
       />
+      <Route path="/u/:handle" element={<Protected><Suspense fallback={<ChunkFallback label="Loading profile…" />}><ProfileDashboardPage /></Suspense></Protected>} />
       <Route path="/social" element={<Protected><Suspense fallback={<ChunkFallback label="Loading social…" />}><SocialPage /></Suspense></Protected>} />
       <Route path="/social/shelf/:folderId" element={<Protected><Suspense fallback={<ChunkFallback label="Loading social…" />}><SocialPage /></Suspense></Protected>} />
       <Route path="/social/:tab" element={<Protected><Suspense fallback={<ChunkFallback label="Loading social…" />}><SocialPage /></Suspense></Protected>} />
@@ -202,8 +215,10 @@ export function App() {
       <Route path="/posts/new" element={<Protected><Suspense fallback={<ChunkFallback label="Loading editor…" />}><PostEditorPage /></Suspense></Protected>} />
       <Route path="/posts/edit/:folderId" element={<Protected><Suspense fallback={<ChunkFallback label="Loading editor…" />}><PostEditorPage /></Suspense></Protected>} />
       <Route path="/posts/view/:folderId" element={<Protected><Suspense fallback={<ChunkFallback label="Loading post…" />}><PostViewPage /></Suspense></Protected>} />
-      <Route path="/settings" element={<Protected><SettingsPage /></Protected>} />
-      <Route path="/account" element={<Protected><AccountPage /></Protected>} />
+      {/* Legacy settings/account pages — now sections of the Account Center
+          overlay. Redirect keeps old links working; `/app` is the backdrop. */}
+      <Route path="/settings" element={<Navigate to="/app?settings=appearance" replace />} />
+      <Route path="/account" element={<Navigate to="/app?settings=my-account" replace />} />
 
       {/* Legacy hash-router deep links (/#/library/...) and unknown paths. */}
       <Route path="*" element={<Navigate to="/" replace />} />
@@ -227,7 +242,9 @@ function useViewTransitionLocation(location: Location): Location {
       return;
     }
 
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const reducedMotion =
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches ||
+      useSettingsStore.getState().settings.reducedMotion;
     if (typeof document.startViewTransition !== "function" || reducedMotion) {
       setDisplayLocation(location);
       return;
@@ -278,6 +295,8 @@ function Protected({ children }: { children: ReactNode }) {
         {children}
         <DriveDebugPanel />
         <SharingHost />
+        <AccountCenterHost />
+        <ShortcutsOverlayHost />
       </AppShell>
     </RequireAuth>
   );
@@ -290,6 +309,13 @@ function AppBootstrap() {
     void runMalPosterMigration();
     void useLocalLibraryStore.getState().load();
   }, [loadDevMode]);
+
+  const { status, account } = useAuth();
+  useEffect(() => {
+    if (status !== "authenticated" || !account || !isSupabaseConfigured()) return;
+    return useProfileStatsStore.getState().startAutoSync(account.id);
+  }, [status, account]);
+
   return null;
 }
 

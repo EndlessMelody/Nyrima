@@ -32,7 +32,8 @@
       "PowerShell(if \\(Test-Path node_modules/sass\\) { npx sass --no-source-map src/landing/landing-vn/entry-flow.scss \"$env:TEMP/entry-flow-check.css\"; if \\($?\\) { \"SCSS compiles OK\" } } else { \"sass not installed locally\" })",
       "Bash(sed -i 's|@/landing/landing-vn/mascotArt|@/landing/mascotArt|' src/pages/login-page-content.ts src/pages/LoginPage.tsx)",
       "Bash(sed -i 's|\\(see landing-vn/mascotArt\\)|\\(see landing/mascotArt\\)|' src/pages/login-page-content.ts)",
-      "Bash(npm ls *)"
+      "Bash(npm ls *)",
+      "Bash(echo \"EXIT:$?\")"
     ]
   },
   "enableAllProjectMcpServers": true

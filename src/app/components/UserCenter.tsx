@@ -1,57 +1,69 @@
 /**
- * UserCenter — dropdown panel from the header UserChip.
+ * UserCenter — slim quick-menu dropdown from the header UserChip.
  *
- * Sections:
- *   A. Identity   — avatar, name, email, sign-out
- *   B. Appearance — theme toggle (dark/light/system)
- *   C. Playback   — auto-play next, default volume, skip duration
- *   D. Storage    — clear watch history, clear cache
- *   E. About      — version, API key status
+ * Discord-style: a profile card (avatar, name, email) plus quick links into
+ * the Account Center, a theme toggle, and sign-out. All the settings controls
+ * this panel used to hold (playback, storage, API drill-ins) live in the
+ * Account Center overlay now.
+ *
+ * Identity shown is the Nyrima account when signed in (nickname override
+ * first), falling back to the Google Drive profile — a deliberate change from
+ * the old panel, which only ever showed the Drive identity.
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import { LayoutDashboard } from "lucide-react";
 import cn from "classnames";
 import { useAuth } from "@/auth/AuthProvider";
 import { useTheme } from "../providers/AppProviders";
 import { useSettingsStore } from "../stores/settings-store";
-import { signOut } from "../services/auth";
-import { clearUserProfile } from "../services/user-profile";
-import { startDriveConnect, DriveConnectError } from "../services/drive-connect";
-import { useDevModeStore } from "../services/drive/dev-mode";
-import { SubtitleConfigPanel } from "./SubtitleConfigPanel";
-import { ApiConfigPanel } from "./ApiConfigPanel";
-import { STORAGE_KEYS } from "@shared/constants";
-import type { UserProfile, AppSettings } from "@shared/types";
+import { useRecentStore } from "../stores/recent-store";
+import { useAccountCenter } from "../account-center/useAccountCenter";
+import { useMostRecentInProgress } from "../hooks/useMostRecentInProgress";
+import { parseTitle } from "@shared/title-parser";
+import { formatRuntime, formatTimecode } from "../services/formatters";
+import type { UserProfile } from "@shared/types";
 
 import "./UserCenter.scss";
 
-const SKIP_OPTIONS: AppSettings["skipSeconds"][] = [5, 10, 15, 30];
-
 interface Props {
+  /** Google Drive profile (streaming identity) — the fallback identity. */
   profile: UserProfile | null;
   onClose: () => void;
-  onProfileChange: (p: UserProfile | null) => void;
 }
 
-export function UserCenter({ profile, onClose, onProfileChange }: Props) {
+export function UserCenter({ profile, onClose }: Props) {
   const navigate = useNavigate();
-  const { status, exitGuestMode } = useAuth();
+  const { status, account, signOut, exitGuestMode } = useAuth();
   const isGuest = status === "guest";
   const { mode, setMode } = useTheme();
   const settings = useSettingsStore((s) => s.settings);
   const patch = useSettingsStore((s) => s.patch);
-  const setDefaultVolume = useSettingsStore((s) => s.setDefaultVolume);
-  const [clearing, setClearing] = useState(false);
-  const [view, setView] = useState<"main" | "subtitles" | "api">("main");
-  const defaultVolumePct = Math.round(settings.defaultVolume * 100);
+  const accountCenter = useAccountCenter();
+
+  const displayName =
+    settings.profileNickname ||
+    account?.displayName ||
+    profile?.name ||
+    "Guest";
+  const email = account?.email ?? profile?.email;
+  const avatarUrl = settings.profileAvatarDataUrl ?? profile?.picture;
+  const initial = displayName[0]?.toUpperCase() ?? "G";
+
+  const openSection = useCallback(
+    (sectionId?: string) => {
+      onClose();
+      accountCenter.open(sectionId);
+    },
+    [accountCenter, onClose],
+  );
 
   const handleSignOut = useCallback(async () => {
-    await signOut();
-    await clearUserProfile();
-    onProfileChange(null);
     onClose();
-  }, [onClose, onProfileChange]);
+    await signOut();
+    navigate("/", { replace: true });
+  }, [onClose, signOut, navigate]);
 
   // Leave "Try Nyrima" guest mode. Clears only the local guest marker (Drive
   // stays connected for a later visit) and returns to the login threshold.
@@ -61,76 +73,46 @@ export function UserCenter({ profile, onClose, onProfileChange }: Props) {
     navigate("/login", { replace: true });
   }, [exitGuestMode, onClose, navigate]);
 
-  const handleSignIn = useCallback(async () => {
-    // Full-page web redirect to Google's consent screen. On return,
-    // AuthGoogleCallbackPage stores the token and brings us back here.
-    try {
-      await startDriveConnect({
-        returnTo: window.location.pathname + window.location.search,
-      });
-    } catch (e) {
-      alert(
-        e instanceof DriveConnectError
-          ? e.message
-          : "Failed to connect Drive. Please try again.",
-      );
-    }
-  }, []);
-
-  const handleClearHistory = useCallback(async () => {
-    setClearing(true);
-    try {
-      // Was `"dc.positions"` — a key that never existed; the button silently
-      // cleared nothing. The real key is STORAGE_KEYS.PLAYBACK_STATE.
-      await chrome.storage.local.remove(STORAGE_KEYS.PLAYBACK_STATE);
-      // The in-memory cache in storage.ts has a chrome.storage.onChanged
-      // listener and will refresh itself, but the lobby/library's React
-      // `usePlaybackPositions` state is loaded once on mount — reload to
-      // get a clean view across all open surfaces.
-      window.location.reload();
-    } catch {
-      setClearing(false);
-    }
-  }, []);
-
-  const handleClearCache = useCallback(async () => {
-    try {
-      // Wipe the IDB-backed SWR caches (folder scans, file metadata,
-      // subtitle text, thumbnails, media segments) managed by dev-mode.
-      // The legacy `METADATA_CACHE` chrome.storage key (former MAL poster
-      // cache) is also purged here so an existing install can recover from
-      // a runaway-sized blob — the key holds nothing useful since posters
-      // moved to per-folder `Poster.*` files.
-      await chrome.storage.local.remove(STORAGE_KEYS.METADATA_CACHE);
-      await useDevModeStore.getState().clearAllCaches();
-    } catch {
-      // ignore — best-effort cleanup
-    }
-  }, []);
-
-    const initial = profile?.name?.[0]?.toUpperCase() ?? "G";
-
-  if (view === "subtitles" || view === "api") {
-    return (
-      <div className="dc-uc" role="dialog" aria-label={view === "subtitles" ? "Subtitle settings" : "API settings"}>
-        <div className="dc-uc__nav-header">
-          <button
-            type="button"
-            className="dc-uc__nav-back"
-            onClick={() => setView("main")}
-          >
-            <ChevronLeftIcon />
-            <span>Back to User Center</span>
-          </button>
-        </div>
-        <div className="dc-uc__divider" />
-        {view === "subtitles" ? <SubtitleConfigPanel /> : <ApiConfigPanel />}
-      </div>
+  const resumePosition = useMostRecentInProgress();
+  const recentFolders = useRecentStore((s) => s.folders);
+  const loadRecents = useRecentStore((s) => s.load);
+  useEffect(() => {
+    void loadRecents();
+  }, [loadRecents]);
+  const resumeFolderName = useMemo(
+    () => recentFolders.find((f) => f.id === resumePosition?.folderId)?.name ?? "",
+    [recentFolders, resumePosition],
+  );
+  const resumeParsed = useMemo(
+    () =>
+      resumePosition
+        ? parseTitle({
+            filename: resumePosition.name ?? "Unknown",
+            parentFolder: resumeFolderName,
+          })
+        : null,
+    [resumePosition, resumeFolderName],
+  );
+  const handleResume = useCallback(() => {
+    if (!resumePosition?.folderId) return;
+    onClose();
+    navigate(
+      `/play/${encodeURIComponent(resumePosition.folderId)}/${encodeURIComponent(resumePosition.fileId)}`,
     );
-  }
+  }, [resumePosition, onClose, navigate]);
+
+  const handleShortcuts = useCallback(() => {
+    onClose();
+    window.dispatchEvent(new CustomEvent("nyrima:shortcuts"));
+  }, [onClose]);
+
+  const handleViewDashboard = useCallback(() => {
+    onClose();
+    navigate("/u/me");
+  }, [onClose, navigate]);
 
   return (
-    <div className="dc-uc" role="dialog" aria-label="User center">
+    <div className="dc-uc" role="dialog" aria-label="User menu">
       {/* ── Guest session ─────────────────────────────────────────── */}
       {isGuest && (
         <>
@@ -153,48 +135,129 @@ export function UserCenter({ profile, onClose, onProfileChange }: Props) {
         </>
       )}
 
-      {/* ── Identity ──────────────────────────────────────────────── */}
-      <div className="dc-uc__identity">
-        {profile?.picture ? (
-          <img
-            className="dc-uc__avatar"
-            src={profile.picture}
-            alt=""
-            referrerPolicy="no-referrer"
-          />
-        ) : (
-          <span className="dc-uc__avatar dc-uc__avatar--mono">{initial}</span>
-        )}
-        <div className="dc-uc__identity-text">
-          <span className="dc-uc__name">{profile?.name ?? "Guest"}</span>
-          {profile?.email && (
-            <span className="dc-uc__email">{profile.email}</span>
+      {/* ── Profile card ──────────────────────────────────────────── */}
+      <div
+        className="dc-uc__identity-card"
+        style={
+          settings.profileBannerDataUrl
+            ? { ["--uc-banner" as never]: `url(${settings.profileBannerDataUrl})` }
+            : undefined
+        }
+      >
+        <div className="dc-uc__identity-banner" aria-hidden="true" />
+        <div className="dc-uc__identity">
+          {avatarUrl ? (
+            <img
+              className="dc-uc__avatar"
+              src={avatarUrl}
+              alt=""
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <span className="dc-uc__avatar dc-uc__avatar--mono">{initial}</span>
           )}
+          <div className="dc-uc__identity-text">
+            <span className="dc-uc__name">{displayName}</span>
+            {email && <span className="dc-uc__email">{email}</span>}
+          </div>
         </div>
-        {profile ? (
+      </div>
+
+      {resumePosition && resumeParsed && (
+        <>
+          <div className="dc-uc__divider" />
           <button
             type="button"
-            className="dc-uc__sign-out"
-            onClick={() => void handleSignOut()}
+            className="dc-uc__resume"
+            onClick={handleResume}
+            title={resumeParsed.fullTitle}
           >
-            Disconnect Drive
+            <PlayIcon />
+            <div className="dc-uc__resume-text">
+              <span className="dc-uc__resume-title">{resumeParsed.fullTitle}</span>
+              <span className="dc-uc__resume-meta">
+                {formatTimecode(resumePosition.positionSeconds)} /{" "}
+                {formatTimecode(resumePosition.durationSeconds)}
+                {resumePosition.durationSeconds > resumePosition.positionSeconds && (
+                  <>
+                    {" "}
+                    ·{" "}
+                    {formatRuntime(
+                      resumePosition.durationSeconds - resumePosition.positionSeconds,
+                    )}{" "}
+                    left
+                  </>
+                )}
+              </span>
+              <div className="dc-uc__resume-track">
+                <div
+                  className="dc-uc__resume-bar"
+                  style={{
+                    width: `${
+                      resumePosition.durationSeconds > 0
+                        ? Math.min(
+                            100,
+                            (resumePosition.positionSeconds /
+                              resumePosition.durationSeconds) *
+                              100,
+                          )
+                        : 0
+                    }%`,
+                  }}
+                />
+              </div>
+            </div>
           </button>
-        ) : (
+        </>
+      )}
+
+      <div className="dc-uc__divider" />
+
+      {/* ── Quick links ───────────────────────────────────────────── */}
+      <div className="dc-uc__section">
+        <div className="dc-uc__actions">
           <button
             type="button"
-            className="dc-uc__sign-in dc-uc__sign-out"
-            onClick={() => void handleSignIn()}
+            className="dc-uc__action"
+            onClick={() => openSection("my-account")}
           >
-            Connect Drive
+            <UserIcon />
+            <span>My Account</span>
           </button>
-        )}
+          {!isGuest && (
+            <button type="button" className="dc-uc__action" onClick={handleViewDashboard}>
+              <LayoutDashboard size={16} aria-hidden="true" />
+              <span>View my dashboard</span>
+            </button>
+          )}
+          <button
+            type="button"
+            className="dc-uc__action"
+            onClick={() => openSection("profile")}
+          >
+            <PencilIcon />
+            <span>Edit Profile</span>
+          </button>
+          <button
+            type="button"
+            className="dc-uc__action"
+            onClick={() => openSection("appearance")}
+          >
+            <GearIcon />
+            <span>Settings</span>
+          </button>
+          <button type="button" className="dc-uc__action" onClick={handleShortcuts}>
+            <ShortcutsIcon />
+            <span>Keyboard shortcuts</span>
+          </button>
+        </div>
       </div>
 
       <div className="dc-uc__divider" />
 
-      {/* ── Appearance ────────────────────────────────────────────── */}
+      {/* ── Theme ─────────────────────────────────────────────────── */}
       <div className="dc-uc__section">
-        <div className="dc-uc__section-label">Appearance</div>
+        <div className="dc-uc__section-label">Theme</div>
         <div className="dc-uc__pills">
           {(["dark", "light", "system"] as const).map((m) => (
             <button
@@ -215,127 +278,23 @@ export function UserCenter({ profile, onClose, onProfileChange }: Props) {
         </div>
       </div>
 
-      <div className="dc-uc__divider" />
-
-      {/* ── Playback defaults ─────────────────────────────────────── */}
-      <div className="dc-uc__section">
-        <div className="dc-uc__section-label">Playback</div>
-
-        <div className="dc-uc__row">
-          <span className="dc-uc__row-label">Auto-play next</span>
-          <button
-            type="button"
-            className={cn("dc-uc__toggle", { "is-on": settings.autoplayNext })}
-            onClick={() => void patch({ autoplayNext: !settings.autoplayNext })}
-            aria-label="Toggle auto-play"
-          >
-            <span className="dc-uc__toggle-knob" />
-          </button>
-        </div>
-
-        <div className="dc-uc__row">
-          <span className="dc-uc__row-label">Default volume</span>
-          <div className="dc-uc__range-control">
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={5}
-              value={defaultVolumePct}
-              onChange={(e) =>
-                void setDefaultVolume(Number(e.target.value) / 100)
-              }
-              className="dc-uc__range"
-              style={{
-                ["--pct" as never]: `${defaultVolumePct}%`,
-              }}
-              aria-label="Default volume"
-            />
-            <span className="dc-uc__range-value">{defaultVolumePct}%</span>
-          </div>
-        </div>
-
-        <div className="dc-uc__row">
-          <span className="dc-uc__row-label">Skip duration</span>
-          <div className="dc-uc__mini-pills">
-            {SKIP_OPTIONS.map((s) => (
+      {!isGuest && (
+        <>
+          <div className="dc-uc__divider" />
+          <div className="dc-uc__section">
+            <div className="dc-uc__actions">
               <button
                 type="button"
-                key={s}
-                className={cn("dc-uc__mini-pill", {
-                  "is-active": settings.skipSeconds === s,
-                })}
-                onClick={() => void patch({ skipSeconds: s })}
+                className="dc-uc__action dc-uc__action--danger"
+                onClick={() => void handleSignOut()}
               >
-                {s}s
+                <SignOutIcon />
+                <span>Sign out</span>
               </button>
-            ))}
+            </div>
           </div>
-        </div>
-
-        <div className="dc-uc__actions" style={{ marginTop: 8 }}>
-          <button
-            type="button"
-            className="dc-uc__action dc-uc__action--forward"
-            onClick={() => setView("subtitles")}
-          >
-            <PaintIcon />
-            <span>Subtitle typography...</span>
-          </button>
-        </div>
-      </div>
-
-      <div className="dc-uc__divider" />
-
-      {/* ── Storage ───────────────────────────────────────────────── */}
-      <div className="dc-uc__section">
-        <div className="dc-uc__section-label">Storage</div>
-        <div className="dc-uc__actions">
-          <button
-            type="button"
-            className="dc-uc__action"
-            onClick={() => void handleClearHistory()}
-            disabled={clearing}
-          >
-            <TrashIcon />
-            <span>{clearing ? "Clearing…" : "Clear watch history"}</span>
-          </button>
-          <button
-            type="button"
-            className="dc-uc__action"
-            onClick={() => void handleClearCache()}
-          >
-            <RefreshIcon />
-            <span>Clear metadata cache</span>
-          </button>
-        </div>
-      </div>
-
-      <div className="dc-uc__divider" />
-
-      {/* ── About ─────────────────────────────────────────────────── */}
-      <div className="dc-uc__section dc-uc__section--about">
-        <div className="dc-uc__about-row">
-          <span className="dc-uc__about-label">Nyrima</span>
-          <span className="dc-uc__about-value">v0.0.1</span>
-        </div>
-        <div className="dc-uc__about-row">
-          <span className="dc-uc__about-label">API keys</span>
-          <span className="dc-uc__about-value dc-uc__about-value--status">
-            {profile ? "OAuth Configured" : "Key Configured"}
-          </span>
-        </div>
-        <div className="dc-uc__actions" style={{ marginTop: 8 }}>
-          <button
-            type="button"
-            className="dc-uc__action dc-uc__action--forward"
-            onClick={() => setView("api")}
-          >
-            <KeyIcon />
-            <span>Configure API keys...</span>
-          </button>
-        </div>
-      </div>
+        </>
+      )}
     </div>
   );
 }
@@ -343,6 +302,84 @@ export function UserCenter({ profile, onClose, onProfileChange }: Props) {
 // ---------------------------------------------------------------------------
 // Inline icons — 16×16 hairline strokes matching AppShell style.
 // ---------------------------------------------------------------------------
+
+function UserIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <circle cx="8" cy="5.5" r="2.6" stroke="currentColor" strokeWidth="1.2" />
+      <path
+        d="M2.8 13.5c0-2.4 2.3-4.1 5.2-4.1s5.2 1.7 5.2 4.1"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function PencilIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M9.8 3.2 12.8 6.2M3 13l.6-3 7.2-7.2a1.4 1.4 0 0 1 2 0l1 1a1.4 1.4 0 0 1 0 2L6.6 13l-3.6.6.0-.6Z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <circle cx="8" cy="8" r="2.1" stroke="currentColor" strokeWidth="1.2" />
+      <path
+        d="M8 1.6v1.8M8 12.6v1.8M14.4 8h-1.8M3.4 8H1.6M12.5 3.5l-1.3 1.3M4.8 11.2l-1.3 1.3M12.5 12.5l-1.3-1.3M4.8 4.8 3.5 3.5"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function PlayIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M4.5 2.8v10.4l9-5.2-9-5.2Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function ShortcutsIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="1.5" y="4" width="13" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.2" />
+      <path
+        d="M4 7h.01M6.5 7h.01M9 7h.01M11.5 7h.01M4.5 9.5h7"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function SignOutIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M6.5 2.5H4a1.5 1.5 0 0 0-1.5 1.5v8A1.5 1.5 0 0 0 4 13.5h2.5M10.5 11l3-3-3-3M13.2 8H6"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
 
 function MoonIcon() {
   return (
@@ -388,87 +425,6 @@ function MonitorIcon() {
         stroke="currentColor"
         strokeWidth="1.2"
         strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function TrashIcon() {
-  return (
-    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path
-        d="M3 5h10M6 5V4a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1M5 5l.5 8h5l.5-8"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function RefreshIcon() {
-  return (
-    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path
-        d="M13 8a5 5 0 0 1-9 3M3 8a5 5 0 0 1 9-3"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinecap="round"
-      />
-      <path
-        d="M13 3v3h-3M3 13v-3h3"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function ChevronLeftIcon() {
-  return (
-    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path
-        d="M10 12L6 8l4-4"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function PaintIcon() {
-  return (
-    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path
-        d="M2.5 10c0 2 1.5 3.5 3.5 3.5s3.5-1.5 3.5-3.5-1.5-4.5-3.5-6.5C4 5.5 2.5 8 2.5 10Z"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M12.5 2.5a2 2 0 0 1 0 4h-2a2 2 0 0 1 0-4h2Z"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function KeyIcon() {
-  return (
-    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path
-        d="M6 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm0 0L2.5 11.5v3h3v-2h2v-2h1L6 8Z"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
       />
     </svg>
   );

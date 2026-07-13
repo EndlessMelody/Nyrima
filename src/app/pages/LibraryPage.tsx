@@ -13,6 +13,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useLibraryStore } from "../stores/library-store";
 import { useRecentStore } from "../stores/recent-store";
+import { LobbyShell, LobbySidebar, LobbyTopbar } from "../components/LobbyChrome";
+import { GuestBanner } from "../components/GuestBanner";
 import { usePlaybackPositions } from "../hooks/usePlaybackPositions";
 import { LobbyHero } from "../components/LobbyHero";
 import { ContinueWatchingRow } from "../components/ContinueWatchingRow";
@@ -86,6 +88,11 @@ export function LibraryPage() {
   const settings = useSettingsStore((s) => s.settings);
   const patchSettings = useSettingsStore((s) => s.patch);
   const [setupOpen, setSetupOpen] = useState(false);
+  const [chromeCollapsed, setChromeCollapsed] = useState(() =>
+    typeof window === "undefined" ? false : window.innerWidth < 1280,
+  );
+  const [chromeQuery, setChromeQuery] = useState("");
+  const chromeSearchRef = useRef<HTMLInputElement>(null);
   const [positions] = usePlaybackPositions(folderId);
   /** Resolved folder cover URL — from the user-placed `Poster.{jpg,png,…}`
    *  in this library, or the parent library's poster when this one has none
@@ -389,10 +396,11 @@ export function LibraryPage() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [navigate, query]);
-  const withTransition = (content: ReactNode) => content;
+
+  let content: ReactNode;
 
   if (invalidFolderId) {
-    return withTransition(
+    content = (
       <div className="ny-library">
         <LibraryHeader
           title="Invalid library link"
@@ -418,12 +426,10 @@ export function LibraryPage() {
             </div>
           </div>
         </div>
-      </div>,
+      </div>
     );
-  }
-
-  if (loading) {
-    return withTransition(
+  } else if (loading) {
+    content = (
       <div className="ny-library">
         <LibraryHeader
           title="Loading library…"
@@ -431,12 +437,10 @@ export function LibraryPage() {
           onBack={() => navigate("/app")}
         />
         <PosterSkeleton count={5} />
-      </div>,
+      </div>
     );
-  }
-
-  if (error) {
-    return withTransition(
+  } else if (error) {
+    content = (
       <div className="ny-library">
         <LibraryHeader
           title="Access denied"
@@ -450,19 +454,10 @@ export function LibraryPage() {
           onRetry={() => void loadFolder(folderId)}
           onOpenSetup={() => setSetupOpen(true)}
         />
-        <SetupAccessDialog
-          isOpen={setupOpen}
-          onClose={() => setSetupOpen(false)}
-          onSaved={() => {
-            setSetupOpen(false);
-            void loadFolder(folderId);
-          }}
-        />
-      </div>,
+      </div>
     );
-  }
-
-  return withTransition(
+  } else {
+    content = (
     <div className="ny-library">
       <LibraryHeader
         title={libraryTitle}
@@ -639,13 +634,42 @@ export function LibraryPage() {
           </p>
         </div>
       )}
+    </div>
+    );
+  }
 
+  return (
+    <LobbyShell
+      collapsed={chromeCollapsed}
+      sidebar={
+        <LobbySidebar
+          collapsed={chromeCollapsed}
+          onToggle={() => setChromeCollapsed((v) => !v)}
+          onOpenDrive={() => setSetupOpen(true)}
+        />
+      }
+      topbar={
+        <LobbyTopbar
+          query={chromeQuery}
+          onQueryChange={setChromeQuery}
+          inputRef={chromeSearchRef}
+          searchPlaceholder="Search worlds, anime, movies, music..."
+        />
+      }
+    >
+      <div className="ny-lobby-main__guest">
+        <GuestBanner />
+      </div>
+      {content}
       <SetupAccessDialog
         isOpen={setupOpen}
         onClose={() => setSetupOpen(false)}
-        onSaved={() => setSetupOpen(false)}
+        onSaved={() => {
+          setSetupOpen(false);
+          if (folderId) void loadFolder(folderId);
+        }}
       />
-    </div>,
+    </LobbyShell>
   );
 }
 

@@ -1,0 +1,60 @@
+.ny-badges {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--neutral-border-weak);
+  border-radius: var(--ny-radius-md);
+  background: var(--surface-background);
+}
+
+.ny-badges__title {
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--brand-on-background-strong);
+}
+
+.ny-badges__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.ny-badges__badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--neutral-border-weak);
+  border-radius: var(--ny-radius-sm);
+  background: var(--surface-background-weak);
+
+  &.is-locked {
+    opacity: 0.4;
+  }
+}
+
+.ny-badges__tier {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+
+  &--bronze {
+    background: #b06b3a;
+  }
+  &--silver {
+    background: #b7c0c9;
+  }
+  &--gold {
+    background: #e0b23a;
+  }
+}
+
+.ny-badges__label {
+  font-size: 0.75rem;
+  color: var(--neutral-on-background-medium);
+}

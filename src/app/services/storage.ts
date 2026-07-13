@@ -19,6 +19,7 @@ import { isSupabaseConfigured } from "../../lib/supabase";
 import { getActiveAccount } from "../../platform/storage-adapter";
 import { getRepository } from "../../server/db/repository";
 import type { UserSettings } from "../../server/db/schema";
+import { markProfileStatsDirty } from "./social/dirty-signal";
 
 type LegacyAppSettings = Partial<AppSettings> & {
   subtitleFont?: string;
@@ -167,6 +168,7 @@ export async function savePlaybackPosition(
     ? { ...existing, ...pos, updatedAt: Date.now() }
     : pos;
   await schedulePlaybackFlush();
+  markProfileStatsDirty();
 }
 
 export async function getAllPlaybackPositions(): Promise<PlaybackPosition[]> {

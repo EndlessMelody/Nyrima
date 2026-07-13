@@ -33,7 +33,6 @@ import { SetupAccessDialog } from "../components/SetupAccessDialog";
 import { LibraryHeroHeader, LibraryStatePanel, NyChanAssistant, describeLocalSource } from "../components/library-hub";
 import { useNyrimaRootStore } from "../stores/nyrima-root-store";
 import { useRecentStore } from "../stores/recent-store";
-import { useSocialStore } from "../stores/social-store";
 import { usePlaybackPositions } from "../hooks/usePlaybackPositions";
 import { isInProgress, isWatched } from "../services/storage";
 import { cleanTitle, formatRelativeTime } from "../components/library-hub/format";
@@ -298,7 +297,6 @@ export function MediaLibraryPage({ kind }: { kind: MediaLibraryKind }) {
   const refreshRoot = useNyrimaRootStore((s) => s.refresh);
   const recentFolders = useRecentStore((s) => s.folders);
   const loadRecents = useRecentStore((s) => s.load);
-  const unreadCount = useSocialStore((s) => s.unreadCount);
   const [positions] = usePlaybackPositions(kind);
   const localStatus = useLocalLibraryStore((s) => s.status);
   const localRootName = useLocalLibraryStore((s) => s.rootName);
@@ -633,7 +631,6 @@ export function MediaLibraryPage({ kind }: { kind: MediaLibraryKind }) {
           query={query}
           onQueryChange={setQuery}
           inputRef={searchInputRef}
-          unreadCount={unreadCount}
           searchPlaceholder={`Search ${definition.title.toLowerCase()}...`}
         />
       }

@@ -209,8 +209,14 @@ export function ConnectDriveScreen({
 
   return (
     <section className="ny-login">
-      <header className="ny-login__hero">
-        <NyrimaMark size="splash" className="ny-login__mark" />
+      <header
+        className="ny-login__hero ny-reveal"
+        style={{ "--ny-reveal-delay": "0ms" } as React.CSSProperties}
+      >
+        <div className="ny-login__mark-wrap">
+          <span className="ny-login__portal" aria-hidden="true" />
+          <NyrimaMark size="splash" className="ny-login__mark" />
+        </div>
         <div className="ny-login__hero-body">
           <span className="ny-login__eyebrow">
             {isGuest
@@ -234,6 +240,7 @@ export function ConnectDriveScreen({
         title="Connect your Google account"
         status={step1}
         hint={`Keeps your Nyrima session valid for ${OAUTH_INTERACTIVE_SESSION_HOURS} hours and streams through your personal Drive quota.`}
+        revealDelay="60ms"
       >
         {oauthState === "active" && profile ? (
           <div className="ny-login__signed">
@@ -331,6 +338,7 @@ export function ConnectDriveScreen({
         title="Pair your cinema folder"
         status={step2}
         hint="Paste the URL of any Google Drive folder. Its immediate subfolders become your libraries — one per show."
+        revealDelay="120ms"
       >
         {folderPaired && rootName ? (
           <p className="ny-login__msg is-ok">
@@ -375,7 +383,10 @@ export function ConnectDriveScreen({
       </Card>
 
       {/* ─── Advanced — BYOK credentials (optional) ─────────────────────── */}
-      <details className="ny-login__advanced">
+      <details
+        className="ny-login__advanced ny-reveal"
+        style={{ "--ny-reveal-delay": "180ms" } as React.CSSProperties}
+      >
         <summary className="ny-login__advanced-summary">
           Advanced: bring your own Drive API key
         </summary>
@@ -458,6 +469,10 @@ export function ConnectDriveScreen({
           </div>
         </div>
       </details>
+
+      <span className="ny-login__engraving" aria-hidden="true">
+        Nyrima · Cinema Access
+      </span>
     </section>
   );
 }
@@ -469,17 +484,24 @@ function Card({
   title,
   hint,
   status,
+  revealDelay,
   children,
 }: {
   index: string;
   title: string;
   hint: string;
   status: StepStatus;
+  revealDelay?: string;
   children: React.ReactNode;
 }) {
   return (
     <section
-      className={`ny-login__card ny-login__card--${status}`}
+      className={`ny-login__card ny-login__card--${status} ny-reveal`}
+      style={
+        revealDelay
+          ? ({ "--ny-reveal-delay": revealDelay } as React.CSSProperties)
+          : undefined
+      }
       aria-current={status === "active" ? "step" : undefined}
     >
       <header className="ny-login__card-head">

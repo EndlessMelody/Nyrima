@@ -33,6 +33,7 @@ import {
   IconProvider,
   ToastProvider,
 } from "@once-ui-system/core/contexts";
+import { applyAccentPreset } from "../theme/accent-presets";
 
 type ThemeMode = "light" | "dark" | "system";
 
@@ -59,17 +60,48 @@ export function AppProviders({ children }: { children: ReactNode }) {
   const resolved = resolveTheme(mode);
 
   // Hydrate the persisted user settings (subtitle scale/font, skip seconds,
-  // …) once on boot so the player can read straight from the store. Lazy
-  // import keeps the providers file's dependency graph thin.
+  // accent preset, …) once on boot so the player can read straight from the
+  // store. Lazy import keeps the providers file's dependency graph thin.
   useEffect(() => {
     let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
     void import("../stores/settings-store").then(async ({ useSettingsStore }) => {
       const store = useSettingsStore.getState();
       await store.load();
-      if (!cancelled) setMode(store.settings.theme);
+      if (cancelled) return;
+      setMode(store.settings.theme);
+      applyAccentPreset(store.settings.accentPreset);
+      document.documentElement.toggleAttribute(
+        "data-reduced-motion",
+        store.settings.reducedMotion,
+      );
+      document.documentElement.setAttribute(
+        "data-density",
+        store.settings.libraryDensity,
+      );
+      // Keep <html> in sync with later patches (accent picker, reduced
+      // motion toggle, density) without re-subscribing this effect.
+      unsubscribe = useSettingsStore.subscribe((state, prev) => {
+        if (state.settings.accentPreset !== prev.settings.accentPreset) {
+          applyAccentPreset(state.settings.accentPreset);
+        }
+        if (state.settings.reducedMotion !== prev.settings.reducedMotion) {
+          document.documentElement.toggleAttribute(
+            "data-reduced-motion",
+            state.settings.reducedMotion,
+          );
+        }
+        if (state.settings.libraryDensity !== prev.settings.libraryDensity) {
+          document.documentElement.setAttribute(
+            "data-density",
+            state.settings.libraryDensity,
+          );
+        }
+      });
     });
     return () => {
       cancelled = true;
+      unsubscribe?.();
     };
   }, []);
 

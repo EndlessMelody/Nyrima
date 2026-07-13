@@ -1,8 +1,9 @@
 /**
- * UserCenter — glassmorphic dropdown panel.
+ * UserCenter — glassmorphic quick-menu dropdown.
  *
  * Matches the Obsidian Atelier aesthetic: blurred backdrop, hairline
- * borders, monospace tracker labels, subtle slide-down entrance.
+ * borders, monospace tracker labels, subtle slide-down entrance. Slim by
+ * design — the full settings surface lives in the Account Center overlay.
  */
 
 .dc-uc {
@@ -10,7 +11,7 @@
   top: calc(100% + 8px);
   right: 0;
   z-index: 100;
-  width: 340px;
+  width: 300px;
   max-height: calc(100vh - 80px);
   overflow-y: auto;
 
@@ -39,20 +40,31 @@
   }
 }
 
-/* Tighter rail for the User Center panel — the surface is a slim sidebar
- * so a 6px scrollbar keeps the gradient legible without crowding the
- * settings rows. Thumb gradient + glow inherited from anime-theme.scss. */
 .dc-uc::-webkit-scrollbar {
   width: 6px;
 }
 
-/* ── Identity ──────────────────────────────────────────────────── */
+/* ── Identity card (banner + avatar) ──────────────────────────────── */
+.dc-uc__identity-card {
+  position: relative;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.dc-uc__identity-banner {
+  height: 44px;
+  background: var(--uc-banner, none),
+    linear-gradient(120deg, var(--brand-alpha-medium), var(--surface-background-strong) 70%);
+  background-size: cover;
+  background-position: center;
+}
+
 .dc-uc__identity {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 14px 12px;
-  border-radius: 10px;
+  padding: 0 12px 12px;
+  margin-top: -18px;
 }
 
 .dc-uc__avatar {
@@ -61,7 +73,8 @@
   border-radius: 50%;
   object-fit: cover;
   flex-shrink: 0;
-  border: 2px solid var(--neutral-alpha-weak);
+  border: 3px solid var(--page-background);
+  background: var(--surface-background-strong);
 }
 
 .dc-uc__avatar--mono {
@@ -76,7 +89,6 @@
   font-family: var(--dc-font-display);
   font-size: 1rem;
   font-weight: 600;
-  border: none;
 }
 
 .dc-uc__identity-text {
@@ -85,6 +97,7 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  padding-top: 14px;
 }
 
 .dc-uc__name {
@@ -140,10 +153,10 @@
   padding: 12px;
   border-radius: 10px;
   border: 1px solid
-    color-mix(in srgb, var(--brand-on-background-strong, #f7c948) 26%, transparent);
+    color-mix(in srgb, var(--brand-on-background-strong) 26%, transparent);
   background: color-mix(
     in srgb,
-    var(--brand-on-background-strong, #f7c948) 8%,
+    var(--brand-on-background-strong) 8%,
     transparent
   );
 }
@@ -162,7 +175,7 @@
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--brand-on-background-strong, #f7c948);
+  color: var(--brand-on-background-strong);
 }
 
 .dc-uc__guest-sub {
@@ -171,41 +184,71 @@
   color: var(--neutral-on-background-weak);
 }
 
-/* ── Nav Header (Sub-pages) ────────────────────────────────────── */
-.dc-uc__nav-header {
-  padding: 8px 12px;
+/* ── Continue watching resume card ────────────────────────────────── */
+.dc-uc__resume {
+  appearance: none;
+  border: var(--dc-hairline);
+  background: var(--surface-background-weak);
+  width: calc(100% - 24px);
+  margin: 8px 12px;
+  padding: 10px;
+  border-radius: 10px;
+  cursor: pointer;
   display: flex;
   align-items: center;
+  gap: 10px;
+  text-align: left;
+  color: var(--brand-on-background-strong);
+  transition:
+    border-color 140ms ease,
+    background 140ms ease;
+
+  svg {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+  }
+
+  &:hover {
+    border-color: var(--brand-border-medium);
+    background: var(--brand-alpha-weak);
+  }
 }
 
-.dc-uc__nav-back {
-  appearance: none;
-  border: none;
-  background: transparent;
-  color: var(--neutral-on-background-medium);
+.dc-uc__resume-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dc-uc__resume-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--neutral-on-background-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dc-uc__resume-meta {
   font-family: var(--dc-font-mono);
   font-size: 0.625rem;
-  font-weight: 500;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  padding: 6px;
-  border-radius: 6px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  transition: all 140ms ease;
-  margin-left: -6px;
+  color: var(--neutral-on-background-weak);
 }
 
-.dc-uc__nav-back svg {
-  width: 14px;
-  height: 14px;
-}
-
-.dc-uc__nav-back:hover {
-  color: var(--neutral-on-background-strong);
+.dc-uc__resume-track {
+  height: 3px;
+  border-radius: 999px;
   background: var(--neutral-alpha-weak);
+  overflow: hidden;
+}
+
+.dc-uc__resume-bar {
+  height: 100%;
+  background: var(--brand-solid-strong);
+  border-radius: 999px;
 }
 
 /* ── Divider ───────────────────────────────────────────────────── */
@@ -275,132 +318,6 @@
   background: color-mix(in srgb, var(--brand-on-background-weak) 14%, transparent);
 }
 
-/* ── Row items (label + control) ───────────────────────────────── */
-.dc-uc__row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 6px 0;
-}
-
-.dc-uc__row-label {
-  font-size: 0.75rem;
-  color: var(--neutral-on-background-medium);
-  white-space: nowrap;
-}
-
-/* Toggle switch */
-.dc-uc__toggle {
-  appearance: none;
-  width: 36px;
-  height: 20px;
-  border-radius: 10px;
-  border: none;
-  cursor: pointer;
-  position: relative;
-  background: var(--neutral-alpha-medium);
-  transition: background 180ms ease;
-  flex-shrink: 0;
-}
-
-.dc-uc__toggle.is-on {
-  background: var(--brand-on-background-medium);
-}
-
-.dc-uc__toggle-knob {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-  transition: transform 180ms ease;
-}
-
-.dc-uc__toggle.is-on .dc-uc__toggle-knob {
-  transform: translateX(16px);
-}
-
-/* Mini-pill group */
-.dc-uc__mini-pills {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-
-.dc-uc__mini-pill {
-  appearance: none;
-  border: var(--dc-hairline);
-  background: transparent;
-  color: var(--neutral-on-background-weak);
-  font-family: var(--dc-font-mono);
-  font-size: 0.5625rem;
-  letter-spacing: 0.06em;
-  padding: 4px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition:
-    color 140ms ease,
-    border-color 140ms ease,
-    background 140ms ease;
-}
-
-.dc-uc__mini-pill:hover {
-  color: var(--neutral-on-background-strong);
-  border-color: var(--neutral-border-strong);
-}
-
-.dc-uc__mini-pill.is-active {
-  color: var(--brand-on-background-strong);
-  border-color: var(--brand-on-background-medium);
-  background: color-mix(in srgb, var(--brand-on-background-weak) 14%, transparent);
-}
-
-.dc-uc__range-control {
-  display: grid;
-  grid-template-columns: minmax(104px, 1fr) 36px;
-  align-items: center;
-  gap: 8px;
-  min-width: 150px;
-}
-
-.dc-uc__range {
-  appearance: none;
-  width: 100%;
-  height: 4px;
-  border-radius: 999px;
-  background:
-    linear-gradient(
-      90deg,
-      var(--brand-on-background-medium) 0%,
-      var(--brand-on-background-medium) var(--pct, 100%),
-      var(--neutral-alpha-medium) var(--pct, 100%),
-      var(--neutral-alpha-medium) 100%
-    );
-  cursor: pointer;
-}
-
-.dc-uc__range::-webkit-slider-thumb {
-  appearance: none;
-  width: 14px;
-  height: 14px;
-  border-radius: 999px;
-  border: 2px solid var(--page-background);
-  background: var(--brand-on-background-strong);
-  box-shadow: 0 0 0 1px var(--brand-border-medium);
-}
-
-.dc-uc__range-value {
-  font-family: var(--dc-font-mono);
-  font-size: 0.5625rem;
-  letter-spacing: 0.06em;
-  color: var(--neutral-on-background-weak);
-  text-align: right;
-}
-
 /* ── Actions ───────────────────────────────────────────────────── */
 .dc-uc__actions {
   display: flex;
@@ -422,6 +339,7 @@
   display: inline-flex;
   align-items: center;
   gap: 10px;
+  width: 100%;
   transition:
     color 140ms ease,
     background 140ms ease;
@@ -439,40 +357,18 @@
   background: var(--neutral-alpha-weak);
 }
 
+.dc-uc__action--danger {
+  color: var(--danger-solid-strong);
+}
+
+.dc-uc__action--danger:hover {
+  color: var(--danger-solid-strong);
+  background: color-mix(in srgb, var(--danger-solid-strong) 12%, transparent);
+}
+
 .dc-uc__action:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-/* ── About ─────────────────────────────────────────────────────── */
-.dc-uc__section--about {
-  padding-bottom: 8px;
-}
-
-.dc-uc__about-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 3px 0;
-}
-
-.dc-uc__about-label {
-  font-family: var(--dc-font-mono);
-  font-size: 0.5625rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--neutral-on-background-weak);
-}
-
-.dc-uc__about-value {
-  font-family: var(--dc-font-mono);
-  font-size: 0.5625rem;
-  letter-spacing: 0.06em;
-  color: var(--neutral-on-background-medium);
-}
-
-.dc-uc__about-value--status {
-  color: var(--brand-on-background-medium);
 }
 
 /* ── Responsive ────────────────────────────────────────────────── */

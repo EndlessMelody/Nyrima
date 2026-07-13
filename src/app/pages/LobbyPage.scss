@@ -2499,6 +2499,16 @@
   box-shadow: 0 0 8px var(--success-solid-strong);
 }
 
+.ny-command-bar__status--warn .ny-command-bar__status-dot {
+  background: var(--warning-solid-strong);
+  box-shadow: 0 0 8px var(--warning-solid-strong);
+}
+
+.ny-command-bar__status--off .ny-command-bar__status-dot {
+  background: var(--neutral-on-background-weak);
+  box-shadow: none;
+}
+
 .ny-command-bar::after {
   content: "";
   position: absolute;

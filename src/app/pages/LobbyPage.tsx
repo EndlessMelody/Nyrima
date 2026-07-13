@@ -20,12 +20,10 @@ import {
   useRef,
   useState,
   type ReactNode,
-  type RefObject,
 } from "react";
 import { Column, Row, Text, Button } from "@once-ui-system/core/components";
 import {
   Activity,
-  Bell,
   BookOpen,
   BookText,
   Captions,
@@ -34,6 +32,7 @@ import {
   Clock3,
   Database,
   Download,
+  FileText,
   Film,
   FolderOpen,
   Gauge,
@@ -53,8 +52,6 @@ import {
   Play,
   RefreshCw,
   Repeat,
-  Search,
-  Settings,
   Shuffle,
   SkipBack,
   SkipForward,
@@ -66,9 +63,9 @@ import {
 import cn from "classnames";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useNyrimaRootStore } from "../stores/nyrima-root-store";
+import { useOnlineStatus } from "../hooks/useOnlineStatus";
 import { useRecentStore } from "../stores/recent-store";
 import { useSettingsStore } from "../stores/settings-store";
-import { useSocialStore } from "../stores/social-store";
 import { usePlaybackPositions } from "../hooks/usePlaybackPositions";
 import { LibraryCard } from "../components/LibraryCard";
 import { ContinueWatchingRow } from "../components/ContinueWatchingRow";
@@ -77,7 +74,7 @@ import { NyrimaRootDialog } from "../components/NyrimaRootDialog";
 import { ConnectDriveScreen } from "../components/ConnectDriveScreen";
 import { GuestBanner } from "../components/GuestBanner";
 import { NyrimaMark } from "../components/NyrimaMark";
-import { UserChip } from "../components/UserChip";
+import { LobbyTopbar } from "../components/LobbyChrome";
 import { useLibraryHub, type LibraryItem } from "../components/library-hub";
 import {
   HOME_ROUTE,
@@ -251,7 +248,6 @@ export function LobbyPage() {
   const location = useLocation();
   const mascotRouteKeyRef = useRef(location.key);
   const isOnline = useOnlineStatus();
-  const unreadCount = useSocialStore((s) => s.unreadCount);
   const customBannerUrl = useSettingsStore(
     (s) => s.settings.lobbyBannerImageDataUrl,
   );
@@ -721,12 +717,10 @@ export function LobbyPage() {
           />
         }
         topbar={
-          <TopCommandBar
+          <LobbyTopbar
             query={query}
             onQueryChange={setQuery}
             inputRef={searchInputRef}
-            unreadCount={unreadCount}
-            onNavigate={(path) => navigate(path)}
           />
         }
         player={
@@ -869,6 +863,8 @@ const SIDEBAR_ICONS: Record<SidebarNavIcon, LucideIcon> = {
   downloads: Download,
   "google-drive": Cloud,
   "local-folder": FolderOpen,
+  social: Users,
+  posts: FileText,
 };
 
 function Sidebar({
@@ -947,93 +943,6 @@ function Sidebar({
         ))}
       </nav>
     </aside>
-  );
-}
-
-function TopCommandBar({
-  query,
-  onQueryChange,
-  inputRef,
-  unreadCount,
-  onNavigate,
-}: {
-  query: string;
-  onQueryChange: (query: string) => void;
-  inputRef: RefObject<HTMLInputElement>;
-  unreadCount: number;
-  onNavigate: (path: string) => void;
-}) {
-  return (
-    <header className="ny-command-bar">
-      <label className="ny-command-bar__search" aria-label="Search libraries">
-        <Search aria-hidden="true" />
-        <input
-          ref={inputRef}
-          type="search"
-          value={query}
-          onChange={(e) => onQueryChange(e.target.value)}
-          placeholder="Search worlds, anime, movies, music..."
-          autoComplete="off"
-          spellCheck={false}
-        />
-        <span className="ny-command-bar__shortcut" aria-hidden="true">
-          Ctrl K
-        </span>
-        <span className="ny-command-bar__shortcut" aria-hidden="true">
-          /
-        </span>
-      </label>
-
-      <div className="ny-command-bar__actions">
-        <span className="ny-command-bar__status" aria-hidden="true">
-          <span className="ny-command-bar__status-dot" />
-          Every World, One Archive <i>//</i> Nyrima Online
-        </span>
-        <button
-          type="button"
-          className="ny-command-bar__action"
-          onClick={() => onNavigate("/app")}
-        >
-          <LibraryBig />
-          <span>Libraries</span>
-        </button>
-        <button
-          type="button"
-          className="ny-command-bar__action"
-          onClick={() => onNavigate("/social")}
-        >
-          <Users />
-          <span>Social</span>
-          {unreadCount > 0 && (
-            <span
-              className="ny-command-bar__badge"
-              aria-label={`${unreadCount} unread`}
-            >
-              {unreadCount > 99 ? "99+" : unreadCount}
-            </span>
-          )}
-        </button>
-        <button
-          type="button"
-          className="ny-command-bar__action"
-          onClick={() => onNavigate("/settings")}
-        >
-          <Settings />
-          <span>Settings</span>
-        </button>
-        <button
-          type="button"
-          className="ny-command-bar__icon"
-          onClick={() => onNavigate("/social")}
-          aria-label="Notifications"
-          title="Notifications"
-        >
-          <Bell />
-          {unreadCount > 0 && <span className="ny-command-bar__dot" />}
-        </button>
-        <UserChip />
-      </div>
-    </header>
   );
 }
 
@@ -2169,23 +2078,6 @@ function isTypingTarget(target: HTMLElement | null): boolean {
     target.tagName === "TEXTAREA" ||
     target.isContentEditable
   );
-}
-
-function useOnlineStatus(): boolean {
-  const [online, setOnline] = useState(() =>
-    typeof navigator === "undefined" ? true : navigator.onLine,
-  );
-  useEffect(() => {
-    const onOnline = () => setOnline(true);
-    const onOffline = () => setOnline(false);
-    window.addEventListener("online", onOnline);
-    window.addEventListener("offline", onOffline);
-    return () => {
-      window.removeEventListener("online", onOnline);
-      window.removeEventListener("offline", onOffline);
-    };
-  }, []);
-  return online;
 }
 
 function formatRelative(epoch: number): string {

@@ -1,0 +1,54 @@
+.ny-profile-stats {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.ny-profile-stats__metric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 14px;
+  border: 1px solid var(--neutral-border-weak);
+  border-radius: var(--ny-radius-sm);
+  background: var(--surface-background-weak);
+
+  &.is-brand {
+    border-color: var(--brand-border-medium);
+    background: var(--brand-alpha-weak);
+  }
+
+  &.is-accent {
+    border-color: var(--accent-border-medium);
+    background: var(--accent-alpha-weak);
+  }
+}
+
+.ny-profile-stats__value {
+  font-family: var(--dc-font-display);
+  font-size: 1.5rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--neutral-on-background-strong);
+
+  .ny-profile-stats__metric.is-brand & {
+    color: var(--brand-on-background-strong);
+  }
+  .ny-profile-stats__metric.is-accent & {
+    color: var(--accent-on-background-strong);
+  }
+}
+
+.ny-profile-stats__label {
+  font-family: var(--dc-font-mono);
+  font-size: 0.625rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--neutral-on-background-weak);
+}

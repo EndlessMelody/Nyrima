@@ -9,6 +9,7 @@ import {
   removeRecentFolder,
   togglePinRecentFolder,
 } from "../services/storage";
+import { markProfileStatsDirty } from "../services/social/dirty-signal";
 import type { RecentFolder } from "@shared/types";
 
 interface RecentState {
@@ -33,6 +34,7 @@ export const useRecentStore = create<RecentState>((set) => ({
   upsert: async (folder) => {
     const next = await upsertRecentFolder(folder);
     set({ folders: next });
+    markProfileStatsDirty();
   },
 
   remove: async (folderId) => {
