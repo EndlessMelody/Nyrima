@@ -25,7 +25,13 @@
         0%,
       var(--surface-background) 100%
     );
+  backdrop-filter: blur(22px) saturate(135%);
+  -webkit-backdrop-filter: blur(22px) saturate(135%);
+  box-shadow:
+    inset 0 1px 0 var(--neutral-alpha-medium),
+    0 24px 64px -34px var(--brand-alpha-strong);
   position: relative;
+  isolation: isolate;
   overflow: hidden;
 }
 
@@ -49,6 +55,25 @@
   opacity: 0.5;
 }
 
+/* Ambient light drift — the same "one lamp breathing" wash used behind the
+   dashboard's WelcomeBanner hero, dialed down since this panel holds forms
+   the user needs to read. Sits behind all in-flow content (z-index: -1)
+   without escaping the panel's own rounded/clipped bounds. */
+.ny-login::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: inherit;
+  background:
+    linear-gradient(118deg, transparent 0 28%, var(--neutral-alpha-weak) 28.2% 28.45%, transparent 28.7% 100%),
+    linear-gradient(150deg, transparent 0 72%, var(--brand-alpha-weak) 72.2% 72.45%, transparent 72.7% 100%);
+  mix-blend-mode: screen;
+  opacity: 0.5;
+  animation: ny-banner-ambient-drift 18s ease-in-out infinite;
+}
+
 /* ───────────────────────── Hero ───────────────────────────────────────── */
 
 .ny-login__hero {
@@ -69,11 +94,54 @@
   }
 }
 
+.ny-login__mark-wrap {
+  position: relative;
+  display: inline-flex;
+  isolation: isolate;
+}
+
 .ny-login__mark {
+  position: relative;
+  z-index: 1;
   border-radius: 22px !important;
   box-shadow:
     0 0 0 1px var(--brand-border-medium),
+    0 0 32px -6px var(--brand-alpha-strong),
     0 18px 48px -18px rgba(0, 0, 0, 0.45);
+}
+
+/* The mark is the literal light source of this screen — a slow rotating
+   portal ring behind it, the same conic-gradient recipe as the dashboard
+   hero's ring accent, dialed to a single quiet halo rather than a status
+   indicator. */
+.ny-login__portal {
+  position: absolute;
+  inset: -22%;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: 999px;
+  background: conic-gradient(
+    from 18deg,
+    transparent 0 42deg,
+    var(--brand-alpha-strong) 43deg 45deg,
+    transparent 46deg 154deg,
+    var(--brand-alpha-medium) 155deg 158deg,
+    transparent 159deg 268deg,
+    var(--neutral-alpha-strong) 269deg 270deg,
+    transparent 271deg 360deg
+  );
+  filter: drop-shadow(0 0 18px var(--brand-alpha-medium));
+  opacity: 0.7;
+  animation: ny-login-portal-turn 24s linear infinite;
+}
+
+@keyframes ny-login-portal-turn {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .ny-login__hero-body {
@@ -122,6 +190,7 @@
   border-radius: var(--ny-radius-md);
   background: var(--surface-background);
   transition:
+    transform var(--ny-dur-base) var(--ny-ease-spring),
     border-color 200ms ease,
     box-shadow 200ms ease,
     opacity 200ms ease;
@@ -136,6 +205,16 @@
 
 .ny-login__card--done {
   opacity: 0.82;
+}
+
+/* House card-lift idiom (same recipe as .dc-card-glow) — the active/done
+   steps are interactive-enough to earn the elevation; pending stays inert
+   (already pointer-events: none). */
+.ny-login__card--active:hover,
+.ny-login__card--done:hover {
+  transform: translateY(-2px);
+  border-color: var(--neutral-border-strong);
+  box-shadow: var(--dc-glow);
 }
 
 .ny-login__card--pending {
@@ -176,6 +255,9 @@
   background: var(--brand-alpha-weak);
   border-color: var(--brand-on-background-strong);
   color: var(--brand-on-background-strong);
+  box-shadow: 0 0 0 0 var(--brand-alpha-weak);
+  animation: ny-login-dot-pulse var(--ny-dur-ambient) ease-in-out infinite
+    alternate;
 }
 
 .ny-login__step-dot--done {
@@ -183,6 +265,29 @@
   border-color: var(--brand-on-background-strong);
   color: var(--page-background);
   font-size: 0.9375rem;
+  animation: ny-login-dot-pop var(--ny-dur-base) var(--ny-ease-spring);
+}
+
+/* Breathing ring on the actionable step — same pattern WelcomeBlock uses
+   for "the next gate to clear". */
+@keyframes ny-login-dot-pulse {
+  from {
+    box-shadow: 0 0 0 0 var(--brand-alpha-weak);
+  }
+  to {
+    box-shadow: 0 0 0 5px var(--brand-alpha-weak);
+  }
+}
+
+/* One-shot pop when a step flips to done, so completion reads as a small
+   reward rather than a silent state change. */
+@keyframes ny-login-dot-pop {
+  from {
+    transform: scale(1.2);
+  }
+  to {
+    transform: scale(1);
+  }
 }
 
 .ny-login__card-text {
@@ -342,6 +447,20 @@
   font-family: var(--dc-font-display);
   font-size: 1.125rem;
   color: var(--brand-on-background-strong);
+  box-shadow: 0 0 0 3px var(--brand-alpha-weak);
+  animation: ny-login-avatar-in var(--ny-dur-slow) var(--ny-ease-out);
+}
+
+/* One-shot arrival for the "you're connected" moment. */
+@keyframes ny-login-avatar-in {
+  from {
+    opacity: 0;
+    transform: scale(0.86);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .ny-login__avatar--mono {
@@ -410,4 +529,39 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+/* ───────────────────────── Engraving ──────────────────────────────────── */
+
+.ny-login__engraving {
+  position: absolute;
+  right: 20px;
+  bottom: 14px;
+  z-index: 1;
+  pointer-events: none;
+  font-family: var(--dc-font-mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--neutral-on-background-strong);
+  opacity: 0.16;
+}
+
+@media (max-width: 720px) {
+  .ny-login__engraving {
+    display: none;
+  }
+}
+
+/* ───────────────────────── Reduced motion ─────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .ny-login::after,
+  .ny-login__portal,
+  .ny-login__step-dot--active,
+  .ny-login__step-dot--done,
+  .ny-login__avatar {
+    animation: none;
+  }
 }

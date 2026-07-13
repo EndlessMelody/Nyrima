@@ -26,9 +26,12 @@
  * or font stack.
  */
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "@/auth/AuthProvider";
+import { LobbyShell, LobbySidebar, LobbyTopbar } from "../components/LobbyChrome";
+import { GuestBanner } from "../components/GuestBanner";
+import { SetupAccessDialog } from "../components/SetupAccessDialog";
 import { SocialLockedState } from "../components/SocialLockedState";
 import { useSharingStore } from "../stores/sharing-store";
 import { useSocialStore } from "../stores/social-store";
@@ -57,7 +60,43 @@ const DEFAULT_TAB: SocialTabKey = "inbox";
  */
 export function SocialPage() {
   const { canAccess } = useAuth();
-  return canAccess("social:profile") ? <SocialHub /> : <SocialLockedState />;
+  const [collapsed, setCollapsed] = useState(() =>
+    typeof window === "undefined" ? false : window.innerWidth < 1280,
+  );
+  const [query, setQuery] = useState("");
+  const [setupOpen, setSetupOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <LobbyShell
+      collapsed={collapsed}
+      sidebar={
+        <LobbySidebar
+          collapsed={collapsed}
+          onToggle={() => setCollapsed((v) => !v)}
+          onOpenDrive={() => setSetupOpen(true)}
+        />
+      }
+      topbar={
+        <LobbyTopbar
+          query={query}
+          onQueryChange={setQuery}
+          inputRef={searchInputRef}
+          searchPlaceholder="Search social..."
+        />
+      }
+    >
+      <div className="ny-lobby-main__guest">
+        <GuestBanner />
+      </div>
+      {canAccess("social:profile") ? <SocialHub /> : <SocialLockedState />}
+      <SetupAccessDialog
+        isOpen={setupOpen}
+        onClose={() => setSetupOpen(false)}
+        onSaved={() => setSetupOpen(false)}
+      />
+    </LobbyShell>
+  );
 }
 
 function SocialHub() {

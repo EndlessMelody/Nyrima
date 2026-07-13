@@ -618,6 +618,17 @@ button[class*="primary"]:hover,
   }
 }
 
+/* App-level reduced motion (Appearance → Reduced motion), independent of the
+ * OS media query. Mirrors the same rules `prefers-reduced-motion: reduce`
+ * triggers elsewhere: kill the sakura petals and the reveal animation. */
+:root[data-reduced-motion] .ny-reveal {
+  animation: none;
+}
+
+:root[data-reduced-motion] .dc-shell__sakura {
+  display: none;
+}
+
 /* ───────────────────────── Focus rings ─────────────────────────────────── */
 
 /* Apply this class to any interactive surface to get the brand focus ring. */
@@ -689,6 +700,13 @@ button:focus-visible,
   display: grid;
   grid-template-columns: repeat(var(--ny-cols, 5), minmax(0, 1fr));
   gap: 16px;
+}
+
+/* Library & Storage → density: compact tightens gaps and adds a column so
+ * more posters fit per row. Per-page --ny-cols overrides still apply on top. */
+:root[data-density="compact"] .ny-poster-grid {
+  grid-template-columns: repeat(calc(var(--ny-cols, 5) + 1), minmax(0, 1fr));
+  gap: 10px;
 }
 
 @media (max-width: 1200px) {

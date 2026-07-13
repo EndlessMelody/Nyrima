@@ -31,6 +31,7 @@ import {
 import { useLocation, useNavigate } from "react-router-dom";
 import { NyrimaMark } from "@app/components/NyrimaMark";
 import { useAuth } from "@/auth/AuthProvider";
+import { resolveLandingPage } from "@app/services/landing-page";
 import { EMOTION_ART } from "@/landing/mascotArt";
 import {
   featureChips,
@@ -66,7 +67,8 @@ export function LoginPage() {
   } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const redirectTo = (location.state as LocationState | null)?.from ?? "/app";
+  const redirectTo =
+    (location.state as LocationState | null)?.from ?? resolveLandingPage();
 
   const [mode, setMode] = useState<Mode>("signin");
   const [email, setEmail] = useState("");

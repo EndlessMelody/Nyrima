@@ -20,7 +20,6 @@ import cn from "classnames";
 import { LobbyShell, LobbySidebar, LobbyTopbar } from "../components/LobbyChrome";
 import { LibraryGridSkeleton } from "../components/LibraryGridSkeleton";
 import { SetupAccessDialog } from "../components/SetupAccessDialog";
-import { useSocialStore } from "../stores/social-store";
 import {
   CATEGORY_META,
   CategoryIcon,
@@ -61,7 +60,6 @@ export function AllLibraryPage() {
   } = hub;
 
   const navigate = useNavigate();
-  const unreadCount = useSocialStore((s) => s.unreadCount);
 
   const [collapsed, setCollapsed] = useState(() =>
     typeof window === "undefined" ? false : window.innerWidth < 1280,
@@ -187,7 +185,6 @@ export function AllLibraryPage() {
           query={query}
           onQueryChange={setQuery}
           inputRef={searchInputRef}
-          unreadCount={unreadCount}
           searchPlaceholder="Search your library — movies, manga, novels, music..."
         />
       }

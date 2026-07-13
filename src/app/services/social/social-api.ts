@@ -25,13 +25,65 @@ import type { Friendship, RelationshipStatus } from "@/server/db/schema";
 // Types — camelCase domain shapes mapped from snake_case rows.
 // ---------------------------------------------------------------------------
 
+export interface SocialLink {
+  label: string;
+  url: string;
+}
+
+export type PinnedKind = "library" | "post";
+
 export interface SocialProfile {
   id: string;
   handle: string | null;
   displayName: string;
   avatarUrl?: string;
+  bio: string | null;
+  genres: string[];
+  socialLinks: SocialLink[];
+  pinnedKind: PinnedKind | null;
+  pinnedRef: string | null;
+  pinnedLabel: string | null;
   createdAt: number;
   updatedAt: number;
+}
+
+/** One row in `profile_stats` — client-computed lifetime aggregates only,
+ *  never raw watch history. See the profile-dashboard migration header. */
+export interface ProfileStats {
+  userId: string;
+  minutesWatched: number;
+  completedCount: number;
+  librariesOwned: number;
+  postsCount: number;
+  commentsGivenCount: number;
+  commentsReceivedCount: number;
+  friendsCount: number;
+  currentStreakDays: number;
+  longestStreakDays: number;
+  lastActiveDay: string | null;
+  computedAt: number;
+  updatedAt: number;
+}
+
+/** One day of the contribution heatmap. `units` is an activity-touch count
+ *  (distinct files touched that day), not real watch-minutes. */
+export interface ActivityDay {
+  day: string;
+  units: number;
+}
+
+export interface BadgeDef {
+  id: string;
+  label: string;
+  description: string;
+  icon: string | null;
+  tier: "bronze" | "silver" | "gold" | null;
+  sortOrder: number;
+}
+
+export interface UserBadge {
+  badgeId: string;
+  earnedAt: number;
 }
 
 export interface FolderComment {
@@ -93,15 +145,86 @@ function optStr(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+function toSocialLinks(value: unknown): SocialLink[] {
+  if (!Array.isArray(value)) return [];
+  const out: SocialLink[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const label = (item as Record<string, unknown>).label;
+    const url = (item as Record<string, unknown>).url;
+    if (typeof label === "string" && typeof url === "string" && url) {
+      out.push({ label, url });
+    }
+  }
+  return out;
+}
+
 function toProfile(row: Record<string, unknown>): SocialProfile {
   const created = toEpoch(row.created_at);
+  const pinnedKind =
+    row.pinned_kind === "library" || row.pinned_kind === "post"
+      ? row.pinned_kind
+      : null;
   return {
     id: String(row.id),
     handle: typeof row.handle === "string" ? row.handle : null,
     displayName: String(row.display_name ?? ""),
     avatarUrl: optStr(row.avatar_url),
+    bio: typeof row.bio === "string" ? row.bio : null,
+    genres: Array.isArray(row.genres) ? row.genres.filter((g): g is string => typeof g === "string") : [],
+    socialLinks: toSocialLinks(row.social_links),
+    pinnedKind,
+    pinnedRef: optStr(row.pinned_ref) ?? null,
+    pinnedLabel: optStr(row.pinned_label) ?? null,
     createdAt: created,
     updatedAt: toEpoch(row.updated_at, created),
+  };
+}
+
+function toProfileStats(row: Record<string, unknown>): ProfileStats {
+  const computed = toEpoch(row.computed_at);
+  return {
+    userId: String(row.user_id),
+    minutesWatched: Number(row.minutes_watched ?? 0),
+    completedCount: Number(row.completed_count ?? 0),
+    librariesOwned: Number(row.libraries_owned ?? 0),
+    postsCount: Number(row.posts_count ?? 0),
+    commentsGivenCount: Number(row.comments_given_count ?? 0),
+    commentsReceivedCount: Number(row.comments_received_count ?? 0),
+    friendsCount: Number(row.friends_count ?? 0),
+    currentStreakDays: Number(row.current_streak_days ?? 0),
+    longestStreakDays: Number(row.longest_streak_days ?? 0),
+    lastActiveDay: typeof row.last_active_day === "string" ? row.last_active_day : null,
+    computedAt: computed,
+    updatedAt: toEpoch(row.updated_at, computed),
+  };
+}
+
+function toActivityDay(row: Record<string, unknown>): ActivityDay {
+  return {
+    day: String(row.day),
+    units: Number(row.units ?? 0),
+  };
+}
+
+function toBadgeDef(row: Record<string, unknown>): BadgeDef {
+  return {
+    id: String(row.id),
+    label: String(row.label ?? ""),
+    description: String(row.description ?? ""),
+    icon: optStr(row.icon) ?? null,
+    tier:
+      row.tier === "bronze" || row.tier === "silver" || row.tier === "gold"
+        ? row.tier
+        : null,
+    sortOrder: Number(row.sort_order ?? 0),
+  };
+}
+
+function toUserBadge(row: Record<string, unknown>): UserBadge {
+  return {
+    badgeId: String(row.badge_id),
+    earnedAt: toEpoch(row.earned_at),
   };
 }
 
@@ -157,6 +280,37 @@ export async function ensureSocialProfile(
   if (error) throw new Error(`Ensure profile: ${error.message}`);
   const row = Array.isArray(data) ? data[0] : data;
   return toProfile(asRow(row));
+}
+
+/**
+ * Update the caller's public-profile fields (bio, genres, social links,
+ * pinned library/post). Plain `.update()` under `profiles_update_own` — the
+ * row must already exist, so callers should `ensureSocialProfile({})` first.
+ */
+export async function updateMyProfile(input: {
+  bio?: string | null;
+  genres?: string[];
+  socialLinks?: SocialLink[];
+  pinnedKind?: PinnedKind | null;
+  pinnedRef?: string | null;
+  pinnedLabel?: string | null;
+}): Promise<SocialProfile> {
+  const { client, userId } = await requireSession();
+  const patch: Record<string, unknown> = {};
+  if ("bio" in input) patch.bio = input.bio || null;
+  if ("genres" in input) patch.genres = input.genres ?? [];
+  if ("socialLinks" in input) patch.social_links = input.socialLinks ?? [];
+  if ("pinnedKind" in input) patch.pinned_kind = input.pinnedKind ?? null;
+  if ("pinnedRef" in input) patch.pinned_ref = input.pinnedRef ?? null;
+  if ("pinnedLabel" in input) patch.pinned_label = input.pinnedLabel ?? null;
+  const { data, error } = await client
+    .from("profiles")
+    .update(patch)
+    .eq("id", userId)
+    .select("*")
+    .single();
+  if (error) throw new Error(`Update profile: ${error.message}`);
+  return toProfile(asRow(data));
 }
 
 export async function getMyProfile(): Promise<SocialProfile | null> {
@@ -337,4 +491,151 @@ export async function deleteFolderComment(id: string): Promise<void> {
   const { client } = await requireSession();
   const { error } = await client.from("folder_comments").delete().eq("id", id);
   if (error) throw new Error(`Delete comment: ${error.message}`);
+  return;
+}
+
+// ---------------------------------------------------------------------------
+// Profile stats + activity heatmap — client-computed aggregates only. Writes
+// go through security-definer RPCs scoped to the caller (see the profile
+// dashboard migration); reads are open to any signed-in user.
+// ---------------------------------------------------------------------------
+
+export async function getProfileStats(userId: string): Promise<ProfileStats | null> {
+  const { client } = await requireSession();
+  const { data, error } = await client
+    .from("profile_stats")
+    .select("*")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throw new Error(`Load profile stats: ${error.message}`);
+  return data ? toProfileStats(asRow(data)) : null;
+}
+
+export async function upsertMyProfileStats(input: {
+  minutesWatched: number;
+  completedCount: number;
+  librariesOwned: number;
+  postsCount: number;
+  commentsGivenCount: number;
+  commentsReceivedCount: number;
+  friendsCount: number;
+  currentStreakDays: number;
+  longestStreakDays: number;
+  lastActiveDay: string | null;
+}): Promise<ProfileStats> {
+  const { client } = await requireSession();
+  const { data, error } = await client.rpc("upsert_profile_stats", {
+    p_minutes_watched: input.minutesWatched,
+    p_completed_count: input.completedCount,
+    p_libraries_owned: input.librariesOwned,
+    p_posts_count: input.postsCount,
+    p_comments_given_count: input.commentsGivenCount,
+    p_comments_received_count: input.commentsReceivedCount,
+    p_friends_count: input.friendsCount,
+    p_current_streak_days: input.currentStreakDays,
+    p_longest_streak_days: input.longestStreakDays,
+    p_last_active_day: input.lastActiveDay,
+  });
+  if (error) throw new Error(`Sync profile stats: ${error.message}`);
+  const row = Array.isArray(data) ? data[0] : data;
+  return toProfileStats(asRow(row));
+}
+
+export async function getActivityDays(
+  userId: string,
+  sinceDays = 365,
+): Promise<ActivityDay[]> {
+  const { client } = await requireSession();
+  const since = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
+  const { data, error } = await client
+    .from("activity_days")
+    .select("day, units")
+    .eq("user_id", userId)
+    .gte("day", since)
+    .order("day", { ascending: true });
+  if (error) throw new Error(`Load activity: ${error.message}`);
+  return (data ?? []).map((r) => toActivityDay(asRow(r)));
+}
+
+export async function upsertMyActivityDays(
+  days: { day: string; units: number }[],
+): Promise<void> {
+  if (days.length === 0) return;
+  const { client } = await requireSession();
+  const { error } = await client.rpc("upsert_activity_days", { p_days: days });
+  if (error) throw new Error(`Sync activity: ${error.message}`);
+}
+
+export async function listBadgeDefs(): Promise<BadgeDef[]> {
+  const { client } = await requireSession();
+  const { data, error } = await client
+    .from("badge_defs")
+    .select("*")
+    .order("sort_order", { ascending: true });
+  if (error) throw new Error(`Load badges: ${error.message}`);
+  return (data ?? []).map((r) => toBadgeDef(asRow(r)));
+}
+
+export async function listUserBadges(userId: string): Promise<UserBadge[]> {
+  const { client } = await requireSession();
+  const { data, error } = await client
+    .from("user_badges")
+    .select("badge_id, earned_at")
+    .eq("user_id", userId);
+  if (error) throw new Error(`Load earned badges: ${error.message}`);
+  return (data ?? []).map((r) => toUserBadge(asRow(r)));
+}
+
+export async function awardBadge(badgeId: string): Promise<UserBadge> {
+  const { client, userId } = await requireSession();
+  const { data, error } = await client
+    .from("user_badges")
+    .insert({ user_id: userId, badge_id: badgeId })
+    .select("badge_id, earned_at")
+    .single();
+  if (error) throw new Error(`Award badge: ${error.message}`);
+  return toUserBadge(asRow(data));
+}
+
+/** Server-verified count — `folder_comments` read RLS is open to any signed-
+ *  in user, so this is a live query rather than a self-reported number. */
+export async function getCommentsGivenCount(userId: string): Promise<number> {
+  const { client } = await requireSession();
+  const { count, error } = await client
+    .from("folder_comments")
+    .select("id", { count: "exact", head: true })
+    .eq("author_user_id", userId);
+  if (error) throw new Error(`Count comments: ${error.message}`);
+  return count ?? 0;
+}
+
+// ---------------------------------------------------------------------------
+// Avatar upload — Supabase Storage, replacing the local-only data URL so
+// other users can actually see the picture on the public-ish dashboard.
+// ---------------------------------------------------------------------------
+
+const AVATAR_BUCKET = "avatars";
+
+export async function uploadAvatar(blob: Blob): Promise<string> {
+  const { client, userId } = await requireSession();
+  const path = `${userId}/avatar.jpg`;
+  const { error: uploadError } = await client.storage
+    .from(AVATAR_BUCKET)
+    .upload(path, blob, { contentType: "image/jpeg", upsert: true });
+  if (uploadError) throw new Error(`Upload avatar: ${uploadError.message}`);
+  const { data } = client.storage.from(AVATAR_BUCKET).getPublicUrl(path);
+  const cacheBusted = `${data.publicUrl}?v=${Date.now()}`;
+  await ensureSocialProfile({ avatarUrl: cacheBusted });
+  return cacheBusted;
+}
+
+export async function clearMyAvatarUrl(): Promise<void> {
+  const { client, userId } = await requireSession();
+  const { error } = await client
+    .from("profiles")
+    .update({ avatar_url: null })
+    .eq("id", userId);
+  if (error) throw new Error(`Remove avatar: ${error.message}`);
 }

@@ -15,6 +15,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getSupabaseClient } from "@/lib/supabase";
+import { resolveLandingPage } from "@app/services/landing-page";
 
 /** The Supabase client, or null when it isn't configured (or prod misconfig). */
 function safeSupabaseClient(): ReturnType<typeof getSupabaseClient> {
@@ -64,7 +65,10 @@ export function AuthCallbackPage() {
     const client = safeSupabaseClient();
     if (!client) {
       setMessage("Redirecting…");
-      const t = window.setTimeout(() => navigate("/app", { replace: true }), 400);
+      const t = window.setTimeout(
+        () => navigate(resolveLandingPage(), { replace: true }),
+        400,
+      );
       return () => window.clearTimeout(t);
     }
 
@@ -89,7 +93,7 @@ export function AuthCallbackPage() {
           session = (await activeClient.auth.getSession()).data.session;
         }
         if (cancelled) return;
-        navigate(session ? "/app" : "/login", { replace: true });
+        navigate(session ? resolveLandingPage() : "/login", { replace: true });
       } catch {
         if (!cancelled) navigate("/login", { replace: true });
       }

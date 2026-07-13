@@ -1,0 +1,72 @@
+.ny-heatmap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--neutral-border-weak);
+  border-radius: var(--ny-radius-md);
+  background: var(--surface-background);
+}
+
+.ny-heatmap__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ny-heatmap__title {
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--brand-on-background-strong);
+}
+
+.ny-heatmap__streaks {
+  display: flex;
+  gap: 16px;
+  font-size: 0.8125rem;
+  color: var(--neutral-on-background-medium);
+
+  strong {
+    color: var(--neutral-on-background-strong);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.ny-heatmap__grid {
+  display: flex;
+  gap: 3px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.ny-heatmap__week {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ny-heatmap__cell {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--neutral-border-weak);
+
+  &[data-active] {
+    background: var(--brand-solid-strong);
+  }
+
+  &.is-future {
+    background: transparent;
+  }
+}
+
+.ny-heatmap__note {
+  margin: 0;
+  font-size: 0.6875rem;
+  color: var(--neutral-on-background-weak);
+}

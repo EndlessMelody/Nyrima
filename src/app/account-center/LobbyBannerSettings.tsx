@@ -1,16 +1,10 @@
 /**
- * SettingsPage — full-page settings for the web app.
- *
- * Surfaces the same controls available in the header UserCenter popover, but
- * as a dedicated route: account, appearance, Drive connection, API
- * credentials, and subtitle typography. Reuses existing self-contained panels
- * (`ApiConfigPanel`, `SubtitleConfigPanel`) and the Drive wizard
- * (`ConnectDriveScreen`) rather than re-implementing them.
+ * LobbyBannerSettings — upload + drag-to-frame crop tool for the custom lobby
+ * banner (5.2:1). Extracted verbatim from the retired SettingsPage so the
+ * Account Center's Appearance section can embed it.
  */
 
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
-import { useNavigate } from "react-router-dom";
-import cn from "classnames";
+import { useRef, useState, type ChangeEvent } from "react";
 import {
   Check,
   Image as ImageIcon,
@@ -19,166 +13,12 @@ import {
   Upload,
   ZoomIn,
 } from "lucide-react";
-import { useAuth } from "@/auth/AuthProvider";
-import { useTheme } from "@app/providers/AppProviders";
-import { useNyrimaRootStore } from "@app/stores/nyrima-root-store";
 import { useSettingsStore } from "@app/stores/settings-store";
-import { hasApiKey } from "@app/services/api-key";
-import { ConnectDriveScreen } from "@app/components/ConnectDriveScreen";
-import { ApiConfigPanel } from "@app/components/ApiConfigPanel";
-import { SubtitleConfigPanel } from "@app/components/SubtitleConfigPanel";
-import "./SettingsPage.scss";
+import "./LobbyBannerSettings.scss";
 
 const LOBBY_BANNER_CROP_WIDTH = 1560;
 const LOBBY_BANNER_CROP_HEIGHT = 300;
 const LOBBY_BANNER_ASPECT_LABEL = "5.2:1";
-
-export function SettingsPage() {
-  const navigate = useNavigate();
-  const { status, account, signOut, exitGuestMode } = useAuth();
-  const isGuest = status === "guest";
-  const { mode, setMode } = useTheme();
-  const patch = useSettingsStore((s) => s.patch);
-
-  const root = useNyrimaRootStore((s) => s.root);
-  const loadRoot = useNyrimaRootStore((s) => s.load);
-  const [keyConfigured, setKeyConfigured] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    void loadRoot();
-    void hasApiKey().then(setKeyConfigured);
-  }, [loadRoot]);
-
-  async function handleAccountSignOut() {
-    await signOut();
-    navigate("/", { replace: true });
-  }
-
-  return (
-      <div className="ny-settings">
-      <header className="ny-settings__head">
-        <span className="dc-tracker">Settings</span>
-        <h1 className="ny-settings__title">Settings</h1>
-        <p className="ny-settings__sub">
-          Manage your account, appearance, Drive connection, and playback.
-        </p>
-      </header>
-
-      {/* Account */}
-      <section className="ny-settings__section">
-        <h2 className="ny-settings__section-title">Account</h2>
-        {isGuest ? (
-          <div className="ny-settings__row">
-            <div>
-              <div className="ny-settings__row-label">Guest mode</div>
-              <div className="ny-settings__row-value">
-                No Nyrima account{" "}
-                <span className="ny-settings__muted">
-                  (social &amp; cloud sync are off)
-                </span>
-              </div>
-            </div>
-            <div className="ny-settings__row-actions">
-              <button
-                type="button"
-                className="ny-btn ny-btn--primary"
-                onClick={() => navigate("/login")}
-              >
-                Sign in
-              </button>
-              <button
-                type="button"
-                className="ny-btn ny-btn--ghost"
-                onClick={() => {
-                  exitGuestMode();
-                  navigate("/login", { replace: true });
-                }}
-              >
-                Exit guest mode
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="ny-settings__row">
-            <div>
-              <div className="ny-settings__row-label">Signed in as</div>
-              <div className="ny-settings__row-value">
-                {account?.displayName ?? "—"}{" "}
-                <span className="ny-settings__muted">({account?.email})</span>
-              </div>
-            </div>
-            <div className="ny-settings__row-actions">
-              <button
-                type="button"
-                className="ny-btn ny-btn--ghost"
-                onClick={() => navigate("/account")}
-              >
-                View account
-              </button>
-              <button
-                type="button"
-                className="ny-btn ny-btn--ghost"
-                onClick={() => void handleAccountSignOut()}
-              >
-                Sign out
-              </button>
-            </div>
-          </div>
-        )}
-      </section>
-
-      {/* Appearance */}
-      <section className="ny-settings__section">
-        <h2 className="ny-settings__section-title">Appearance</h2>
-        <div className="ny-settings__pills">
-          {(["dark", "light", "system"] as const).map((m) => (
-            <button
-              type="button"
-              key={m}
-              className={cn("ny-settings__pill", { "is-active": mode === m })}
-              onClick={() => {
-                setMode(m);
-                void patch({ theme: m });
-              }}
-            >
-              {m[0].toUpperCase() + m.slice(1)}
-            </button>
-          ))}
-        </div>
-        <LobbyBannerSettings />
-      </section>
-
-      {/* Drive connection */}
-      <section className="ny-settings__section">
-        <h2 className="ny-settings__section-title">Drive connection</h2>
-        <div className="ny-settings__panel">
-          <ConnectDriveScreen
-            keyConfigured={!!keyConfigured}
-            rootPaired={!!root}
-            rootName={root?.name ?? null}
-            onKeySaved={() => setKeyConfigured(true)}
-          />
-        </div>
-      </section>
-
-      {/* API credentials */}
-      <section className="ny-settings__section">
-        <h2 className="ny-settings__section-title">API credentials</h2>
-        <div className="ny-settings__panel">
-          <ApiConfigPanel />
-        </div>
-      </section>
-
-      {/* Subtitles */}
-      <section className="ny-settings__section">
-        <h2 className="ny-settings__section-title">Subtitle typography</h2>
-        <div className="ny-settings__panel">
-          <SubtitleConfigPanel />
-        </div>
-      </section>
-      </div>
-  );
-}
 
 interface CropOffset {
   x: number;
@@ -190,7 +30,7 @@ interface ImageSize {
   height: number;
 }
 
-function LobbyBannerSettings() {
+export function LobbyBannerSettings() {
   const settings = useSettingsStore((s) => s.settings);
   const patch = useSettingsStore((s) => s.patch);
   const frameRef = useRef<HTMLDivElement | null>(null);
@@ -350,8 +190,8 @@ function LobbyBannerSettings() {
     <section className="ny-banner-setting" aria-label="Lobby Banner">
       <div className="ny-banner-setting__header">
         <div>
-          <div className="ny-settings__row-label">Lobby Banner</div>
-          <div className="ny-settings__row-value">
+          <div className="ny-ac__row-label">Lobby Banner</div>
+          <div className="ny-ac__row-sub">
             {hasCustomBanner ? "Custom image active" : "Using default image"}
           </div>
         </div>

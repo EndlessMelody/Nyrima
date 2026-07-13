@@ -20,28 +20,36 @@ import { type ReactNode, type RefObject } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import cn from "classnames";
 import {
-  Bell,
   BookOpen,
   BookText,
   Clock3,
   Cloud,
   Download,
+  FileText,
   Film,
   FolderOpen,
   Heart,
   History,
   Home,
   LibraryBig,
+  Moon,
   Music,
   PanelLeftClose,
   PanelLeftOpen,
   Search,
-  Settings,
+  Sun,
   Users,
   type LucideIcon,
 } from "lucide-react";
+import { useAuth } from "@/auth/AuthProvider";
 import { NyrimaMark } from "./NyrimaMark";
 import { UserChip } from "./UserChip";
+import { NotificationsBell } from "./NotificationsBell";
+import { useTheme } from "../providers/AppProviders";
+import { useSettingsStore } from "../stores/settings-store";
+import { useSocialStore } from "../stores/social-store";
+import { useNyrimaRootStore } from "../stores/nyrima-root-store";
+import { useOnlineStatus } from "../hooks/useOnlineStatus";
 import {
   SIDEBAR_NAV_SECTIONS,
   resolveSidebarActiveId,
@@ -107,6 +115,8 @@ const SIDEBAR_ICONS: Record<SidebarNavIcon, LucideIcon> = {
   downloads: Download,
   "google-drive": Cloud,
   "local-folder": FolderOpen,
+  social: Users,
+  posts: FileText,
 };
 
 export function LobbySidebar({
@@ -190,16 +200,15 @@ export function LobbyTopbar({
   query,
   onQueryChange,
   inputRef,
-  unreadCount,
   searchPlaceholder = "Search worlds, anime, movies, music...",
 }: {
   query: string;
   onQueryChange: (query: string) => void;
   inputRef?: RefObject<HTMLInputElement>;
-  unreadCount: number;
   searchPlaceholder?: string;
 }) {
   const navigate = useNavigate();
+  const unreadCount = useSocialStore((s) => s.unreadCount);
   return (
     <header className="ny-command-bar">
       <label className="ny-command-bar__search" aria-label="Search your library">
@@ -222,18 +231,8 @@ export function LobbyTopbar({
       </label>
 
       <div className="ny-command-bar__actions">
-        <span className="ny-command-bar__status" aria-hidden="true">
-          <span className="ny-command-bar__status-dot" />
-          Every World, One Archive <i>//</i> Nyrima Online
-        </span>
-        <button
-          type="button"
-          className="ny-command-bar__action"
-          onClick={() => navigate("/app")}
-        >
-          <LibraryBig />
-          <span>Libraries</span>
-        </button>
+        <ConnectionStatus />
+        <ThemeToggleButton />
         <button
           type="button"
           className="ny-command-bar__action"
@@ -250,26 +249,70 @@ export function LobbyTopbar({
             </span>
           )}
         </button>
-        <button
-          type="button"
-          className="ny-command-bar__action"
-          onClick={() => navigate("/settings")}
-        >
-          <Settings />
-          <span>Settings</span>
-        </button>
-        <button
-          type="button"
-          className="ny-command-bar__icon"
-          onClick={() => navigate("/social")}
-          aria-label="Notifications"
-          title="Notifications"
-        >
-          <Bell />
-          {unreadCount > 0 && <span className="ny-command-bar__dot" />}
-        </button>
+        <NotificationsBell />
         <UserChip />
       </div>
     </header>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ThemeToggleButton — one-click dark/light flip. Deterministic by design: a
+// topbar toggle needs a single obvious next state, so it always resolves to
+// an explicit light/dark. "System" stays available in UserCenter + Appearance.
+// ---------------------------------------------------------------------------
+
+function ThemeToggleButton() {
+  const { resolved, setMode } = useTheme();
+  const patch = useSettingsStore((s) => s.patch);
+  const next = resolved === "dark" ? "light" : "dark";
+  return (
+    <button
+      type="button"
+      className="ny-command-bar__icon"
+      onClick={() => {
+        setMode(next);
+        void patch({ theme: next });
+      }}
+      aria-label={`Switch to ${next} theme`}
+      title={`Switch to ${next} theme`}
+    >
+      {resolved === "dark" ? <Sun /> : <Moon />}
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ConnectionStatus — replaces the old static "Nyrima Online" engraving with
+// the actual guest / offline / Drive-connection state.
+// ---------------------------------------------------------------------------
+
+function ConnectionStatus() {
+  const { status } = useAuth();
+  const isOnline = useOnlineStatus();
+  const root = useNyrimaRootStore((s) => s.root);
+  const rootError = useNyrimaRootStore((s) => s.rootError);
+
+  let tone: "ok" | "warn" | "off";
+  let label: string;
+  if (status === "guest") {
+    tone = "warn";
+    label = "Guest Mode";
+  } else if (!isOnline) {
+    tone = "off";
+    label = "Offline";
+  } else if (root && !rootError) {
+    tone = "ok";
+    label = `Drive Connected · ${root.name}`;
+  } else {
+    tone = "off";
+    label = "Drive Not Connected";
+  }
+
+  return (
+    <span className={`ny-command-bar__status ny-command-bar__status--${tone}`} aria-hidden="true">
+      <span className="ny-command-bar__status-dot" />
+      {label}
+    </span>
   );
 }

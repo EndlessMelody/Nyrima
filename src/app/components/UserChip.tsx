@@ -7,12 +7,16 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useAuth } from "@/auth/AuthProvider";
 import { getUserProfile } from "../services/user-profile";
+import { useSettingsStore } from "../stores/settings-store";
 import { UserCenter } from "./UserCenter";
 import type { UserProfile } from "@shared/types";
 import "./UserChip.scss";
 
 export function UserChip() {
+  const { account } = useAuth();
+  const settings = useSettingsStore((s) => s.settings);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [open, setOpen] = useState(false);
   const chipRef = useRef<HTMLButtonElement>(null);
@@ -58,8 +62,10 @@ export function UserChip() {
 
   const toggle = useCallback(() => setOpen((v) => !v), []);
 
-  const initial = profile?.name?.[0]?.toUpperCase() ?? "G";
-  const displayName = profile?.name ?? "Guest";
+  const displayName =
+    settings.profileNickname || account?.displayName || profile?.name || "Guest";
+  const avatarUrl = settings.profileAvatarDataUrl ?? profile?.picture;
+  const initial = displayName[0]?.toUpperCase() ?? "G";
 
   return (
     <div className="dc-user-chip-wrap">
@@ -71,10 +77,10 @@ export function UserChip() {
         aria-label="Open user menu"
         aria-expanded={open}
       >
-        {profile?.picture ? (
+        {avatarUrl ? (
           <img
             className="dc-user-chip__avatar"
-            src={profile.picture}
+            src={avatarUrl}
             alt=""
             referrerPolicy="no-referrer"
           />
@@ -87,11 +93,7 @@ export function UserChip() {
 
       {open && (
         <div ref={panelRef}>
-          <UserCenter
-            profile={profile}
-            onClose={() => setOpen(false)}
-            onProfileChange={setProfile}
-          />
+          <UserCenter profile={profile} onClose={() => setOpen(false)} />
         </div>
       )}
     </div>

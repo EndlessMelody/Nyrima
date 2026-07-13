@@ -1,0 +1,128 @@
+.ny-shortcuts-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--page-background) 60%, transparent);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  padding: 24px;
+}
+
+.ny-shortcuts-overlay__card {
+  width: min(420px, 100%);
+  max-height: min(560px, 90vh);
+  overflow-y: auto;
+  background: var(--surface-background);
+  border: var(--dc-hairline);
+  border-radius: 14px;
+  box-shadow: 0 24px 64px -24px rgba(0, 0, 0, 0.45);
+  padding: 20px;
+  animation: ny-shortcuts-enter 160ms ease-out both;
+}
+
+@keyframes ny-shortcuts-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.ny-shortcuts-overlay__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+
+  h2 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 650;
+    color: var(--neutral-on-background-strong);
+  }
+}
+
+.ny-shortcuts-overlay__close {
+  appearance: none;
+  border: var(--dc-hairline);
+  background: transparent;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--neutral-on-background-medium);
+
+  svg {
+    width: 13px;
+    height: 13px;
+  }
+
+  &:hover {
+    color: var(--neutral-on-background-strong);
+    background: var(--neutral-alpha-weak);
+  }
+}
+
+.ny-shortcuts-overlay__group h3 {
+  margin: 0 0 8px;
+  font-family: var(--dc-font-mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--neutral-on-background-weak);
+}
+
+.ny-shortcuts-overlay__group dl {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ny-shortcuts-overlay__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--neutral-alpha-weak);
+
+  dt {
+    font-family: var(--dc-font-mono);
+    font-size: 0.6875rem;
+    padding: 3px 7px;
+    border: 1px solid var(--neutral-border-medium);
+    border-radius: 6px;
+    color: var(--neutral-on-background-medium);
+    white-space: nowrap;
+  }
+
+  dd {
+    margin: 0;
+    font-size: 0.8125rem;
+    color: var(--neutral-on-background-medium);
+    text-align: right;
+  }
+}
+
+.ny-shortcuts-overlay__note {
+  margin: 16px 0 0;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--neutral-on-background-weak);
+
+  kbd {
+    font-family: var(--dc-font-mono);
+    padding: 1px 5px;
+    border: 1px solid var(--neutral-border-medium);
+    border-radius: 4px;
+  }
+}
