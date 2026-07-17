@@ -90,7 +90,9 @@
 .lvn-hud-panel::before,
 .lvn-hud-panel::after,
 .lvn-choice__option::before,
-.lvn-choice__option::after {
+.lvn-choice__option::after,
+.lvn-index__card::before,
+.lvn-index__card::after {
   content: "";
   position: absolute;
   width: 14px;
@@ -104,7 +106,8 @@
 .lvn-dialogue::before,
 .lvn-panel::before,
 .lvn-hud-panel::before,
-.lvn-choice__option::before {
+.lvn-choice__option::before,
+.lvn-index__card::before {
   top: 0;
   left: 0;
   border-right: 0;
@@ -114,7 +117,8 @@
 .lvn-dialogue::after,
 .lvn-panel::after,
 .lvn-hud-panel::after,
-.lvn-choice__option::after {
+.lvn-choice__option::after,
+.lvn-index__card::after {
   bottom: 0;
   right: 0;
   border-left: 0;
@@ -366,12 +370,17 @@
   align-items: center;
   gap: 10px;
   min-height: var(--lvn-topbar-height);
-  padding: 0 15px 0 12px;
+  padding: 0 16px 0 12px;
   border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.24);
+  /* Gradient-ring border — the padding-box layers paint the glass fill, the
+   * border-box layer paints a thin pink→cyan ring lifted straight from the
+   * app-mark gradient, so the lockup reads as the same brand object as the
+   * logo rather than a generic frosted pill. */
+  border: 1px solid transparent;
   background:
-    linear-gradient(135deg, rgba(255, 85, 207, 0.28), rgba(255, 85, 207, 0.16)),
-    linear-gradient(180deg, rgba(20, 28, 58, 0.52), rgba(8, 12, 32, 0.58));
+    linear-gradient(135deg, rgba(255, 85, 207, 0.26), rgba(91, 200, 232, 0.14)) padding-box,
+    linear-gradient(180deg, rgba(20, 28, 58, 0.62), rgba(8, 12, 32, 0.74)) padding-box,
+    linear-gradient(120deg, #ff4fd8, #5bc8e8) border-box;
   backdrop-filter: blur(18px) saturate(150%);
   -webkit-backdrop-filter: blur(18px) saturate(150%);
   font-family: var(--ny-font-display);
@@ -386,7 +395,74 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.32),
     inset 0 -1px 0 rgba(255, 85, 207, 0.16),
     0 12px 30px rgba(0, 0, 0, 0.28),
-    0 0 24px rgba(255, 85, 207, 0.16);
+    0 0 24px rgba(255, 85, 207, 0.22);
+}
+
+/* Bespoke corner ticks, scaled down from the shared 14px HUD size — the pill
+ * is much shorter than a panel/dialogue box, so the standard ticks would
+ * swallow it. */
+.lvn-brand::before,
+.lvn-brand::after {
+  content: "";
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  pointer-events: none;
+  border: 1.5px solid rgba(255, 255, 255, 0.65);
+  opacity: 0.9;
+  z-index: 1;
+}
+.lvn-brand::before {
+  top: 3px;
+  left: 3px;
+  border-right: 0;
+  border-bottom: 0;
+}
+.lvn-brand::after {
+  bottom: 3px;
+  right: 3px;
+  border-left: 0;
+  border-top: 0;
+}
+
+/* Small "system-live" pulse — a quiet techno cue that this is a running HUD,
+ * not a static logo lockup. */
+.lvn-brand__pulse {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 1px;
+  border-radius: 50%;
+  background: var(--ny-cyan);
+  box-shadow: 0 0 8px 1px rgba(91, 200, 232, 0.85);
+  animation: lvn-brand-pulse 2.4s ease-in-out infinite;
+}
+@keyframes lvn-brand-pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lvn-brand__pulse {
+    animation: none;
+  }
+}
+
+/* Brand-name lockup — shared `.ny-wordmark` treatment (fonts.scss). The
+   landing hero is always dark, so re-assert the Midnight gradient, and
+   drop the pill's text-shadow (it would render through gradient-clipped
+   transparent glyphs). */
+.lvn-brand .ny-wordmark {
+  --wordmark-gradient: linear-gradient(92deg, #ff4fd8 10%, #5bc8e8 90%);
+  --wordmark-glow: drop-shadow(0 0 10px rgba(255, 79, 216, 0.35));
+  font-size: 17px;
+  text-shadow: none;
 }
 
 .lvn-topbar__actions {
@@ -1272,14 +1348,19 @@
   padding: 17px 20px;
   overflow: hidden;
   border-radius: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  /* Base panel gradient plus a diagonal cyan sweep layer that slides across
-   * on hover/focus — a HUD "scan" cue. */
-  background-image: linear-gradient(120deg, transparent 35%, rgba(91, 200, 232, 0.16) 50%, transparent 65%),
-    linear-gradient(180deg, rgba(22, 24, 44, 0.46), rgba(7, 9, 15, 0.62));
+  /* Per-chapter accent (assigned below) drives the icon, number, watermark
+   * and hover glow, so the grid reads as four distinct brand-colored chapter
+   * plates instead of four identical gray boxes. */
+  --chapter-accent: var(--ny-cyan);
+  border: 1px solid color-mix(in srgb, var(--chapter-accent) 30%, rgba(255, 255, 255, 0.14));
+  /* Base panel gradient, a faint accent-tinted bloom in the corner, plus a
+   * diagonal sweep layer that slides across on hover/focus — a HUD "scan" cue. */
+  background-image: linear-gradient(120deg, transparent 35%, color-mix(in srgb, var(--chapter-accent) 30%, transparent) 50%, transparent 65%),
+    radial-gradient(120% 90% at 100% 0%, color-mix(in srgb, var(--chapter-accent) 16%, transparent), transparent 60%),
+    linear-gradient(180deg, rgba(26, 22, 40, 0.5), rgba(8, 8, 16, 0.66));
   background-repeat: no-repeat;
-  background-size: 220% 100%, 100% 100%;
-  background-position: 150% 0, 0 0;
+  background-size: 220% 100%, 100% 100%, 100% 100%;
+  background-position: 150% 0, 0 0, 0 0;
   backdrop-filter: blur(16px) saturate(150%);
   -webkit-backdrop-filter: blur(16px) saturate(150%);
   color: #fff;
@@ -1290,36 +1371,43 @@
   animation: lvn-rise var(--motion-reveal-short) var(--motion-ease-out) both;
 }
 .lvn-index li:nth-child(1) .lvn-index__card {
+  --chapter-accent: var(--ny-pink);
   animation-delay: 50ms;
 }
 .lvn-index li:nth-child(2) .lvn-index__card {
+  --chapter-accent: var(--ny-cyan);
   animation-delay: 120ms;
 }
 .lvn-index li:nth-child(3) .lvn-index__card {
+  --chapter-accent: var(--ny-mint);
   animation-delay: 190ms;
 }
 .lvn-index li:nth-child(4) .lvn-index__card {
+  --chapter-accent: var(--ny-amber);
   animation-delay: 260ms;
+}
+.lvn-index__card::before,
+.lvn-index__card::after {
+  border-color: color-mix(in srgb, var(--chapter-accent) 70%, var(--lvn-hud-line));
 }
 .lvn-index__card:hover,
 .lvn-index__card:focus-visible {
-  border-color: rgba(91, 200, 232, 0.55);
-  background-image: linear-gradient(120deg, transparent 35%, rgba(91, 200, 232, 0.22) 50%, transparent 65%),
-    linear-gradient(180deg, rgba(34, 38, 66, 0.72), rgba(10, 12, 20, 0.8));
-  background-position: -50% 0, 0 0;
+  border-color: color-mix(in srgb, var(--chapter-accent) 65%, transparent);
+  background-position: -50% 0, 0 0, 0 0;
   transform: translateY(-3px);
   box-shadow: 0 20px 42px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.16),
-    0 0 0 1px rgba(91, 200, 232, 0.25), 0 0 24px rgba(91, 200, 232, 0.18);
+    0 0 0 1px color-mix(in srgb, var(--chapter-accent) 35%, transparent),
+    0 0 26px color-mix(in srgb, var(--chapter-accent) 30%, transparent);
 }
 .lvn-index__card:hover .lvn-index__icon,
 .lvn-index__card:focus-visible .lvn-index__icon {
-  border-color: rgba(91, 200, 232, 0.5);
-  background: radial-gradient(circle at 30% 25%, rgba(91, 200, 232, 0.5), transparent);
+  border-color: color-mix(in srgb, var(--chapter-accent) 60%, transparent);
+  background: radial-gradient(circle at 30% 25%, color-mix(in srgb, var(--chapter-accent) 55%, transparent), transparent);
 }
 .lvn-index__card:hover .lvn-index__num,
 .lvn-index__card:focus-visible .lvn-index__num {
   color: #fff;
-  text-shadow: 0 0 10px rgba(91, 200, 232, 0.6);
+  text-shadow: 0 0 10px color-mix(in srgb, var(--chapter-accent) 70%, transparent);
 }
 .lvn-index__card.is-seen .lvn-index__desc {
   opacity: 0.8;
@@ -1333,14 +1421,14 @@
   gap: 4px;
   padding: 3px 8px;
   border-radius: 9999px;
-  border: 1px solid rgba(91, 200, 232, 0.35);
-  background: rgba(91, 200, 232, 0.08);
+  border: 1px solid color-mix(in srgb, var(--chapter-accent) 45%, transparent);
+  background: color-mix(in srgb, var(--chapter-accent) 12%, transparent);
   font-family: var(--ny-font-mono);
   font-size: 9px;
   font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--ny-cyan);
+  color: color-mix(in srgb, var(--chapter-accent) 85%, var(--ny-cyan));
   pointer-events: none;
   z-index: 2;
 }
@@ -1352,7 +1440,7 @@
   font-weight: 700;
   font-size: 78px;
   line-height: 1;
-  color: rgba(255, 255, 255, 0.06);
+  color: color-mix(in srgb, var(--chapter-accent) 10%, transparent);
   pointer-events: none;
 }
 .lvn-index__icon {
@@ -1363,9 +1451,10 @@
   width: 52px;
   height: 52px;
   border-radius: 15px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: radial-gradient(circle at 30% 25%, rgba(255, 85, 207, 0.36), transparent);
+  border: 1px solid color-mix(in srgb, var(--chapter-accent) 40%, rgba(255, 255, 255, 0.16));
+  background: radial-gradient(circle at 30% 25%, color-mix(in srgb, var(--chapter-accent) 42%, transparent), transparent);
   color: #fff;
+  transition: border-color var(--motion-micro) ease, background var(--motion-micro) ease;
 }
 .lvn-index__num {
   grid-area: num;
@@ -1374,7 +1463,7 @@
   font-size: 11px;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--ny-cyan);
+  color: color-mix(in srgb, var(--chapter-accent) 80%, var(--ny-cyan));
 }
 .lvn-index__title {
   grid-area: title;
@@ -1438,11 +1527,19 @@
   color: var(--ny-ink);
 }
 
-/* Center zone — flexes to fill the gap, clips overflow, and fades both edges so
- * extra tabs read as "there is more to scroll". The inner rail is max-content
- * and auto-centred: centred when the tabs fit, horizontally scrollable (with
- * the edge fade) when a chapter has more tabs than fit on the line. */
+/* Center zone — flexes to fill the gap. `.lvn-tabs__scroll` clips overflow and
+ * fades both edges so extra tabs read as "there is more to scroll"; the
+ * chevron nav buttons live OUTSIDE that masked/scrolling element (as plain
+ * flex siblings) so the mask never dims them and they never scroll away. */
 .lvn-header__tabs {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.lvn-tabs__scroll {
   flex: 1 1 auto;
   min-width: 0;
   overflow-x: auto;
@@ -1453,7 +1550,37 @@
   -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
   mask-image: linear-gradient(90deg, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
 }
-.lvn-header__tabs::-webkit-scrollbar {
+.lvn-tabs__scroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* Chevron scroll affordance — only rendered/enabled when the rail actually
+ * overflows in that direction; otherwise collapsed out of the layout so a
+ * chapter with few topics still reads as perfectly centred, unbuttoned. */
+.lvn-tabs__nav {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(91, 200, 232, 0.4);
+  background: rgba(10, 14, 26, 0.6);
+  color: var(--ny-cyan);
+  cursor: pointer;
+  transition: border-color var(--motion-micro) ease, background var(--motion-micro) ease,
+    color var(--motion-micro) ease, transform var(--motion-micro) ease;
+}
+.lvn-tabs__nav:hover {
+  color: #fff;
+  border-color: rgba(91, 200, 232, 0.75);
+  background: rgba(91, 200, 232, 0.16);
+}
+.lvn-tabs__nav:active {
+  transform: scale(0.92);
+}
+.lvn-tabs__nav[disabled] {
   display: none;
 }
 
