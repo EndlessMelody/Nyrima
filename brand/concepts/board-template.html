@@ -1,0 +1,342 @@
+<title>Nyrima — Logo Concepts</title>
+<style>
+  @font-face {
+    font-family: "Audiowide";
+    src: url("%AUDIOWIDE%") format("woff2");
+    font-weight: 400;
+    font-display: block;
+  }
+  @font-face {
+    font-family: "Chakra Petch";
+    src: url("%CHAKRA%") format("woff2");
+    font-weight: 600;
+    font-display: block;
+  }
+  @font-face {
+    font-family: "Geist Sans";
+    src: url("%GEIST%") format("woff2");
+    font-weight: 400;
+    font-display: block;
+  }
+
+  /* Deck commits to one dark presentation canvas — a brand board, not an app. */
+  :root {
+    --canvas: #101218;
+    --ink: #070812;
+    --pearl: #f6f5fa;
+    --pink: #ff4fd8;
+    --cyan: #5bc8e8;
+    --label: rgba(244, 243, 252, 0.52);
+    --line: rgba(244, 243, 252, 0.1);
+    --panel-r: 14px;
+  }
+
+  * { box-sizing: border-box; margin: 0; }
+
+  body {
+    background: var(--canvas);
+    color: var(--pearl);
+    font-family: "Geist Sans", system-ui, sans-serif;
+    padding: clamp(20px, 4vw, 56px);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .deck {
+    max-width: 1060px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: clamp(28px, 4vw, 48px);
+  }
+
+  /* ── deck header ─────────────────────────────────────────── */
+  .masthead {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 18px;
+  }
+  .masthead h1 {
+    font-family: "Chakra Petch", sans-serif;
+    font-size: clamp(1.1rem, 2.4vw, 1.5rem);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .masthead h1 em {
+    font-style: normal;
+    color: var(--pink);
+  }
+  .masthead .meta {
+    font-family: "Chakra Petch", sans-serif;
+    font-size: 0.66rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--label);
+    white-space: nowrap;
+  }
+
+  .label {
+    font-family: "Chakra Petch", sans-serif;
+    font-size: 0.62rem;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--label);
+  }
+
+  /* ── direction section ───────────────────────────────────── */
+  section.direction { display: flex; flex-direction: column; gap: 14px; }
+
+  .direction-head {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+  }
+  .direction-head .no {
+    font-family: "Chakra Petch", sans-serif;
+    font-size: 0.8rem;
+    color: var(--pink);
+    letter-spacing: 0.1em;
+  }
+  .direction-head h2 {
+    font-family: "Chakra Petch", sans-serif;
+    font-size: clamp(1rem, 2vw, 1.25rem);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .direction-head p {
+    margin-left: auto;
+    font-size: 0.8rem;
+    color: var(--label);
+    max-width: 44ch;
+    text-align: right;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    grid-auto-rows: 118px;
+    gap: 10px;
+  }
+  @media (max-width: 760px) {
+    .grid { grid-template-columns: repeat(3, 1fr); }
+  }
+
+  .panel {
+    position: relative;
+    border-radius: var(--panel-r);
+    border: 1px solid var(--line);
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    background: var(--ink);
+  }
+  .panel .tag {
+    position: absolute;
+    left: 12px;
+    bottom: 9px;
+    font-family: "Chakra Petch", sans-serif;
+    font-size: 0.56rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--label);
+    pointer-events: none;
+  }
+  .panel.on-pearl { background: var(--pearl); }
+  .panel.on-pearl .tag { color: rgba(11, 13, 26, 0.45); }
+
+  .panel svg { display: block; }
+
+  /* cover: mark large on ink */
+  .cover { grid-column: span 3; grid-row: span 3; }
+  .cover svg { width: 62%; height: auto; }
+
+  /* pearl tile */
+  .pearl-tile { grid-column: span 3; grid-row: span 2; }
+  .pearl-tile svg { width: 34%; height: auto; }
+
+  /* app icon tile — squircle-ish mask on ink gradient */
+  .appicon { grid-column: span 1; grid-row: span 1; background: transparent; border: 0; }
+  .appicon .tile {
+    width: 82px;
+    height: 82px;
+    border-radius: 20px;
+    background: radial-gradient(120% 120% at 20% 15%, #131735 0%, var(--ink) 60%);
+    border: 1px solid rgba(244, 243, 252, 0.14);
+    display: grid;
+    place-items: center;
+  }
+  .appicon .tile svg { width: 72%; }
+
+  /* favicon strip — true 16 & 32 px renders */
+  .favicons { grid-column: span 2; grid-row: span 1; }
+  .fav-row { display: flex; align-items: center; gap: 18px; }
+  .fav-row .fav { display: grid; place-items: center; gap: 6px; }
+  .fav svg { image-rendering: auto; }
+  .fav span {
+    font-family: "Chakra Petch", sans-serif;
+    font-size: 0.55rem;
+    letter-spacing: 0.16em;
+    color: var(--label);
+  }
+
+  /* lockup — mark + Audiowide gradient wordmark */
+  .lockup { grid-column: span 4; grid-row: span 2; }
+  .lockup .row { display: flex; align-items: center; gap: 22px; }
+  .lockup .row > svg { width: 74px; height: 74px; flex: 0 0 auto; }
+  .wordmark {
+    font-family: "Audiowide", "Chakra Petch", sans-serif;
+    font-size: clamp(2rem, 5.4vw, 3.4rem);
+    letter-spacing: 0.02em;
+    background-image: linear-gradient(92deg, var(--pink) 10%, var(--cyan) 90%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    filter: drop-shadow(0 0 14px rgba(255, 79, 216, 0.35));
+  }
+
+  /* flat variants */
+  .flats { grid-column: span 2; grid-row: span 2; }
+  .flats .row { display: flex; gap: 14px; align-items: center; }
+  .flats .chip {
+    width: 74px;
+    height: 74px;
+    border-radius: 12px;
+    display: grid;
+    place-items: center;
+  }
+  .flats .chip.dark { background: var(--ink); border: 1px solid var(--line); }
+  .flats .chip.light { background: var(--pearl); }
+  .flats .chip svg { width: 70%; }
+
+  /* ── shared system strip ─────────────────────────────────── */
+  .system {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 10px;
+  }
+  @media (max-width: 760px) {
+    .system { grid-template-columns: repeat(3, 1fr); }
+  }
+  .system .panel { min-height: 150px; padding: 18px; place-items: start; }
+
+  .type-panel { grid-column: span 4; display: flex; flex-direction: column; gap: 10px; justify-content: center; }
+  .type-panel .spec-display {
+    font-family: "Chakra Petch", sans-serif;
+    font-size: 1.5rem;
+    letter-spacing: 0.03em;
+  }
+  .type-panel .spec-word {
+    font-family: "Audiowide", sans-serif;
+    font-size: 1.35rem;
+    color: var(--pink);
+  }
+  .type-panel .spec-body { font-size: 0.85rem; color: var(--label); max-width: 52ch; }
+
+  .palette { grid-column: span 2; display: flex; flex-direction: column; gap: 8px; justify-content: center; }
+  .swatch { display: flex; align-items: center; gap: 10px; font-family: "Chakra Petch", sans-serif; font-size: 0.62rem; letter-spacing: 0.14em; color: var(--label); }
+  .swatch i { width: 30px; height: 18px; border-radius: 5px; border: 1px solid var(--line); }
+
+  footer {
+    display: flex;
+    justify-content: space-between;
+    border-top: 1px solid var(--line);
+    padding-top: 14px;
+  }
+</style>
+
+<div class="deck">
+  <header class="masthead">
+    <h1>Nyrima<em>.</em> Logo Concepts</h1>
+    <span class="meta">Neon Arcade — Identity Round 01</span>
+  </header>
+
+  <!-- ═══ Direction 01 ═══ -->
+  <section class="direction">
+    <div class="direction-head">
+      <span class="no">01</span>
+      <h2>Neon Cat, Evolved</h2>
+      <p>The cat-N you already own, rebuilt as clean geometry — ear notches in the slab, one curled tail, pink→cyan tube light.</p>
+    </div>
+    <div class="grid">
+      <div class="panel cover">%SVG1%<span class="tag">Primary · Midnight</span></div>
+      <div class="panel pearl-tile on-pearl">%FLAT1_INK%<span class="tag">On Pearl</span></div>
+      <div class="panel favicons">
+        <div class="fav-row">
+          <div class="fav"><span style="width:16px;height:16px;display:block">%SVG1%</span><span>16</span></div>
+          <div class="fav"><span style="width:32px;height:32px;display:block">%SVG1%</span><span>32</span></div>
+          <div class="fav"><span style="width:48px;height:48px;display:block">%SVG1%</span><span>48</span></div>
+        </div>
+        <span class="tag">Favicon</span>
+      </div>
+      <div class="panel appicon"><div class="tile">%SVG1%</div></div>
+      <div class="panel lockup">
+        <div class="row">%SVG1%<span class="wordmark">Nyrima</span></div>
+        <span class="tag">Lockup · Audiowide</span>
+      </div>
+      <div class="panel flats">
+        <div class="row">
+          <div class="chip dark">%FLAT1_LIGHT%</div>
+          <div class="chip light">%FLAT1_INK%</div>
+        </div>
+        <span class="tag">Flat / One-color</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Direction 02 ═══ -->
+  <section class="direction">
+    <div class="direction-head">
+      <span class="no">02</span>
+      <h2>Arcade Marquee</h2>
+      <p>No mascot — a hard geometric N cut like a cabinet marquee, with the play triangle punched out of the right stem as negative space.</p>
+    </div>
+    <div class="grid">
+      <div class="panel cover">%SVG2%<span class="tag">Primary · Midnight</span></div>
+      <div class="panel pearl-tile on-pearl">%FLAT2_INK%<span class="tag">On Pearl</span></div>
+      <div class="panel favicons">
+        <div class="fav-row">
+          <div class="fav"><span style="width:16px;height:16px;display:block">%SVG2%</span><span>16</span></div>
+          <div class="fav"><span style="width:32px;height:32px;display:block">%SVG2%</span><span>32</span></div>
+          <div class="fav"><span style="width:48px;height:48px;display:block">%SVG2%</span><span>48</span></div>
+        </div>
+        <span class="tag">Favicon</span>
+      </div>
+      <div class="panel appicon"><div class="tile">%SVG2%</div></div>
+      <div class="panel lockup">
+        <div class="row">%SVG2%<span class="wordmark">Nyrima</span></div>
+        <span class="tag">Lockup · Audiowide</span>
+      </div>
+      <div class="panel flats">
+        <div class="row">
+          <div class="chip dark">%FLAT2_LIGHT%</div>
+          <div class="chip light">%FLAT2_INK%</div>
+        </div>
+        <span class="tag">Flat / One-color</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Shared system ═══ -->
+  <section class="system">
+    <div class="panel type-panel">
+      <span class="label">Type System</span>
+      <span class="spec-word">Audiowide — the marquee. Wordmark only.</span>
+      <span class="spec-display">Chakra Petch — display. Titles &amp; section heads.</span>
+      <span class="spec-body">Geist Sans stays as the body voice; Geist Mono stays demoted to data. The pink→cyan gradient lives on the wordmark and nowhere else — one lamp, one sign.</span>
+    </div>
+    <div class="panel palette">
+      <span class="label">Palette</span>
+      <span class="swatch"><i style="background:#ff4fd8"></i>FF4FD8 · Lamp Pink</span>
+      <span class="swatch"><i style="background:#5bc8e8"></i>5BC8E8 · Signal Cyan</span>
+      <span class="swatch"><i style="background:#070812"></i>070812 · Ink</span>
+      <span class="swatch"><i style="background:#f6f5fa"></i>F6F5FA · Pearl</span>
+    </div>
+  </section>
+
+  <footer>
+    <span class="label">Nyrima · Personal Anime Cinema</span>
+    <span class="label">BRAND / 01</span>
+  </footer>
+</div>

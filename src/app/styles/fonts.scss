@@ -2,16 +2,16 @@
  * Typography tokens — "Neon, One Lamp" type system.
  *
  * Six voices, each with one job:
- *   - Display (Bricolage Grotesque): page titles, hero headlines, section
- *     heads. A characterful ink-trap grotesque — the personality of the
- *     system. Weights 500–700, tight tracking.
+ *   - Display (Chakra Petch): page titles, hero headlines, section heads.
+ *     A squared, techy face — the "neon arcade" personality of the system.
+ *     Weights 500–700, tight tracking.
  *   - Body (Geist Sans): all UI text, buttons, nav, descriptions. Clean and
  *     unobtrusive so the display voice can stand out.
  *   - Mono (Geist Mono): DEMOTED to data only — timecodes, file sizes,
  *     codec/resolution badges, kbd hints, IDs/logs. Not for section labels,
  *     buttons, nav, or titles. `.dc-tracker` is the one sanctioned
  *     mono-uppercase pattern; use it sparingly.
- *   - Wordmark (M PLUS Rounded 1c): the "Nyrima" lockup only.
+ *   - Wordmark (Audiowide): the "Nyrima" lockup only, via `.ny-wordmark`.
  *   - Kana (Zen Kaku Gothic): small Japanese accents.
  *   - Subtitle (Chinacat/Asap/Cascadia presets): player content, untouched.
  *
@@ -54,11 +54,11 @@
 }
 
 :root {
-  /* Display: Bricolage Grotesque — the system's headline voice. Falls back
+  /* Display: Chakra Petch — the system's headline voice. Falls back
      through Geist Sans so display elements never wait on a second font
      swap before showing readable text. */
   --dc-font-display:
-    "Bricolage Grotesque Variable", "Geist Sans", "Inter", -apple-system,
+    "Chakra Petch", "Geist Sans", "Inter", -apple-system,
     BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
 
   /* Body: Geist Sans, tabular numerals on by default */
@@ -76,15 +76,14 @@
     "Geist Mono", "Zen Kaku Gothic New", "Hiragino Kaku Gothic ProN",
     "Yu Gothic", sans-serif;
 
-  /* Wordmark: only used for the "Nyrima" lockup in the AppShell topbar (and
-     anywhere else the brand-name lockup repeats). M PLUS Rounded 1c at 800
-     is the iconic chunky-rounded Japanese title face — its heavy strokes
-     carry the animated pink↔cyan gradient + neon drop-shadow halo
-     cleanly. Falls back through the standard sans stack so dev / SSR
-     contexts that haven't loaded the woff2 still render a readable mark. */
+  /* Wordmark: only used for the "Nyrima" lockup (see `.ny-wordmark` below).
+     Audiowide ships a single 400 weight that is inherently bold and wide —
+     its rounded terminals read as neon tubing, which is exactly the arcade
+     marquee the brand wants. Its wide strokes carry the pink↔cyan gradient
+     + neon drop-shadow halo cleanly. Falls back through Chakra Petch so
+     contexts that haven't loaded the woff2 still render a techy mark. */
   --dc-font-wordmark:
-    "M PLUS Rounded 1c", "Zen Kaku Gothic New", "Hiragino Kaku Gothic ProN",
-    "Yu Gothic", system-ui, sans-serif;
+    "Audiowide", "Chakra Petch", system-ui, sans-serif;
 
   /* Subtitle: anime-fansub voice — Chinacat Teddybear is the brush face
      that owns the "Anime Brush" preset; it's bundled locally so the look
@@ -109,4 +108,37 @@
   --font-family-display: var(--dc-font-display);
   --font-family-label: var(--dc-font-body);
   --font-family-code: var(--dc-font-mono);
+}
+
+/* The "Nyrima" lockup — the single sanctioned pink→cyan gradient in the
+   system (see anime-theme.scss hard rule #1). Fixed brand hexes on purpose:
+   the lockup must stay pink↔cyan even when the user switches the UI accent
+   preset (accent-presets.ts rewrites --brand-*, never this). Apply to the
+   brand-name <span> wherever the lockup appears (sidebar, login, landing
+   top bar, splash) instead of restyling it per surface. */
+/* Theme tokens live in :where() so they carry zero specificity — any
+   surface that is always dark regardless of theme (login, landing hero,
+   loading screen) re-asserts the two custom properties with a plain class
+   selector and reliably wins in both themes. */
+:where(.ny-wordmark) {
+  /* Dark-surface (Midnight) values. */
+  --wordmark-gradient: linear-gradient(92deg, #ff4fd8 10%, #5bc8e8 90%);
+  --wordmark-glow: drop-shadow(0 0 10px rgba(255, 79, 216, 0.35));
+}
+
+:where(:root[data-theme="light"] .ny-wordmark) {
+  /* Cyan end darkens toward teal for contrast on pearl surfaces. */
+  --wordmark-gradient: linear-gradient(92deg, #d6149a 10%, #1b8fb8 90%);
+  --wordmark-glow: drop-shadow(0 0 8px rgba(214, 20, 154, 0.18));
+}
+
+.ny-wordmark {
+  font-family: var(--dc-font-wordmark);
+  font-weight: 400; /* Audiowide ships 400 only */
+  letter-spacing: 0.02em;
+  background-image: var(--wordmark-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: var(--wordmark-glow);
 }

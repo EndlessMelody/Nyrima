@@ -63,11 +63,13 @@ import {
 import cn from "classnames";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useNyrimaRootStore } from "../stores/nyrima-root-store";
+import { useAccountCenter } from "../account-center/useAccountCenter";
 import { useOnlineStatus } from "../hooks/useOnlineStatus";
 import { useRecentStore } from "../stores/recent-store";
 import { useSettingsStore } from "../stores/settings-store";
 import { usePlaybackPositions } from "../hooks/usePlaybackPositions";
 import { LibraryCard } from "../components/LibraryCard";
+import { PageLoader } from "../components/PageLoader";
 import { ContinueWatchingRow } from "../components/ContinueWatchingRow";
 import { SetupAccessDialog } from "../components/SetupAccessDialog";
 import { NyrimaRootDialog } from "../components/NyrimaRootDialog";
@@ -84,6 +86,7 @@ import {
 } from "../navigation/sidebar-nav";
 import { hasApiKey } from "../services/api-key";
 import { getOAuthSessionState } from "../services/auth";
+import type { DriveAccessReason } from "../services/errors";
 import { getFileMetadata } from "../services/drive/metadata-service";
 import { formatTimecode } from "../services/formatters";
 import { isInProgress, isWatched } from "../services/storage";
@@ -213,6 +216,9 @@ export function LobbyPage() {
   const [rootDialogOpen, setRootDialogOpen] = useState(false);
   const [keyConfigured, setKeyConfigured] = useState<boolean | null>(null);
   const [oauthActive, setOAuthActive] = useState<boolean | null>(null);
+  // Flips true once the initial `loadRoot()` (persisted-root read) has settled,
+  // so the onboarding gate below doesn't mistake "not loaded yet" for "no root".
+  const [rootChecked, setRootChecked] = useState(false);
   const [positions] = usePlaybackPositions();
   const [continueFile, setContinueFile] = useState<DriveFile | null>(null);
   const [query, setQuery] = useState("");
@@ -246,6 +252,7 @@ export function LobbyPage() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
+  const accountCenter = useAccountCenter();
   const mascotRouteKeyRef = useRef(location.key);
   const isOnline = useOnlineStatus();
   const customBannerUrl = useSettingsStore(
@@ -313,8 +320,14 @@ export function LobbyPage() {
   }, [query]);
 
   useEffect(() => {
-    void loadRoot();
+    let cancelled = false;
+    void loadRoot().finally(() => {
+      if (!cancelled) setRootChecked(true);
+    });
     void loadRecents();
+    return () => {
+      cancelled = true;
+    };
   }, [loadRoot, loadRecents]);
 
   // Auto-refresh the Nyrima scan on a fresh visit so a folder added to Drive
@@ -588,7 +601,14 @@ export function LobbyPage() {
   const hasRoot = !!root;
   const hasLibraries = adaptedFolders.length > 0;
   const driveReady = !!keyConfigured || !!oauthActive;
-  const showFullOnboarding = !driveReady || !hasRoot;
+  // `keyConfigured`/`oauthActive` start out `null` (check not run yet) on every
+  // mount, which `!!` collapses to "not ready" — that briefly forced the full
+  // onboarding screen on every remount, even for an already-connected user
+  // hitting a transient Drive error. Only decide "show onboarding" once both
+  // async checks have actually resolved.
+  const onboardingCheckReady =
+    keyConfigured !== null && oauthActive !== null && rootChecked;
+  const showFullOnboarding = onboardingCheckReady && (!driveReady || !hasRoot);
   const watchedAnything = Object.values(positions).some(
     (p) => p && p.positionSeconds > 5,
   );
@@ -646,6 +666,13 @@ export function LobbyPage() {
   };
 
   // --- Render --------------------------------------------------------------
+  // Drive/root checks haven't resolved yet — render nothing more than a
+  // loader rather than momentarily flashing the full onboarding screen (see
+  // `onboardingCheckReady` above).
+  if (!onboardingCheckReady) {
+    return <PageLoader />;
+  }
+
   // No API key OR no Nyrima root → unified LoginScreen. Replaces the prior
   // WelcomeBlock + SetupAccessDialog + NyrimaRootDialog handoff: every step
   // lives on one surface so the user never wonders which button maps to
@@ -670,8 +697,10 @@ export function LobbyPage() {
       <div className="ny-landing">
         <RootErrorCard
           message={rootError.message}
+          driveReason={rootError.driveReason}
           onPick={() => setRootDialogOpen(true)}
           onRetry={() => void refreshRoot()}
+          onReconnect={() => accountCenter.open("connections")}
         />
         <DashboardDialogs
           rootDialogOpen={rootDialogOpen}
@@ -898,7 +927,7 @@ function Sidebar({
           aria-label="Go to Nyrima home"
         >
           <NyrimaMark size="header" />
-          <span className="ny-sidebar__wordmark">Nyrima</span>
+          <span className="ny-sidebar__wordmark ny-wordmark">Nyrima</span>
         </button>
         <button
           type="button"
@@ -2009,13 +2038,42 @@ function EmptyShelf({
 
 function RootErrorCard({
   message,
+  driveReason,
   onPick,
   onRetry,
+  onReconnect,
 }: {
   message: string;
+  driveReason?: DriveAccessReason;
   onPick: () => void;
   onRetry: () => void;
+  onReconnect: () => void;
 }) {
+  // An expired/missing Drive token isn't a folder problem — "pick a different
+  // folder" and "try again" both dead-end, since retrying just repeats the
+  // same failing auth check. Send the user straight to the reconnect step
+  // instead of leaving them stuck rereading this card.
+  const isAuthIssue = driveReason === "needs-oauth" || driveReason === "auth-required";
+
+  if (isAuthIssue) {
+    return (
+      <Column gap="12" padding="24" radius="l" background="surface">
+        <Text variant="display-strong-s">Drive connection expired</Text>
+        <Text variant="body-default-s" onBackground="neutral-weak">
+          {message}
+        </Text>
+        <Row gap="8">
+          <Button variant="primary" onClick={onReconnect}>
+            Reconnect Google Drive
+          </Button>
+          <Button variant="tertiary" onClick={onRetry}>
+            Try again
+          </Button>
+        </Row>
+      </Column>
+    );
+  }
+
   return (
     <Column gap="12" padding="24" radius="l" background="surface">
       <Text variant="display-strong-s">Nyrima folder unreachable</Text>

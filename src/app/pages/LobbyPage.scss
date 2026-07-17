@@ -95,14 +95,12 @@
   border-radius: 12px;
 }
 
+/* Font/gradient/color come from the shared `.ny-wordmark` class (fonts.scss);
+   this block only keeps the sidebar collapse behavior. */
 .ny-sidebar__wordmark {
   min-width: 0;
   overflow: hidden;
-  font-family: var(--dc-font-wordmark);
-  font-size: 1.05rem;
-  font-weight: 800;
-  letter-spacing: 0;
-  color: var(--brand-on-background-strong);
+  font-size: 1rem;
   white-space: nowrap;
   transition:
     max-width 210ms ease,
@@ -328,7 +326,6 @@
   position: sticky;
   top: 0;
   z-index: 20;
-  overflow: hidden;
   isolation: isolate;
   // Fixed height shared with the sidebar brand row so the search sits on the
   // same line as the logo + collapse toggle.

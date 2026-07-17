@@ -26,6 +26,9 @@
  * Hard rules enforced by this file:
  *   1. No linear-gradient between --brand-* and --accent-*. Primary buttons
  *      are solid pink, flat; hover brightens to a single lighter pink.
+ *      Single sanctioned exception: the `.ny-wordmark` brand lockup
+ *      (fonts.scss) carries the signature pink→cyan gradient — nothing
+ *      else does.
  *   2. No hex-grid background, no dual radial blooms. Page background is a
  *      faint film-grain texture plus ONE low-alpha pink bloom (top-left).
  *   3. Glow is reserved for interactive light: focus rings and
@@ -328,7 +331,7 @@ body::before {
   );
 }
 
-/* Headings wear the display font (Bricolage Grotesque) with tight,
+/* Headings wear the display font (Chakra Petch) with tight,
    premium tracking — the system's headline voice. */
 h1,
 h2,

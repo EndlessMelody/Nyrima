@@ -114,14 +114,12 @@
   }
 }
 
+/* Font/gradient/glow come from the shared `.ny-wordmark` class (fonts.scss). */
 .watch-room-header__brand {
   display: flex;
   align-items: center;
   gap: 9px;
-  font-family: var(--dc-font-wordmark);
   font-size: 1rem;
-  font-weight: 800;
-  color: var(--brand-on-background-strong);
 }
 
 .watch-room-header__title {

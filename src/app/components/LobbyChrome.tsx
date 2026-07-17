@@ -143,7 +143,7 @@ export function LobbySidebar({
           aria-label="Go to Nyrima home"
         >
           <NyrimaMark size="header" />
-          <span className="ny-sidebar__wordmark">Nyrima</span>
+          <span className="ny-sidebar__wordmark ny-wordmark">Nyrima</span>
         </button>
         <button
           type="button"

@@ -140,14 +140,11 @@
   flex-shrink: 0;
 }
 
+/* Font/gradient/glow come from the shared `.ny-wordmark` class (fonts.scss). */
 .music-player-header__brand {
   gap: 9px;
   min-width: 0;
-  font-family: var(--dc-font-wordmark);
   font-size: 1rem;
-  font-weight: 800;
-  color: var(--brand-on-background-strong);
-  text-shadow: 0 0 18px rgba(255, 79, 216, 0.38);
 }
 
 .music-player-header__title {
