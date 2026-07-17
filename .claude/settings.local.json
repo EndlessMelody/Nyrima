@@ -33,7 +33,8 @@
       "Bash(sed -i 's|@/landing/landing-vn/mascotArt|@/landing/mascotArt|' src/pages/login-page-content.ts src/pages/LoginPage.tsx)",
       "Bash(sed -i 's|\\(see landing-vn/mascotArt\\)|\\(see landing/mascotArt\\)|' src/pages/login-page-content.ts)",
       "Bash(npm ls *)",
-      "Bash(echo \"EXIT:$?\")"
+      "Bash(echo \"EXIT:$?\")",
+      "PowerShell(npm install @fontsource/audiowide @fontsource/chakra-petch)"
     ]
   },
   "enableAllProjectMcpServers": true
