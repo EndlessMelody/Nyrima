@@ -31,13 +31,19 @@ import { STORAGE_KEYS } from "@shared/constants";
 import type { PostAnnouncement, PostDoc, PostsManifest } from "@shared/post-types";
 import {
   deletePost,
+  derivePostExcerpt,
   listMyPostFolders,
   publishPost,
   readPost,
   readPostsManifest,
+  savePost,
   unpublishPost,
   type PublishedVisibility,
 } from "../services/posts";
+import {
+  removePostIndexEntry,
+  upsertPostIndexEntry,
+} from "../services/social/posts-discovery-api";
 import { useSocialStore } from "./social-store";
 
 export interface MyPostSummary {
@@ -98,6 +104,10 @@ interface PostsState {
     visibility: PublishedVisibility,
   ) => Promise<PostDoc>;
   unpublish: (postFolderId: string, doc: PostDoc) => Promise<PostDoc>;
+  /** Revoke Drive sharing (if published) and mark the post "private" rather
+   *  than "draft" — same Drive behavior as unpublish, different resting
+   *  state (see post-types.ts). */
+  makePrivate: (postFolderId: string, doc: PostDoc) => Promise<PostDoc>;
   remove: (postFolderId: string, doc: PostDoc) => Promise<void>;
 }
 
@@ -256,18 +266,50 @@ export const usePostsStore = create<PostsState>((set, get) => ({
   publish: async (postFolderId, doc, visibility) => {
     const next = await publishPost(postFolderId, doc, visibility);
     set({ myPosts: upsertMyPost(get().myPosts, postFolderId, next) });
+    // Both friends and public posts get a discovery-index pointer now —
+    // RLS scopes friends rows to accepted friends of the author, public
+    // rows to any signed-in user (posts-discovery-api.ts).
+    await upsertPostIndexEntry({
+      postId: next.id,
+      folderId: postFolderId,
+      title: next.title,
+      excerpt: derivePostExcerpt(next.blocks),
+      tags: next.tags,
+      visibility,
+      publishedAt: next.publishedAt ?? next.updatedAt,
+      updatedAt: next.updatedAt,
+    }).catch(() => undefined);
     return next;
   },
 
   unpublish: async (postFolderId, doc) => {
     const next = await unpublishPost(postFolderId, doc);
     set({ myPosts: upsertMyPost(get().myPosts, postFolderId, next) });
+    await removePostIndexEntry(doc.id).catch(() => undefined);
+    return next;
+  },
+
+  makePrivate: async (postFolderId, doc) => {
+    const wasPublished = doc.visibility === "friends" || doc.visibility === "public";
+    let next: PostDoc;
+    if (wasPublished) {
+      // Revokes the Drive folder's public permission and persists the doc —
+      // same as unpublish(), just landing on "private" instead of "draft".
+      next = await unpublishPost(postFolderId, doc, {}, "private");
+    } else {
+      // Never published — a local-only flip, no Drive permission to revoke.
+      next = { ...doc, visibility: "private", updatedAt: new Date().toISOString() };
+      await savePost(postFolderId, next);
+    }
+    set({ myPosts: upsertMyPost(get().myPosts, postFolderId, next) });
+    await removePostIndexEntry(doc.id).catch(() => undefined);
     return next;
   },
 
   remove: async (postFolderId, doc) => {
     await deletePost(postFolderId, doc);
     set({ myPosts: get().myPosts.filter((p) => p.folderId !== postFolderId) });
+    await removePostIndexEntry(doc.id).catch(() => undefined);
   },
 }));
 

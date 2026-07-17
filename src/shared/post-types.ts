@@ -71,7 +71,8 @@ export type PostCustomBlockType =
   | "animeCard"
   | "rating"
   | "spoiler"
-  | "callout";
+  | "callout"
+  | "linkCard";
 
 /** Placeholder type the sanitizer substitutes for any block type it doesn't
  *  recognise (e.g. written by a newer Nyrima version). Rendered as a dashed
@@ -99,7 +100,11 @@ export interface PostBlock {
 // Post document
 // ---------------------------------------------------------------------------
 
-export type PostVisibility = "draft" | "friends" | "public";
+/** "draft" = still being written. "private" = finished, intentionally kept
+ *  off Drive-sharing — same Drive permissions as "draft" (folder never made
+ *  public), distinct only in intent/UI framing. "friends"/"public" flip the
+ *  post folder to "anyone with the link" (see post-publish.ts). */
+export type PostVisibility = "draft" | "private" | "friends" | "public";
 
 /** Current on-disk schema version for `post.json`. */
 export const POST_DOC_SCHEMA_VERSION = 1 as const;
@@ -123,7 +128,28 @@ export interface PostDoc {
   publishedAt?: string;
   visibility: PostVisibility;
   cover?: PostCover;
+  /** Optional per-post accent — a hex color or bare named token, same
+   *  shape as an inline run's `textColor` (see `PostInlineStyles`). A
+   *  light personalization layer: tints the cover frame and a couple of
+   *  small accents on the published page, never a full theme override. */
+  accent?: string;
   tags?: string[];
+  /** Author-written share-preview blurb — distinct from the auto-derived
+   *  excerpt (`derivePostExcerpt`), which an author may not want verbatim
+   *  in a social/search preview. */
+  metaDescription?: string;
+  /** Renders a reader-facing jump-to-heading table of contents on the
+   *  published page, reusing the same heading-outline logic as the
+   *  editor's own structure rail. */
+  showToc?: boolean;
+  /** Per-block font family/size overrides, keyed by block id. Deliberately
+   *  a doc-level side-car map rather than BlockNote block props: adding
+   *  custom props to BlockNote's built-in text block types would require
+   *  reimplementing their ProseMirror node specs (propSchema is baked into
+   *  the node at creation time, not patchable after the fact), risking
+   *  dropped behavior (keyboard shortcuts, list semantics). This map is
+   *  applied as plain inline styles by the editor/renderer instead. */
+  blockFonts?: Record<string, { family?: string; size?: number }>;
   /** Drive file ids OUTSIDE the post folder (e.g. a library video
    *  referenced by a `driveVideo` block) that were flipped "anyone with
    *  the link" at publish time with the author's per-file consent.
@@ -154,7 +180,7 @@ export interface PostAnnouncement {
   /** Poster/cover snapshot, sourced the same way as `ShareEntry.posterUrl` —
    *  accepted to rot; the viewer falls back to resolving `cover.fileId`. */
   posterUrl?: string;
-  visibility: Exclude<PostVisibility, "draft">;
+  visibility: Exclude<PostVisibility, "draft" | "private">;
   publishedAt: string;
   updatedAt: string;
   tags?: string[];

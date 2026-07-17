@@ -5,6 +5,14 @@
  * `/u/:handle`. Deliberately separate from `ProfileSection` (nickname/
  * avatar/banner), which stays device-local personalization — see that
  * section's header comment for the split rationale.
+ *
+ * The handle saved here also mirrors into the local `ShareProfile`
+ * (`useSharingStore.saveProfile`) — Posts (post-types.ts) and the rest of
+ * the Drive-sharing layer stamp content with that local, device-scoped
+ * identity, while `/u/:handle` and post discovery read this Supabase one.
+ * They're two separate stores under the hood, but from here on out this is
+ * the single place a user picks "their handle" — saving here keeps both in
+ * lockstep instead of surfacing two disconnected pickers.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -13,6 +21,8 @@ import { Plus, X } from "lucide-react";
 import { useAuth } from "@/auth/AuthProvider";
 import { useRecentStore } from "@app/stores/recent-store";
 import { usePostsStore } from "@app/stores/posts-store";
+import { useSharingStore } from "@app/stores/sharing-store";
+import { SHARE_HANDLE_PATTERN } from "@shared/constants";
 import {
   ensureSocialProfile,
   getMyProfile,
@@ -22,7 +32,9 @@ import {
 } from "@app/services/social/social-api";
 import type { SectionProps } from "../registry";
 
-const HANDLE_PATTERN = /^[a-z0-9_-]{3,32}$/;
+// Shared with the local (Drive-facing) share handle — see the module doc.
+// Reusing the same pattern here keeps the two handle stores always in sync.
+const HANDLE_PATTERN = SHARE_HANDLE_PATTERN;
 const BIO_MAX = 280;
 const GENRES_MAX = 12;
 
@@ -32,6 +44,7 @@ export function PublicProfileSection({ highlightSettingId: _ }: SectionProps) {
   const loadFolders = useRecentStore((s) => s.load);
   const myPosts = usePostsStore((s) => s.myPosts);
   const loadMyPosts = usePostsStore((s) => s.loadMyPosts);
+  const saveShareProfile = useSharingStore((s) => s.saveProfile);
 
   const [loading, setLoading] = useState(true);
   const [handle, setHandle] = useState("");
@@ -121,7 +134,8 @@ export function PublicProfileSection({ highlightSettingId: _ }: SectionProps) {
     setSaving(true);
     setError(null);
     try {
-      await ensureSocialProfile({ handle: handle.trim() || undefined });
+      const trimmedHandle = handle.trim() || undefined;
+      await ensureSocialProfile({ handle: trimmedHandle });
       const pinnedLabel = pinnedKind
         ? (pinnedOptions[pinnedKind].find((o) => o.ref === pinnedRef)?.label ?? null)
         : null;
@@ -133,6 +147,16 @@ export function PublicProfileSection({ highlightSettingId: _ }: SectionProps) {
         pinnedRef: pinnedKind ? pinnedRef || null : null,
         pinnedLabel: pinnedKind ? pinnedLabel : null,
       });
+      // Mirror into the local ShareProfile so Posts/Drive-sharing (which
+      // stamp content with the local, device-scoped identity) always match
+      // the handle set here — see the module doc.
+      if (trimmedHandle) {
+        await saveShareProfile({
+          handle: trimmedHandle,
+          name: account?.displayName,
+          avatarUrl: account?.avatarUrl,
+        });
+      }
       setSavedTick(true);
       window.setTimeout(() => setSavedTick(false), 1600);
     } catch (e) {

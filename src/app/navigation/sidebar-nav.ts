@@ -51,6 +51,7 @@ export const SIDEBAR_NAV_SECTIONS: SidebarNavSection[] = [
     label: "Browse",
     items: [
       { id: "home", label: "Home", path: HOME_ROUTE, icon: "home" },
+      { id: "posts", label: "Posts", path: "/posts", icon: "posts" },
       { id: "library", label: "Library", path: LIBRARY_ROUTE, icon: "library" },
       { id: "movies", label: "Movies", path: "/library/movies", icon: "movies" },
       { id: "manga", label: "Manga", path: "/library/manga", icon: "manga" },
@@ -98,7 +99,6 @@ export const SIDEBAR_NAV_SECTIONS: SidebarNavSection[] = [
     label: "Community",
     items: [
       { id: "social", label: "Social", path: "/social", icon: "social" },
-      { id: "posts", label: "Posts", path: "/posts", icon: "posts" },
     ],
   },
 ];

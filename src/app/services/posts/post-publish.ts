@@ -21,7 +21,7 @@ import { POSTS_MANIFEST_SCHEMA_VERSION } from "@shared/post-types";
 import type { ShareAuthor } from "@shared/types";
 import { deleteFile, setFolderPrivate, setFolderPublic } from "../drive-api";
 import type { RequestOptions } from "../drive/types";
-import { ensureShareFolders } from "../sharing";
+import { ensureShareFolders, getShareProfile, profileToAuthor } from "../sharing";
 import { derivePostExcerpt } from "./post-doc";
 import { copyMediaIntoPost } from "./post-assets";
 import { savePost } from "./post-io";
@@ -31,7 +31,7 @@ import {
   removeAnnouncement,
 } from "./posts-manifest";
 
-export type PublishedVisibility = Exclude<PostVisibility, "draft">;
+export type PublishedVisibility = Exclude<PostVisibility, "draft" | "private">;
 
 /**
  * Copy referenced media into the post folder so it's self-contained, flip
@@ -44,6 +44,16 @@ export async function publishPost(
   visibility: PublishedVisibility,
   reqOpts: RequestOptions = {},
 ): Promise<PostDoc> {
+  // A draft/private post may have been created before the author picked a
+  // share handle (post-types.ts). Re-stamp from the freshest profile here
+  // rather than trusting whatever `doc.author` was left with from drafting,
+  // so a friends/public post always carries a valid, current handle.
+  const profile = await getShareProfile();
+  if (!profile) {
+    throw new Error("Pick a share handle before publishing — open Settings to set one up.");
+  }
+  const author = profileToAuthor(profile);
+
   const blocks = await copyExternalImagesIntoAssets(
     doc.blocks,
     postFolderId,
@@ -56,6 +66,7 @@ export async function publishPost(
   const publishedAt = doc.publishedAt ?? now;
   const nextDoc: PostDoc = {
     ...doc,
+    author,
     blocks,
     visibility,
     publishedAt,
@@ -82,21 +93,23 @@ export async function publishPost(
 
 /**
  * Revoke the post folder's public permission, revoke any individually
- * consented media files, drop the announcement, and reset the doc to a
- * draft. `publishedAt` is left in place as history — only `visibility`
- * flips back.
+ * consented media files, drop the announcement, and reset the doc to
+ * `target` (draft or private — both are "not shared on Drive", they only
+ * differ in author intent). `publishedAt` is left in place as history —
+ * only `visibility` flips back.
  */
 export async function unpublishPost(
   postFolderId: string,
   doc: PostDoc,
   reqOpts: RequestOptions = {},
+  target: "draft" | "private" = "draft",
 ): Promise<PostDoc> {
   await setFolderPrivate(postFolderId, reqOpts);
   await revokeSharedFiles(doc.sharedFileIds, reqOpts);
 
   const nextDoc: PostDoc = {
     ...doc,
-    visibility: "draft",
+    visibility: target,
     updatedAt: new Date().toISOString(),
   };
   delete nextDoc.sharedFileIds;

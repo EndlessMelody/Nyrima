@@ -18,6 +18,7 @@ import {
   LayoutDashboard,
   MonitorPlay,
   Palette,
+  Share2,
   UserRound,
   IdCard,
   type LucideIcon,
@@ -25,6 +26,7 @@ import {
 import { MyAccountSection } from "./sections/MyAccountSection";
 import { ProfileSection } from "./sections/ProfileSection";
 import { PublicProfileSection } from "./sections/PublicProfileSection";
+import { PostSharingSection } from "./sections/PostSharingSection";
 import { ConnectionsSection } from "./sections/ConnectionsSection";
 import { AppearanceSection } from "./sections/AppearanceSection";
 import { PlaybackSection } from "./sections/PlaybackSection";
@@ -36,6 +38,7 @@ export type SectionId =
   | "my-account"
   | "profile"
   | "public-profile"
+  | "post-sharing"
   | "connections"
   | "appearance"
   | "playback"
@@ -87,6 +90,14 @@ export const SECTIONS: AccountCenterSection[] = [
     Icon: LayoutDashboard,
     Component: PublicProfileSection,
     keywords: ["dashboard", "handle", "bio", "genres", "pinned", "social links", "badges", "heatmap"],
+  },
+  {
+    id: "post-sharing",
+    label: "Post Sharing",
+    group: "user",
+    Icon: Share2,
+    Component: PostSharingSection,
+    keywords: ["posts", "visibility", "private", "friends", "public", "publish", "unpublish"],
   },
   {
     id: "connections",
@@ -168,6 +179,9 @@ export const SETTING_ENTRIES: SettingEntry[] = [
   { settingId: "public-profile-genres", sectionId: "public-profile", label: "Favorite genres", keywords: ["genres", "tags", "interests"] },
   { settingId: "public-profile-pinned", sectionId: "public-profile", label: "Pinned item", keywords: ["pinned", "library", "post", "showcase"] },
   { settingId: "public-profile-links", sectionId: "public-profile", label: "Social links", keywords: ["links", "mal", "anilist", "website"] },
+  // Post Sharing
+  { settingId: "post-sharing-default-visibility", sectionId: "post-sharing", label: "Default visibility", keywords: ["draft", "private", "new post"] },
+  { settingId: "post-sharing-published", sectionId: "post-sharing", label: "Published posts", keywords: ["friends", "public", "unpublish", "manage"] },
   // Connections
   { settingId: "connection-drive", sectionId: "connections", label: "Google Drive connection", keywords: ["drive", "connect", "disconnect", "oauth", "google"] },
   // Appearance

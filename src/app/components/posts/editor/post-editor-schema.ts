@@ -23,8 +23,14 @@ import {
   BlockNoteSchema,
   createHeadingBlockSpec,
   defaultBlockSpecs,
+  type Block,
+  type BlockNoteEditor,
 } from "@blocknote/core";
 import { driveImageBlockSpec } from "./blocks/DriveImageBlock";
+import { linkCardBlockSpec } from "./blocks/LinkCardBlock";
+import { calloutBlockSpec } from "./blocks/CalloutBlock";
+import { spoilerBlockSpec } from "./blocks/SpoilerBlock";
+import { ratingBlockSpec } from "./blocks/RatingBlock";
 
 export const postEditorSchema = BlockNoteSchema.create({
   blockSpecs: {
@@ -39,7 +45,24 @@ export const postEditorSchema = BlockNoteSchema.create({
     quote: defaultBlockSpecs.quote,
     codeBlock: defaultBlockSpecs.codeBlock,
     driveImage: driveImageBlockSpec(),
+    linkCard: linkCardBlockSpec(),
+    callout: calloutBlockSpec(),
+    spoiler: spoilerBlockSpec(),
+    rating: ratingBlockSpec(),
   },
 });
 
 export type PostEditorSchema = typeof postEditorSchema;
+
+/** Concrete editor type for `postEditorSchema` — every workspace component
+ *  that touches the editor instance (top bar, inspector, slash menu) shares
+ *  this instead of re-deriving generics or falling back to `any`. */
+export type PostEditor = PostEditorSchema extends BlockNoteSchema<infer B, infer I, infer S>
+  ? BlockNoteEditor<B, I, S>
+  : never;
+
+/** Concrete block type for `postEditorSchema` — replaces `Block<any, any,
+ *  any>` in the inspector/selection code below. */
+export type PostEditorBlock = PostEditorSchema extends BlockNoteSchema<infer B, infer I, infer S>
+  ? Block<B, I, S>
+  : never;

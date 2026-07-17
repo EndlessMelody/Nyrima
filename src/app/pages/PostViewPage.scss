@@ -27,6 +27,32 @@
   color: var(--neutral-on-background-weak);
 }
 
+.ny-post-view-page__like {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 3px 10px;
+  border: var(--dc-hairline);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--neutral-on-background-weak);
+  font-family: var(--dc-font-mono);
+  font-size: 0.75rem;
+  text-transform: none;
+  cursor: pointer;
+  transition: color var(--ny-dur-base, 220ms) ease, border-color var(--ny-dur-base, 220ms) ease;
+
+  &:hover {
+    color: var(--neutral-on-background-strong);
+  }
+
+  &.is-liked {
+    color: var(--danger-on-background-strong, #ff6b81);
+    border-color: var(--danger-on-background-strong, #ff6b81);
+  }
+}
+
 .ny-post-view-page__tags {
   display: flex;
   flex-wrap: wrap;
