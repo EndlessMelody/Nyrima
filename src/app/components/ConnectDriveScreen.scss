@@ -151,6 +151,13 @@
   min-width: 0;
 }
 
+/* Brand lockup above the eyebrow — treatment comes from `.ny-wordmark`
+   (fonts.scss); this only sizes it for the splash hero. */
+.ny-login__wordmark {
+  font-size: 1.3rem;
+  line-height: 1;
+}
+
 .ny-login__eyebrow {
   font-family: var(--dc-font-mono);
   font-size: 0.6875rem;

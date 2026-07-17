@@ -90,7 +90,7 @@ export function WatchRoomHeader({
         </button>
         <div className="watch-room-header__brand">
           <NyrimaMark size="header" />
-          <span>Nyrima</span>
+          <span className="ny-wordmark">Nyrima</span>
         </div>
         <div className="watch-room-header__title">
           <span>{isSeries ? "Anime Player" : "Movies Player"}</span>

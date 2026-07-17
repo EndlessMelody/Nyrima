@@ -14,7 +14,11 @@ import { fileURLToPath } from "node:url";
 export default defineConfig({
   resolve: {
     alias: {
+      // Mirrors vite.config.ts's alias set — tests import through the same
+      // "@", "@app", "@shared" specifiers the app source does.
+      "@app": fileURLToPath(new URL("./src/app", import.meta.url)),
       "@shared": fileURLToPath(new URL("./src/shared", import.meta.url)),
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
   },
   test: {

@@ -93,7 +93,8 @@ export function NyrimaTopBar({
       <header className="lvn-topbar" onClick={(event) => event.stopPropagation()}>
         <a className="lvn-brand" href="/" aria-label="Nyrima home">
           <NyrimaMark size="header" />
-          <span>Nyrima</span>
+          <span className="ny-wordmark">Nyrima</span>
+          <span className="lvn-brand__pulse" aria-hidden="true" />
         </a>
 
         <div className="lvn-topbar__actions" aria-label="Visual novel controls">

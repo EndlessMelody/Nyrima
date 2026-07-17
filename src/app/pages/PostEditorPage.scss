@@ -1,38 +1,6 @@
 .ny-post-editor-page {
+  height: 100dvh;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 24px 0 48px;
-}
-
-.ny-post-editor-page__header {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.ny-post-editor-page__title {
-  flex: 1;
-  min-width: 240px;
-  border: none;
-  background: transparent;
-  font-family: var(--dc-font-display);
-  font-size: 1.75rem;
-  font-weight: 600;
-  color: var(--neutral-on-background-strong);
-
-  &::placeholder {
-    color: var(--neutral-on-background-weak);
-  }
-
-  &:focus {
-    outline: none;
-  }
-}
-
-.ny-post-editor-page__actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
 }

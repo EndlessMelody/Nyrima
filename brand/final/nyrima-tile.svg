@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="mk" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff4fd8"/>
+      <stop offset="1" stop-color="#5bc8e8"/>
+    </linearGradient>
+    <radialGradient id="bg" cx="0.2" cy="0.15" r="1.2">
+      <stop offset="0" stop-color="#131735"/>
+      <stop offset="0.6" stop-color="#070812"/>
+      <stop offset="1" stop-color="#070812"/>
+    </radialGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="3" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <!-- mark at ~72% of the tile, centered -->
+  <g transform="translate(72 72) scale(3.833)" filter="url(#glow)">
+    <path fill="url(#mk)"
+          d="M22 76 L22 18 L24.5 5 L31 16 L36 20 L60 52 L60 20 L65 16 L71.5 5 L74 18 L74 76 L60 76 L36 44 L36 76 Z"/>
+    <path d="M28 70 C 28 82, 13 87, 10.5 77 C 9.5 72.5 12.5 69.5 16 70.5"
+          fill="none" stroke="url(#mk)" stroke-width="8" stroke-linecap="round"/>
+  </g>
+</svg>

@@ -1,0 +1,261 @@
+.ny-editor-workspace {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  overflow: hidden;
+  background-color: var(--page-background);
+  background-image: linear-gradient(135deg, var(--brand-alpha-weak), transparent 28%);
+  background-repeat: no-repeat;
+  color: var(--neutral-on-background-strong);
+}
+
+// ---------------------------------------------------------------------------
+// top bar
+// ---------------------------------------------------------------------------
+
+.ny-editor-topbar {
+  position: relative;
+  z-index: 20;
+  flex: 0 0 auto;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 16px;
+  border-bottom: var(--dc-hairline);
+  background-image:
+    repeating-linear-gradient(45deg, var(--brand-alpha-weak) 0 1px, transparent 1px 22px),
+    repeating-linear-gradient(-45deg, var(--brand-alpha-weak) 0 1px, transparent 1px 22px);
+  background-color: color-mix(in srgb, var(--page-background) 74%, transparent);
+  backdrop-filter: blur(24px) saturate(150%);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+}
+
+.ny-editor-topbar[data-saving="true"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  height: 1px;
+  width: 30%;
+  background: linear-gradient(90deg, transparent, var(--brand-solid-strong), transparent);
+  animation: ny-topbar-save-sweep var(--ny-dur-ambient) ease-in-out infinite;
+}
+
+@keyframes ny-topbar-save-sweep {
+  0% {
+    left: -30%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+
+.ny-editor-topbar__back,
+.ny-editor-topbar__rail-toggle {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--neutral-border-medium);
+  background: color-mix(in srgb, var(--surface-background) 74%, transparent);
+  color: var(--neutral-on-background-medium);
+  cursor: pointer;
+  transition: color var(--ny-dur-fast) ease, border-color var(--ny-dur-fast) ease, background var(--ny-dur-fast) ease;
+
+  &:hover {
+    color: var(--neutral-on-background-strong);
+    border-color: var(--brand-border-medium);
+    background: var(--brand-alpha-weak);
+  }
+}
+
+.ny-editor-topbar__rail-toggle[aria-pressed="true"] {
+  color: var(--brand-on-background-strong);
+  border-color: var(--brand-border-strong);
+  background: var(--brand-alpha-weak);
+}
+
+.ny-editor-topbar__title {
+  flex: 1;
+  min-width: 120px;
+  border: none;
+  background: transparent;
+  font-family: var(--dc-font-display);
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--neutral-on-background-strong);
+
+  &::placeholder {
+    color: var(--neutral-on-background-weak);
+  }
+
+  &:focus {
+    outline: none;
+  }
+}
+
+.ny-editor-topbar__stats {
+  flex: 0 0 auto;
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.02em;
+  color: var(--neutral-on-background-weak);
+  white-space: nowrap;
+}
+
+.ny-editor-topbar__mode {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  border-radius: 8px;
+  border: 1px solid var(--neutral-border-medium);
+  overflow: hidden;
+
+  button {
+    position: relative;
+    z-index: 1;
+    padding: 6px 12px;
+    border: none;
+    background: transparent;
+    color: var(--neutral-on-background-medium);
+    font-family: var(--dc-font-mono);
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    transition: color var(--ny-dur-fast) ease;
+
+    &:hover {
+      color: var(--neutral-on-background-strong);
+    }
+
+    &.is-active {
+      color: var(--brand-on-background-strong);
+    }
+  }
+
+  &__mode-thumb {
+    position: absolute;
+    z-index: 0;
+    top: 2px;
+    bottom: 2px;
+    left: 2px;
+    width: calc(50% - 2px);
+    border-radius: 6px;
+    background: var(--brand-alpha-weak);
+    border: 1px solid var(--brand-border-medium);
+    transition: transform var(--ny-dur-base) var(--ny-ease-spring);
+  }
+
+  &[data-mode="preview"] &__mode-thumb {
+    transform: translateX(100%);
+  }
+}
+
+.ny-editor-workspace__error {
+  flex: 0 0 auto;
+  padding: 8px 16px;
+  font-family: var(--dc-font-mono);
+  font-size: 0.75rem;
+  color: var(--danger-on-background-strong, #ff8a8a);
+  border-bottom: var(--dc-hairline);
+}
+
+// ---------------------------------------------------------------------------
+// body — canvas + rail
+// ---------------------------------------------------------------------------
+
+.ny-editor-workspace__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.ny-editor-workspace__canvas {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.ny-editor-workspace__scroll {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 40px 40px 140px;
+}
+
+.ny-editor-workspace__add-block {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: var(--ny-radius-sm, 8px);
+  border: 1px dashed var(--neutral-alpha-strong);
+  background: transparent;
+  color: var(--neutral-on-background-weak);
+  font-family: var(--dc-font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color var(--ny-dur-fast) ease, border-color var(--ny-dur-fast) ease, background var(--ny-dur-fast) ease;
+
+  &:hover {
+    color: var(--neutral-on-background-strong);
+    border-color: var(--brand-border-medium);
+    background: var(--brand-alpha-weak);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// "Jupyter cell" treatment for top-level blocks. Plain-text blocks
+// (paragraph/heading/quote/codeBlock) had no visual identity before and
+// blended together — those get a persistent card border + generous
+// padding so the canvas reads as a stack of distinct cells. Custom/media
+// blocks (image, link card, callout, spoiler, rating) already draw their
+// own purpose-built chrome (PostEditor.scss) and would double-box, so
+// they only get a thin hover/selection ring. List items stay grouped as
+// one flowing list rather than N separate boxes. Nested blocks (list
+// children, spoiler bodies) opt out entirely so indentation doesn't read
+// as a stack of nested frames.
+// ---------------------------------------------------------------------------
+
+.ny-post-editor .bn-editor > .bn-block-group > .bn-block-outer {
+  border: 1px solid transparent;
+  border-radius: var(--ny-radius-sm, 8px);
+  padding: 3px 14px;
+  margin-bottom: 4px;
+  transition: border-color var(--ny-dur-fast) ease, background var(--ny-dur-fast) ease, padding var(--ny-dur-fast) ease;
+
+  &:hover {
+    border-color: var(--neutral-alpha-strong);
+  }
+
+  &.ny-cell-active {
+    border-color: var(--brand-border-medium);
+    background: var(--brand-alpha-weak);
+  }
+
+  &:has(> .bn-block > .bn-block-content[data-content-type="paragraph"]),
+  &:has(> .bn-block > .bn-block-content[data-content-type="heading"]),
+  &:has(> .bn-block > .bn-block-content[data-content-type="quote"]),
+  &:has(> .bn-block > .bn-block-content[data-content-type="codeBlock"]) {
+    border-color: var(--neutral-border-medium);
+    padding: 10px 14px;
+    margin-bottom: 8px;
+
+    &.ny-cell-active {
+      border-color: var(--brand-border-strong);
+    }
+  }
+
+  .bn-block-outer {
+    border: none;
+    padding: 0;
+    margin: 0;
+    background: none;
+  }
+}

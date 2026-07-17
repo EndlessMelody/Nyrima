@@ -108,7 +108,9 @@ export function BrandConsole() {
 
       <div className="lvn-brand-console__lockup">
         <NyrimaMark
-          size="header"
+          size="hero"
+          variant="mark"
+          fluid
           className="lvn-brand-console__lockup-logo"
           aria-hidden="true"
         />

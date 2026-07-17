@@ -1,13 +1,79 @@
 .ny-post-editor {
-  border: var(--dc-hairline);
-  border-radius: var(--ny-radius-md, 10px);
-  padding: var(--ny-space-4, 16px);
-  background: var(--page-background);
-  min-height: 320px;
+  // No min-height: the "+ Add block" button (rendered right after this
+  // element) must hug the last real block instead of floating below a
+  // fixed-height gap on short documents.
 
   .bn-editor {
+    // No reserved left gutter: an earlier version of this rule padded
+    // .bn-editor to make room for the hover toolbar, but that shifted
+    // EVERY block's content 110px narrower/right vs the sibling
+    // "+ Add block" button (which lives outside .bn-editor entirely,
+    // unaffected by this padding) — a much more visible bug than the one
+    // it was trying to fix. The toolbar doesn't actually need reserved
+    // space: it renders via a floating-ui portal (position: fixed, not
+    // clipped/bounded by this box) into the canvas's own natural side
+    // margin, and BlockNote's show/hide logic already treats hovering the
+    // toolbar as "inside the editor" via `editor.portalElement` regardless
+    // of this padding (see PostSideMenu.tsx's freeze-on-enter handling and
+    // PostEditor.tsx's floatingUIOptions for the actual hitbox fix).
     padding: 0;
   }
+}
+
+// ---------------------------------------------------------------------------
+// custom block toolbar (PostSideMenu) — replaces BlockNote's bare 6-dot
+// drag handle: drag, type badge, duplicate, delete, all one click away.
+// ---------------------------------------------------------------------------
+
+.ny-block-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 8px;
+  border: var(--dc-hairline);
+  background: color-mix(in srgb, var(--surface-background-strong) 88%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--ny-shadow-sm, 0 2px 8px -4px rgba(0, 0, 0, 0.3));
+
+  button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: none;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--neutral-on-background-medium);
+    cursor: pointer;
+    transition: color var(--ny-dur-fast) ease, background var(--ny-dur-fast) ease;
+
+    &:hover {
+      color: var(--neutral-on-background-strong);
+      background: var(--neutral-alpha-weak);
+    }
+  }
+}
+
+.ny-block-toolbar__drag {
+  cursor: grab;
+
+  &:active {
+    cursor: grabbing;
+  }
+}
+
+.ny-block-toolbar__type {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  color: var(--neutral-on-background-weak);
+  opacity: 0.8;
 }
 
 .ny-drive-image-block {
@@ -127,4 +193,304 @@
     outline: none;
     color: var(--neutral-on-background-strong);
   }
+}
+
+// ---------------------------------------------------------------------------
+// callout
+// ---------------------------------------------------------------------------
+
+.ny-callout-block {
+  width: 100%;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 12px 0;
+  padding: 12px 14px;
+  border-radius: var(--ny-radius-sm, 8px);
+  border: var(--dc-hairline);
+  background: var(--neutral-alpha-weak);
+
+  &--warning {
+    border-color: rgba(217, 115, 13, 0.32);
+    background: rgba(217, 115, 13, 0.08);
+  }
+
+  &--fave {
+    border-color: var(--brand-border-strong);
+    background: var(--brand-alpha-weak);
+  }
+}
+
+.ny-callout-block__tone {
+  flex: 0 0 auto;
+  font-family: var(--dc-font-mono);
+  font-size: 0.625rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 3px 6px;
+  border-radius: 4px;
+  border: var(--dc-hairline);
+  background: transparent;
+  color: var(--neutral-on-background-medium);
+  cursor: pointer;
+}
+
+.ny-callout-block__content {
+  flex: 1;
+  min-width: 0;
+}
+
+// ---------------------------------------------------------------------------
+// spoiler
+// ---------------------------------------------------------------------------
+
+.ny-spoiler-block {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 12px 0 4px;
+  padding: 10px 14px;
+  border-radius: var(--ny-radius-sm, 8px);
+  border: 1px dashed var(--neutral-alpha-weak);
+}
+
+.ny-spoiler-block__label {
+  border: none;
+  background: transparent;
+  font-family: var(--dc-font-mono);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--neutral-on-background-strong);
+
+  &:focus {
+    outline: none;
+  }
+
+  &::placeholder {
+    color: var(--neutral-on-background-weak);
+  }
+}
+
+.ny-spoiler-block__hint {
+  font-family: var(--dc-font-body);
+  font-size: 0.75rem;
+  color: var(--neutral-on-background-weak);
+}
+
+// ---------------------------------------------------------------------------
+// rating
+// ---------------------------------------------------------------------------
+
+.ny-rating-block {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+  padding: 10px 14px;
+  border-radius: var(--ny-radius-sm, 8px);
+  border: var(--dc-hairline);
+}
+
+.ny-rating-block__label {
+  flex: 1 1 140px;
+  min-width: 100px;
+  border: none;
+  background: transparent;
+  font-family: var(--dc-font-body);
+  font-size: 0.875rem;
+  color: var(--neutral-on-background-strong);
+
+  &:focus {
+    outline: none;
+  }
+}
+
+.ny-rating-block__stars {
+  display: flex;
+  gap: 2px;
+}
+
+.ny-rating-block__star {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--brand-on-background-strong, var(--neutral-on-background-strong));
+  padding: 2px;
+}
+
+.ny-rating-block__number {
+  width: 52px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  border: var(--dc-hairline);
+  background: transparent;
+  color: var(--neutral-on-background-medium);
+  font-family: var(--dc-font-mono);
+  font-size: 0.75rem;
+}
+
+.ny-rating-block__style {
+  padding: 3px 6px;
+  border-radius: 4px;
+  border: var(--dc-hairline);
+  background: transparent;
+  color: var(--neutral-on-background-medium);
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+}
+
+// ---------------------------------------------------------------------------
+// link card
+// ---------------------------------------------------------------------------
+
+.ny-link-card-block {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 12px 14px;
+  border-radius: var(--ny-radius-md, 12px);
+  border: var(--dc-hairline);
+  background: var(--surface-background);
+}
+
+.ny-link-card-block--empty {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+
+  input {
+    flex: 1;
+    min-width: 200px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: var(--dc-hairline);
+    background: transparent;
+    color: var(--neutral-on-background-strong);
+    font-family: var(--dc-font-body);
+    font-size: 0.8125rem;
+
+    &:focus {
+      outline: none;
+      border-color: var(--brand-border-medium);
+    }
+  }
+}
+
+.ny-link-card-block__toolbar {
+  display: flex;
+  gap: 6px;
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ny-link-card-block button {
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: var(--dc-hairline);
+  background: transparent;
+  color: var(--neutral-on-background-medium);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+
+  &:hover:not(:disabled) {
+    background: var(--neutral-alpha-weak);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+}
+
+.ny-link-card-block__title-input {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: var(--dc-hairline);
+  background: transparent;
+  color: var(--neutral-on-background-strong);
+  font-family: var(--dc-font-body);
+  font-size: 0.8125rem;
+
+  &:focus {
+    outline: none;
+    border-color: var(--brand-border-medium);
+  }
+}
+
+.ny-link-card-block__preview {
+  display: flex;
+  gap: 12px;
+  text-decoration: none;
+  cursor: default;
+}
+
+.ny-link-card-block__thumb {
+  flex: 0 0 64px;
+  width: 64px;
+  height: 64px;
+  border-radius: var(--ny-radius-sm, 6px);
+  overflow: hidden;
+  background: var(--neutral-alpha-weak);
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+}
+
+.ny-link-card-block__body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ny-link-card-block__title {
+  font-family: var(--dc-font-display);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--neutral-on-background-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ny-link-card-block__description {
+  font-size: 0.8125rem;
+  color: var(--neutral-on-background-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.ny-link-card-block__site {
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--neutral-on-background-weak);
+}
+
+.ny-link-card-block__error {
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  color: var(--danger-on-background-strong, #ff8a8a);
 }

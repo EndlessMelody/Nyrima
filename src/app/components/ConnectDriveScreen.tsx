@@ -218,6 +218,7 @@ export function ConnectDriveScreen({
           <NyrimaMark size="splash" className="ny-login__mark" />
         </div>
         <div className="ny-login__hero-body">
+          <span className="ny-wordmark ny-login__wordmark">Nyrima</span>
           <span className="ny-login__eyebrow">
             {isGuest
               ? "Personal Cinema - Connect Your Drive"

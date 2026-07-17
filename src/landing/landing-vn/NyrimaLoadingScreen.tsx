@@ -16,7 +16,7 @@ const IMAGES_TO_PRELOAD = [
   EMOTION_ART.thinking,
 ];
 
-const FONTS_TO_PRELOAD = ["Bricolage Grotesque Variable"];
+const FONTS_TO_PRELOAD = ["Chakra Petch", "Audiowide"];
 
 const MESSAGES = [
   "Booting Nyrima...",
@@ -197,10 +197,10 @@ export function NyrimaLoadingScreen({ onFinish }: NyrimaLoadingScreenProps) {
       
       <div className="lvn-loading__content">
         <div className="lvn-loading__logo-wrapper">
-          <NyrimaMark size="splash" className="lvn-loading__logo" />
+          <NyrimaMark size="splash" variant="mark" className="lvn-loading__logo" />
         </div>
-        
-        <h1 className="lvn-loading__title">Nyrima</h1>
+
+        <h1 className="lvn-loading__title ny-wordmark">Nyrima</h1>
 
         {error ? (
           <div className="lvn-loading__error">

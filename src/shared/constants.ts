@@ -70,6 +70,16 @@ export const STORAGE_KEYS = {
   /** Cached flattened feed rows from the last successful posts sync. Lets
    *  the Posts feed render the previous state while Drive refreshes. */
   POSTS_FEED_CACHE: "dc.postsFeedCache.v1",
+  /** Default `PostVisibility` applied to a freshly-created post, set from
+   *  Settings → Post Sharing. Local-only, like every other Posts preference. */
+  POSTS_DEFAULT_VISIBILITY: "dc.postsDefaultVisibility",
+  /** `Record<localId, LocalPostDraft>` — posts being written that haven't
+   *  been pushed to Drive yet (post-local-draft.ts). A post never touches
+   *  Drive just because the editor was opened; it's promoted here only on
+   *  an explicit action (Publish, or "Save to Drive" from the resume
+   *  banner) or the first time it needs real Drive storage (an image
+   *  upload). */
+  POSTS_LOCAL_DRAFTS: "dc.postsLocalDrafts",
 } as const;
 
 /** Max entries kept in the per-file playback-mode LRU. */

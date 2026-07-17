@@ -1,21 +1,29 @@
 /**
- * PublishDialog — choose friends/public visibility and flip a post live,
- * or pull it back to a draft.
+ * PublishDialog — choose private/friends/public visibility and apply it.
  *
  * "Friends" and "public" share the same Drive permission today (the post
  * folder goes "Anyone with the link") — the honest distinction, stated in
- * the dialog copy rather than implied, is announcement reach: friends-tier
- * only ever gets surfaced via the follow mechanism, public additionally
- * flags itself for a future central discovery surface. v1 has no
- * `driveVideo` blocks yet, so there's no per-file consent list here —
- * that lands in v1.1 alongside the block itself.
+ * the dialog copy rather than implied, is announcement/discovery reach:
+ * friends-tier is surfaced via the follow mechanism and a friends-only
+ * discovery-index pointer, public additionally opens up central discovery
+ * (Popular/Recent). "Private" never touches Drive permissions or the
+ * discovery index — see post-types.ts for the full visibility model.
+ *
+ * Sharing (friends/public) requires a share handle; drafting never does
+ * (PostEditorPage). If none is set yet, the radios are replaced with a
+ * prompt into Settings — Private stays available either way since it
+ * never needs one. v1 has no `driveVideo` blocks yet, so there's no
+ * per-file consent list here — that lands in v1.1 alongside the block.
  */
 
 import { useEffect, useState } from "react";
 import { Column, Row, Text, Button, Dialog, Spinner } from "@once-ui-system/core/components";
-import type { PostDoc } from "@shared/post-types";
+import type { PostDoc, PostVisibility } from "@shared/post-types";
 import { usePostsStore } from "../../stores/posts-store";
-import type { PublishedVisibility } from "../../services/posts";
+import { useSharingStore } from "../../stores/sharing-store";
+import { useAccountCenter } from "../../account-center/useAccountCenter";
+
+type DialogVisibility = Extract<PostVisibility, "private" | "friends" | "public">;
 
 interface Props {
   isOpen: boolean;
@@ -33,10 +41,14 @@ export function PublishDialog({
   onPublished,
 }: Props) {
   const publish = usePostsStore((s) => s.publish);
-  const unpublish = usePostsStore((s) => s.unpublish);
+  const makePrivate = usePostsStore((s) => s.makePrivate);
+  const profile = useSharingStore((s) => s.profile);
+  const accountCenter = useAccountCenter();
 
-  const [visibility, setVisibility] = useState<PublishedVisibility>(
-    doc.visibility === "public" ? "public" : "friends",
+  const [visibility, setVisibility] = useState<DialogVisibility>(
+    doc.visibility === "public" || doc.visibility === "private"
+      ? doc.visibility
+      : "friends",
   );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,74 +59,69 @@ export function PublishDialog({
       setError(null);
       return;
     }
-    setVisibility(doc.visibility === "public" ? "public" : "friends");
+    setVisibility(
+      doc.visibility === "public" || doc.visibility === "private"
+        ? doc.visibility
+        : "friends",
+    );
   }, [isOpen, doc.visibility]);
 
-  const isPublished = doc.visibility === "friends" || doc.visibility === "public";
+  const isShared = doc.visibility === "friends" || doc.visibility === "public";
+  const needsHandle = (visibility === "friends" || visibility === "public") && !profile;
 
-  async function handlePublish() {
+  async function handleSubmit() {
     if (!postFolderId) return;
+    if (needsHandle) {
+      setError("Pick a share handle before sharing — open Settings to set one up.");
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
-      const next = await publish(postFolderId, doc, visibility);
+      const next =
+        visibility === "private"
+          ? await makePrivate(postFolderId, doc)
+          : await publish(postFolderId, doc, visibility);
       onPublished(next);
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't publish.");
+      setError(e instanceof Error ? e.message : "Couldn't update visibility.");
     } finally {
       setSubmitting(false);
     }
   }
 
-  async function handleUnpublish() {
-    if (!postFolderId) return;
-    setSubmitting(true);
-    setError(null);
-    try {
-      const next = await unpublish(postFolderId, doc);
-      onPublished(next);
-      onClose();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't unpublish.");
-    } finally {
-      setSubmitting(false);
-    }
+  function openSharingSettings() {
+    accountCenter.open("post-sharing");
+    onClose();
   }
+
+  const submitLabel = isShared
+    ? visibility === "private"
+      ? "Make private"
+      : "Update"
+    : visibility === "private"
+      ? "Keep private"
+      : "Publish";
 
   return (
     <Dialog
       isOpen={isOpen}
       onClose={submitting ? () => undefined : onClose}
-      title={isPublished ? "Publish settings" : "Publish post"}
-      description='Publishing flips this post’s Drive folder to "Anyone with the link" — anyone who has the URL can open it, follower or not.'
+      title={isShared ? "Publish settings" : "Publish post"}
+      description='Friends/public flip this post’s Drive folder to "Anyone with the link" — anyone who has the URL can open it. Private keeps it off Drive-sharing entirely.'
       style={{ backgroundColor: "var(--page-background)" }}
       footer={
         <Row gap="8">
           <Button variant="tertiary" onClick={onClose} disabled={submitting}>
             Cancel
           </Button>
-          {isPublished && (
-            <Button
-              variant="tertiary"
-              onClick={() => void handleUnpublish()}
-              disabled={submitting}
-            >
-              {submitting ? <Spinner size="xs" /> : "Unpublish"}
-            </Button>
-          )}
           <Button
             variant="primary"
-            onClick={() => void handlePublish()}
-            disabled={submitting || !postFolderId}
+            onClick={() => void handleSubmit()}
+            disabled={submitting || !postFolderId || needsHandle}
           >
-            {submitting ? (
-              <Spinner size="xs" />
-            ) : isPublished ? (
-              "Update"
-            ) : (
-              "Publish"
-            )}
+            {submitting ? <Spinner size="xs" /> : submitLabel}
           </Button>
         </Row>
       }
@@ -122,6 +129,15 @@ export function PublishDialog({
       <Column gap="12" paddingY="8">
         <FieldRow label="Who can see this post?">
           <Column gap="8">
+            <label style={RADIO_LABEL_STYLE}>
+              <input
+                type="radio"
+                name="visibility"
+                checked={visibility === "private"}
+                onChange={() => setVisibility("private")}
+              />
+              Private — only you, kept off Drive-sharing
+            </label>
             <label style={RADIO_LABEL_STYLE}>
               <input
                 type="radio"
@@ -142,6 +158,17 @@ export function PublishDialog({
             </label>
           </Column>
         </FieldRow>
+
+        {needsHandle && (
+          <Column gap="8">
+            <Text variant="body-default-xs" onBackground="neutral-weak">
+              Pick a share handle before sharing with friends or publicly.
+            </Text>
+            <Button variant="tertiary" onClick={openSharingSettings}>
+              Open Settings
+            </Button>
+          </Column>
+        )}
 
         {!postFolderId && (
           <Text variant="body-default-xs" onBackground="neutral-weak">

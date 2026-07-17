@@ -15,13 +15,14 @@
   --auth-line: rgba(248, 247, 255, 0.17);
   --auth-line-strong: rgba(248, 247, 255, 0.3);
   --auth-panel: rgba(7, 9, 15, 0.76);
-  --auth-pink: #ff55cf;
+  --auth-pink: #ff4fd8; /* aligned with the app brand lamp (anime-theme.scss) */
   --auth-pink-soft: #ff9bea;
   --auth-cyan: #5bc8e8;
   --auth-cyan-soft: #9adcf2;
   --auth-radius: 10px;
   --auth-font:
     "Geist Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --auth-display: "Chakra Petch", "Geist Sans", system-ui, sans-serif;
   --auth-mono:
     "Geist Mono", ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
   --frame-h: min(780px, calc(100vh - 72px));
@@ -521,10 +522,13 @@
   display: block;
 }
 
+/* Font/gradient/color come from the shared `.ny-wordmark` class (fonts.scss).
+   The login scene is always dark, so re-assert the Midnight gradient even
+   when the app-wide theme is light. */
 .ny-auth__brand-text span {
-  color: var(--auth-ink);
-  font-size: 1.04rem;
-  font-weight: 800;
+  --wordmark-gradient: linear-gradient(92deg, #ff4fd8 10%, #5bc8e8 90%);
+  --wordmark-glow: drop-shadow(0 0 10px rgba(255, 79, 216, 0.35));
+  font-size: 0.98rem;
 }
 
 .ny-auth__brand-text small {
@@ -545,8 +549,9 @@
 .ny-auth__title {
   margin: 0;
   color: var(--auth-ink);
+  font-family: var(--auth-display);
   font-size: clamp(1.6rem, 2.6vw, 2rem);
-  font-weight: 780;
+  font-weight: 700;
   line-height: 1.06;
 }
 

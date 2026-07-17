@@ -269,7 +269,7 @@ function MusicPlayerHeader({
         </button>
         <div className="music-player-header__brand">
           <NyrimaMark size="header" />
-          <span>Nyrima</span>
+          <span className="ny-wordmark">Nyrima</span>
         </div>
         <div className="music-player-header__title">
           <span>Music Player</span>

@@ -25,6 +25,14 @@ interface Props {
    *  "My Posts" overrides this to the editor route so drafts open for
    *  editing instead of (harmlessly, but pointlessly) the reader. */
   linkTo?: string;
+  /** Like affordance — omitted entirely (no heart control rendered) unless
+   *  the caller supplies both `postId` and `onToggleLike`. Only the Popular
+   *  tab wires this up today (see `PostsFeedPage.tsx`); "Following"/"My
+   *  posts" cards render exactly as before. */
+  postId?: string;
+  likeCount?: number;
+  likedByMe?: boolean;
+  onToggleLike?: (postId: string) => void;
 }
 
 export const PostCard = memo(function PostCard({
@@ -37,12 +45,23 @@ export const PostCard = memo(function PostCard({
   publishedAt,
   tags,
   linkTo,
+  postId,
+  likeCount,
+  likedByMe,
+  onToggleLike,
 }: Props) {
   const navigate = useNavigate();
   const [imgLoaded, setImgLoaded] = useState(false);
 
   function handleClick() {
     navigate(linkTo ?? `/posts/view/${encodeURIComponent(folderId)}`);
+  }
+
+  const showLike = !!postId && !!onToggleLike;
+
+  function handleLikeClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (postId) onToggleLike?.(postId);
   }
 
   return (
@@ -92,6 +111,18 @@ export const PostCard = memo(function PostCard({
             ·
           </span>
           <span>{formatAgo(publishedAt)}</span>
+          {showLike && (
+            <button
+              type="button"
+              className={cn("ny-post-card__like", { "is-liked": likedByMe })}
+              onClick={handleLikeClick}
+              aria-pressed={!!likedByMe}
+              aria-label={likedByMe ? "Unlike" : "Like"}
+            >
+              <span aria-hidden>{likedByMe ? "♥" : "♡"}</span>
+              {typeof likeCount === "number" && <span>{likeCount}</span>}
+            </button>
+          )}
         </div>
         {tags && tags.length > 0 && (
           <div className="ny-post-card__tags">

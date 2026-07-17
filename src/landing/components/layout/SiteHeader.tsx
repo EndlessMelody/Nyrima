@@ -134,8 +134,8 @@ export function SiteHeader({ isScrolled }: SiteHeaderProps) {
           onClick={scrollToTop}
           aria-label="Nyrima home"
         >
-          <img src="/Nyrima_Logo.png" width="34" height="34" alt="" />
-          <span>Nyrima</span>
+          <img src="/icons/app-icon.png" width="34" height="34" alt="" />
+          <span className="ny-wordmark">Nyrima</span>
         </Link>
 
         <nav className="nav-links" aria-label="Primary">

@@ -11,14 +11,18 @@ import { AppProviders } from "./app/providers/AppProviders";
 import { AuthProvider } from "./auth/AuthProvider";
 import { App } from "./App";
 
-// Typography — Bricolage Grotesque carries display headlines (the new
-// "voice" of the design language); Geist Sans is body/UI text, Geist Mono
-// is demoted to data-only labels (timecodes, codecs, file sizes); Zen Kaku
-// covers kana accents; M PLUS Rounded is the wordmark; Itim is a subtitle
-// fallback (Vietnamese-only subset). Comic Neue is also a subtitle fallback
-// but is only needed by the player, so it's deferred to
-// `SubtitleOverlay.tsx` instead of loading on every page.
-import "@fontsource-variable/bricolage-grotesque";
+// Typography — Chakra Petch carries display headlines (the squared, techy
+// "neon arcade" voice of the design language); Audiowide is the "Nyrima"
+// wordmark lockup only; Geist Sans is body/UI text, Geist Mono is demoted
+// to data-only labels (timecodes, codecs, file sizes); Zen Kaku covers kana
+// accents; M PLUS Rounded stays at 400 for the landing VN "rounded"
+// dialogue preset; Itim is a subtitle fallback (Vietnamese-only subset).
+// Comic Neue is also a subtitle fallback but is only needed by the player,
+// so it's deferred to `SubtitleOverlay.tsx` instead of loading on every page.
+import "@fontsource/chakra-petch/500.css";
+import "@fontsource/chakra-petch/600.css";
+import "@fontsource/chakra-petch/700.css";
+import "@fontsource/audiowide/400.css";
 import "@fontsource/geist-sans/400.css";
 import "@fontsource/geist-sans/500.css";
 import "@fontsource/geist-sans/600.css";
@@ -30,7 +34,7 @@ import "@fontsource/zen-kaku-gothic-new/400.css";
 import "@fontsource/zen-kaku-gothic-new/500.css";
 import "@fontsource/zen-kaku-gothic-new/700.css";
 import "@fontsource/zen-kaku-gothic-new/900.css";
-import "@fontsource/m-plus-rounded-1c/800.css";
+import "@fontsource/m-plus-rounded-1c/400.css";
 import "@fontsource/itim/vietnamese-400.css";
 
 import "./app/styles/global.scss";

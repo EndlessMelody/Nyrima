@@ -247,7 +247,7 @@ export function LoginPage() {
             <div className="ny-auth__brand">
               <NyrimaMark size="hero" className="ny-auth__mark" />
               <div className="ny-auth__brand-text">
-                <span>Nyrima</span>
+                <span className="ny-wordmark">Nyrima</span>
                 <small>Personal Anime Cinema</small>
               </div>
             </div>

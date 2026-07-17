@@ -1,14 +1,16 @@
 /**
- * PostsFeedPage — `/posts`. Two tabs: "Following" (aggregated
- * `Shared/posts.json` announcements from everyone the user follows) and
- * "My posts" (the author's own draft + published folders).
+ * PostsFeedPage — `/posts`, Nyrima's social home. Three tabs: "Popular"
+ * (default — discovery across every public post via `posts_index`, not just
+ * people you follow), "Following" (aggregated `Shared/posts.json`
+ * announcements from everyone the user follows), and "My posts" (the
+ * author's own draft + published folders).
  *
  * Gated the same way as `SocialPage`: guests have no `social:profile`
  * capability, so they see the shared `SocialLockedState` instead of ever
- * mounting the hub — no follow-list reads, no posts-store syncs fire for
- * them. This mirrors the fact that "Following" is empty for guests anyway
- * (they can't follow anyone), so a single top-level gate is simpler than
- * partially gating each tab.
+ * mounting the hub — no follow-list reads, no posts-store/discovery-store
+ * syncs fire for them. This is still correct for Popular too: `posts_index`
+ * RLS requires a real Supabase session, so a guest's queries would be
+ * rejected anyway.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -20,10 +22,12 @@ import { GuestBanner } from "../components/GuestBanner";
 import { SetupAccessDialog } from "../components/SetupAccessDialog";
 import { SocialLockedState } from "../components/SocialLockedState";
 import { usePostsStore } from "../stores/posts-store";
+import { usePostsDiscoveryStore } from "../stores/posts-discovery-store";
 import { PostCard } from "../components/posts/PostCard";
+import { LocalDraftsBanner } from "../components/posts/LocalDraftsBanner";
 import "./PostsFeedPage.scss";
 
-type Tab = "following" | "mine";
+type Tab = "popular" | "following" | "mine";
 
 export function PostsFeedPage() {
   const { canAccess } = useAuth();
@@ -68,7 +72,14 @@ export function PostsFeedPage() {
 
 function PostsFeedHub() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState<Tab>("following");
+  const [tab, setTab] = useState<Tab>("popular");
+
+  const popularItems = usePostsDiscoveryStore((s) => s.popularItems);
+  const popularLoaded = usePostsDiscoveryStore((s) => s.popularLoaded);
+  const popularLoading = usePostsDiscoveryStore((s) => s.popularLoading);
+  const likedPostIds = usePostsDiscoveryStore((s) => s.likedPostIds);
+  const loadPopular = usePostsDiscoveryStore((s) => s.loadPopular);
+  const toggleLike = usePostsDiscoveryStore((s) => s.toggleLike);
 
   const feedItems = usePostsStore((s) => s.feedItems);
   const feedLoaded = usePostsStore((s) => s.feedLoaded);
@@ -82,6 +93,7 @@ function PostsFeedHub() {
   const loadMyPosts = usePostsStore((s) => s.loadMyPosts);
 
   useEffect(() => {
+    void loadPopular();
     void loadFeed().then(() => void syncFeed());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -94,6 +106,13 @@ function PostsFeedHub() {
     <div className="ny-posts-feed-page">
       <div className="ny-posts-feed-page__header">
         <div className="ny-posts-feed-page__tabs">
+          <button
+            type="button"
+            className={tab === "popular" ? "is-active" : ""}
+            onClick={() => setTab("popular")}
+          >
+            Popular
+          </button>
           <button
             type="button"
             className={tab === "following" ? "is-active" : ""}
@@ -114,6 +133,17 @@ function PostsFeedHub() {
         </Button>
       </div>
 
+      <LocalDraftsBanner />
+
+      {tab === "popular" && (
+        <PopularTab
+          loaded={popularLoaded}
+          loading={popularLoading}
+          items={popularItems}
+          likedPostIds={likedPostIds}
+          onToggleLike={toggleLike}
+        />
+      )}
       {tab === "following" && (
         <FollowingTab loaded={feedLoaded} syncing={syncing} items={feedItems} />
       )}
@@ -124,6 +154,52 @@ function PostsFeedHub() {
           posts={myPosts}
         />
       )}
+    </div>
+  );
+}
+
+function PopularTab({
+  loaded,
+  loading,
+  items,
+  likedPostIds,
+  onToggleLike,
+}: {
+  loaded: boolean;
+  loading: boolean;
+  items: ReturnType<typeof usePostsDiscoveryStore.getState>["popularItems"];
+  likedPostIds: Set<string>;
+  onToggleLike: (postId: string) => void;
+}) {
+  if (!loaded && loading) {
+    return <div className="ny-posts-feed-page__status">Loading…</div>;
+  }
+  if (items.length === 0) {
+    return (
+      <div className="ny-posts-feed-page__empty">
+        No public posts yet — be the first to publish one.
+      </div>
+    );
+  }
+  return (
+    <div className="ny-posts-feed-page__grid">
+      {items.map((item) => (
+        <PostCard
+          key={item.postId}
+          folderId={item.folderId}
+          title={item.title}
+          excerpt={item.excerpt}
+          posterUrl={item.posterUrl}
+          authorHandle={item.authorHandle}
+          authorName={item.authorName}
+          publishedAt={new Date(item.publishedAt).toISOString()}
+          tags={item.tags}
+          postId={item.postId}
+          likeCount={item.likeCount}
+          likedByMe={likedPostIds.has(item.postId)}
+          onToggleLike={onToggleLike}
+        />
+      ))}
     </div>
   );
 }

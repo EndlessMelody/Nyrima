@@ -105,6 +105,30 @@
   opacity: 0.5;
 }
 
+.ny-post-card__like {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 2px 6px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--neutral-on-background-weak);
+  font-family: var(--dc-font-mono);
+  font-size: 0.6875rem;
+  cursor: pointer;
+  transition: color var(--ny-dur-base, 220ms) ease;
+
+  &:hover {
+    color: var(--neutral-on-background-strong);
+  }
+
+  &.is-liked {
+    color: var(--danger-on-background-strong, #ff6b81);
+  }
+}
+
 .ny-post-card__tags {
   display: flex;
   flex-wrap: wrap;

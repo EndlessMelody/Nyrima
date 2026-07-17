@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
+  <defs>
+    <linearGradient id="mk" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff4fd8"/>
+      <stop offset="1" stop-color="#5bc8e8"/>
+    </linearGradient>
+  </defs>
+  <!-- Angular arcade N with a play triangle punched out of the right stem -->
+  <path fill="url(#mk)" fill-rule="evenodd"
+        d="M22 76 V20 H36 L60 52 V20 H74 V76 H60 L36 44 V76 Z
+           M61.5 55 L72 62 L61.5 69 Z"/>
+</svg>

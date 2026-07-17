@@ -33,9 +33,7 @@ afterAll(() => {
 });
 
 async function loadExampleBook(): Promise<EpubBook> {
-  // @ts-expect-error -- node:fs is untyped in this tsconfig (web-targeted types)
   const { readFileSync } = await import("node:fs");
-  // @ts-expect-error -- node:url is untyped here
   const { fileURLToPath } = await import("node:url");
   const dir = fileURLToPath(new URL(".", import.meta.url));
   const path = `${dir}/../../../../example/Alya Sometimes Hides Her Feelings in Russian v04 [Yen Press] [Stick].epub`;

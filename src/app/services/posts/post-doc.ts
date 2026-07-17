@@ -25,6 +25,7 @@ import {
   SHARE_HANDLE_PATTERN,
 } from "@shared/constants";
 import { isDriveId } from "@shared/drive-id";
+import { POST_FONT_IDS, POST_FONT_SIZE_RANGE } from "../../components/posts/post-fonts";
 import type {
   PostBlock,
   PostBlockType,
@@ -68,11 +69,15 @@ export function sanitizePostDoc(raw: unknown): PostDoc | null {
   if (value.v !== POST_DOC_SCHEMA_VERSION) return null;
 
   const id = isNonEmptyText(value.id, MAX_ID_CHARS) ? value.id : null;
-  const author = sanitizeAuthor(value.author);
   const title = isNonEmptyText(value.title, MAX_POST_TITLE_CHARS)
     ? value.title.trim()
     : null;
   const visibility = sanitizeVisibility(value.visibility);
+  // Draft/private posts are only ever read by their own owner — the strict
+  // handle requirement below matters for friends/public, which is the real
+  // untrusted-input boundary (read by other users' clients).
+  const requireHandle = visibility === "friends" || visibility === "public";
+  const author = sanitizeAuthor(value.author, requireHandle);
   if (
     !id ||
     !author ||
@@ -88,8 +93,12 @@ export function sanitizePostDoc(raw: unknown): PostDoc | null {
     remaining: MAX_POST_BLOCKS,
   });
   const cover = sanitizeCover(value.cover);
+  const accent = sanitizeColorToken(value.accent);
   const tags = sanitizeTags(value.tags);
   const sharedFileIds = sanitizeFileIdList(value.sharedFileIds);
+  const metaDescription = sanitizeStringProp(value.metaDescription, MAX_POST_EXCERPT_CHARS);
+  const showToc = value.showToc === true;
+  const blockFonts = sanitizeBlockFonts(value.blockFonts, collectBlockIds(blocks));
 
   return {
     v: POST_DOC_SCHEMA_VERSION,
@@ -103,14 +112,21 @@ export function sanitizePostDoc(raw: unknown): PostDoc | null {
       : {}),
     visibility,
     ...(cover ? { cover } : {}),
+    ...(accent ? { accent } : {}),
     ...(tags ? { tags } : {}),
     ...(sharedFileIds ? { sharedFileIds } : {}),
+    ...(metaDescription ? { metaDescription } : {}),
+    ...(showToc ? { showToc } : {}),
+    ...(blockFonts ? { blockFonts } : {}),
     blocks,
   };
 }
 
 function sanitizeVisibility(value: unknown): PostVisibility | null {
-  return value === "draft" || value === "friends" || value === "public"
+  return value === "draft" ||
+    value === "private" ||
+    value === "friends" ||
+    value === "public"
     ? value
     : null;
 }
@@ -136,21 +152,65 @@ function sanitizeTags(value: unknown): string[] | null {
   return tags.length > 0 ? tags : null;
 }
 
+function collectBlockIds(blocks: PostBlock[]): Set<string> {
+  const ids = new Set<string>();
+  const visit = (list: PostBlock[]) => {
+    for (const block of list) {
+      ids.add(block.id);
+      if (block.children) visit(block.children);
+    }
+  };
+  visit(blocks);
+  return ids;
+}
+
+/** Drops entries for block ids that no longer exist (deleted blocks) and
+ *  rejects unrecognised font ids / out-of-range sizes — same posture as
+ *  the other doc-level sanitizers above. */
+function sanitizeBlockFonts(
+  value: unknown,
+  blockIds: Set<string>,
+): Record<string, { family?: string; size?: number }> | null {
+  if (!value || typeof value !== "object") return null;
+  const result: Record<string, { family?: string; size?: number }> = {};
+  for (const [id, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (!blockIds.has(id) || !raw || typeof raw !== "object") continue;
+    const entry: { family?: string; size?: number } = {};
+    const font = raw as { family?: unknown; size?: unknown };
+    if (typeof font.family === "string" && POST_FONT_IDS.has(font.family)) {
+      entry.family = font.family;
+    }
+    if (
+      typeof font.size === "number" &&
+      Number.isFinite(font.size) &&
+      font.size >= POST_FONT_SIZE_RANGE.min &&
+      font.size <= POST_FONT_SIZE_RANGE.max
+    ) {
+      entry.size = font.size;
+    }
+    if (entry.family || entry.size) result[id] = entry;
+  }
+  return Object.keys(result).length > 0 ? result : null;
+}
+
 function sanitizeFileIdList(value: unknown): string[] | null {
   if (!Array.isArray(value)) return null;
   const ids = value.filter(isDriveId);
   return ids.length > 0 ? ids : null;
 }
 
-function sanitizeAuthor(value: unknown): ShareAuthor | null {
+function sanitizeAuthor(
+  value: unknown,
+  requireHandle: boolean,
+): ShareAuthor | null {
   if (!value || typeof value !== "object") return null;
   const author = value as Partial<ShareAuthor>;
-  if (
-    typeof author.handle !== "string" ||
-    !SHARE_HANDLE_PATTERN.test(author.handle)
-  ) {
-    return null;
-  }
+  if (typeof author.handle !== "string") return null;
+  const validHandle = SHARE_HANDLE_PATTERN.test(author.handle);
+  if (requireHandle && !validHandle) return null;
+  // A draft/private post may not have a handle picked yet — allow an empty
+  // handle there (never true once requireHandle is set, above).
+  if (!requireHandle && author.handle && !validHandle) return null;
   return {
     handle: author.handle,
     name: sanitizeStringProp(author.name, MAX_AUTHOR_NAME_CHARS),
@@ -508,6 +568,23 @@ const BLOCK_SPECS: Partial<Record<PostBlockType, BlockSpec>> = {
       const props: Props = {};
       const label = sanitizeStringProp(raw.label, MAX_BLOCK_STRING_PROP_CHARS);
       if (label) props.label = label;
+      return props;
+    },
+  },
+  linkCard: {
+    allowsContent: false,
+    sanitizeProps: (raw) => {
+      const url = sanitizeHttpsUrl(raw.url, 2048);
+      if (!url) return null;
+      const props: Props = { url };
+      const title = sanitizeStringProp(raw.title, MAX_BLOCK_STRING_PROP_CHARS);
+      if (title) props.title = title;
+      const description = sanitizeStringProp(raw.description, MAX_BLOCK_STRING_PROP_CHARS);
+      if (description) props.description = description;
+      const imageUrl = sanitizeHttpsUrl(raw.imageUrl, 2048);
+      if (imageUrl) props.imageUrl = imageUrl;
+      const siteName = sanitizeStringProp(raw.siteName, 120);
+      if (siteName) props.siteName = siteName;
       return props;
     },
   },
