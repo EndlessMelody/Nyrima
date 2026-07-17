@@ -257,12 +257,19 @@ export async function authedFetchRaw(
     throw err;
   }
 
-  // No API key but OAuth client ID is configured — user just hasn't
-  // completed the consent flow yet.
-  if (await getOAuthClientId()) {
+  // No API key. OAuth may still be the right path — either the app ships an
+  // app-wide default client id, or the user pasted their own (BYOK) — but the
+  // cached access token is gone (it expired; there's no silent refresh yet).
+  // Check both client-id sources (mirrors `getOAuthSessionState` and
+  // `ConnectDriveScreen`'s `hasClientConfig`) so app-wide-default users don't
+  // get told OAuth is "not configured" when it plainly is.
+  if ((await getOAuthClientId()) || isGoogleOAuthConfigured()) {
+    const session = await getOAuthSessionState();
     throw new DriveAccessError(
       "needs-oauth",
-      "Click Connect Drive in the User Center to authenticate with your Google account.",
+      session.state === "active" || session.state === "expired"
+        ? "Your Drive session token expired. Reconnect Google Drive to keep browsing."
+        : "Click Connect Drive in the User Center to authenticate with your Google account.",
     );
   }
 

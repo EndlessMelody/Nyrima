@@ -14,28 +14,14 @@
 import { Navigate, useLocation } from "react-router-dom";
 import type { ReactNode } from "react";
 import { useAuth } from "./AuthProvider";
+import { PageLoader } from "@app/components/PageLoader";
 
 export function RequireAuth({ children }: { children: ReactNode }) {
   const { status } = useAuth();
   const location = useLocation();
 
   if (status === "loading") {
-    return (
-      <div
-        style={{
-          minHeight: "100vh",
-          display: "grid",
-          placeItems: "center",
-          fontFamily: "var(--font-mono, monospace)",
-          fontSize: "12px",
-          letterSpacing: "0.12em",
-          textTransform: "uppercase",
-          opacity: 0.7,
-        }}
-      >
-        Loading…
-      </div>
-    );
+    return <PageLoader />;
   }
 
   // Guests are allowed into the shell; only a fully unauthenticated visitor is
